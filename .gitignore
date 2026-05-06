@@ -1,0 +1,23 @@
+# Build artifacts
+/bin/
+/mindgate
+*.test
+*.out
+coverage.out
+
+# MindGate state directories accidentally created in-tree
+/.mindgate/
+/.mindgate-*/
+
+# Integration-test scratch
+/test/integration/.tmp/
+/.testdata-tmp/
+
+# SQLite WAL/SHM stragglers
+*.db-wal
+*.db-shm
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
