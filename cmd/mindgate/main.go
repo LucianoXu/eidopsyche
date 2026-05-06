@@ -6,10 +6,8 @@ import (
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "version" {
-		fmt.Println("mindgate v0.0.1")
-		return
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
 	}
-	fmt.Fprintln(os.Stderr, "mindgate: not yet implemented")
-	os.Exit(1)
 }
