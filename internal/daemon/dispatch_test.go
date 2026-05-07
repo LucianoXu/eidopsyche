@@ -4,10 +4,12 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	gnostr "github.com/nbd-wtf/go-nostr"
 
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
+	"github.com/LucianoXu/eidopsyche/internal/dashboard"
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
 )
 
@@ -120,5 +122,39 @@ func TestDispatch_UnknownCommandFromSelfSoftRejects(t *testing.T) {
 	got, _ := d.Box.ListInbox(nil, "", 10)
 	if len(got) != 1 || !got[0].Malformed || got[0].RejectReason != "unknown_command" {
 		t.Fatalf("expected unknown_command soft-reject; got %+v", got)
+	}
+}
+
+func TestDashboardHub_FanOutOnInbox(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+
+	a := dashboardAdapter{d: d}
+	ch1, cancel1 := a.SubscribeEvents()
+	defer cancel1()
+	ch2, cancel2 := a.SubscribeEvents()
+	defer cancel2()
+
+	from := "from-pubkey-hex"
+	if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: from, Tier: contacts.TierFriend}); err != nil {
+		t.Fatal(err)
+	}
+	env := envelope.Envelope{V: 1, Type: envelope.TypeChat, Text: "hi"}
+	content, _ := envelope.Encode(env)
+
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ev-hub"}, makeRumor(from, content))
+
+	for i, ch := range []<-chan dashboard.Event{ch1, ch2} {
+		select {
+		case ev := <-ch:
+			if ev.Kind != "inbox.message" {
+				t.Errorf("subscriber %d kind %q want inbox.message", i, ev.Kind)
+			}
+			if ev.Message == nil || ev.Message.From != from {
+				t.Errorf("subscriber %d missing message data: %+v", i, ev)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Errorf("subscriber %d did not receive event", i)
+		}
 	}
 }

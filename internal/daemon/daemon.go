@@ -15,6 +15,7 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
+	"github.com/LucianoXu/eidopsyche/internal/dashboard"
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
@@ -42,6 +43,7 @@ type Daemon struct {
 	kick        chan struct{}
 	mu          sync.Mutex
 	subs        []*ipc.Conn
+	dashSubs    []chan dashboard.Event
 	dedupe      map[string]struct{}
 	selfWrapIDs map[string]struct{}
 
@@ -564,6 +566,17 @@ func (d *Daemon) broadcastContactAdded(data any) {
 	for _, c := range subs {
 		_ = c.PushEvent("contact.added", data)
 	}
+	// Convert the loose payload to a Contact pointer when possible so the
+	// dashboard event has structured fields. Fall back to a kind-only event.
+	if m, ok := data.(map[string]any); ok {
+		if pk, _ := m["pubkey"].(string); pk != "" {
+			if c, err := d.Repo.Get(context.Background(), pk); err == nil {
+				d.emitDashEvent(dashboard.Event{Kind: "contact.added", Contact: c})
+				return
+			}
+		}
+	}
+	d.emitDashEvent(dashboard.Event{Kind: "contact.added"})
 }
 
 // broadcastInbox pushes an inbox message to all live IPC subscribers.
@@ -574,6 +587,51 @@ func (d *Daemon) broadcastInbox(m inbox.Message) {
 	d.mu.Unlock()
 	for _, c := range subs {
 		_ = c.PushEvent("inbox.message", m)
+	}
+	mc := m
+	d.emitDashEvent(dashboard.Event{Kind: "inbox.message", Message: &mc})
+}
+
+// subscribeDashboard registers a new SSE-bound subscriber. The returned
+// cancel function closes the channel and removes the subscriber from the
+// fan-out list. Channel buffer is small (4) so a slow client falls behind
+// quickly; on send-blocked, broadcast drops the event for that subscriber.
+func (d *Daemon) subscribeDashboard() (<-chan dashboard.Event, func()) {
+	ch := make(chan dashboard.Event, 4)
+	d.mu.Lock()
+	d.dashSubs = append(d.dashSubs, ch)
+	d.mu.Unlock()
+	closed := false
+	cancel := func() {
+		d.mu.Lock()
+		for i, c := range d.dashSubs {
+			if c == ch {
+				d.dashSubs = append(d.dashSubs[:i], d.dashSubs[i+1:]...)
+				break
+			}
+		}
+		d.mu.Unlock()
+		if !closed {
+			closed = true
+			close(ch)
+		}
+	}
+	return ch, cancel
+}
+
+// emitDashEvent fans an event to all dashboard subscribers. Slow consumers
+// are dropped (logged) rather than blocking the broadcaster.
+func (d *Daemon) emitDashEvent(ev dashboard.Event) {
+	d.mu.Lock()
+	subs := make([]chan dashboard.Event, len(d.dashSubs))
+	copy(subs, d.dashSubs)
+	d.mu.Unlock()
+	for _, ch := range subs {
+		select {
+		case ch <- ev:
+		default:
+			d.Log.Warn("dashboard subscriber slow; dropping event", "kind", ev.Kind)
+		}
 	}
 }
 
