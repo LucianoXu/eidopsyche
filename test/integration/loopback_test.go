@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yingtexu/eidopsyche/internal/config"
-	"github.com/yingtexu/eidopsyche/internal/contacts"
-	"github.com/yingtexu/eidopsyche/internal/daemon"
-	"github.com/yingtexu/eidopsyche/internal/identity"
-	"github.com/yingtexu/eidopsyche/internal/ipc"
-	"github.com/yingtexu/eidopsyche/internal/relayd"
-	"github.com/yingtexu/eidopsyche/internal/store"
+	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/contacts"
+	"github.com/LucianoXu/eidopsyche/internal/daemon"
+	"github.com/LucianoXu/eidopsyche/internal/identity"
+	"github.com/LucianoXu/eidopsyche/internal/ipc"
+	"github.com/LucianoXu/eidopsyche/internal/relayd"
+	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
 type instance struct {

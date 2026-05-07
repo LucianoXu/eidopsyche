@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/yingtexu/eidopsyche/internal/store"
+	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
 func newTestRepo(t *testing.T) *Repo {

@@ -9,19 +9,18 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	gnostr "github.com/nbd-wtf/go-nostr"
 
-	"github.com/yingtexu/eidopsyche/internal/config"
-	"github.com/yingtexu/eidopsyche/internal/contacts"
-	"github.com/yingtexu/eidopsyche/internal/identity"
-	"github.com/yingtexu/eidopsyche/internal/inbox"
-	"github.com/yingtexu/eidopsyche/internal/invitedb"
-	"github.com/yingtexu/eidopsyche/internal/ipc"
-	"github.com/yingtexu/eidopsyche/internal/nostr"
-	"github.com/yingtexu/eidopsyche/internal/store"
+	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/contacts"
+	"github.com/LucianoXu/eidopsyche/internal/identity"
+	"github.com/LucianoXu/eidopsyche/internal/inbox"
+	"github.com/LucianoXu/eidopsyche/internal/invitedb"
+	"github.com/LucianoXu/eidopsyche/internal/ipc"
+	"github.com/LucianoXu/eidopsyche/internal/nostr"
+	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
 // Daemon holds all runtime state for a running MindGate instance.
@@ -94,11 +93,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := acquireExclusiveLock(lockFile); err != nil {
 		return fmt.Errorf("another daemon is running: %w", err)
 	}
 	defer lockFile.Close()
-	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN) //nolint:errcheck
+	defer releaseLock(lockFile) //nolint:errcheck
 
 	fmt.Fprintf(lockFile, "%d\n", os.Getpid())
 

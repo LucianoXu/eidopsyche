@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yingtexu/eidopsyche/internal/store"
+	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
 type Tier string

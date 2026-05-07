@@ -9,7 +9,7 @@ import (
 
 	gnostr "github.com/nbd-wtf/go-nostr"
 
-	"github.com/yingtexu/eidopsyche/internal/store"
+	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
 func freePort(t *testing.T) string {

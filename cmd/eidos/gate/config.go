@@ -1,4 +1,4 @@
-package main
+package gate
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/yingtexu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/config"
 )
 
 // configKey describes how to get and set a single scalar config key.

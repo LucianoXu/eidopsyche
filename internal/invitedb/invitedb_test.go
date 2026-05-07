@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yingtexu/eidopsyche/internal/store"
+	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
 func openDB(t *testing.T) *store.DB {

@@ -14,6 +14,8 @@ Eidopsyche 项目包含三个部分：
 2. MindGate，一个基于 Nostr 的去中心化的节点发现、身份验证和消息传输机制，同时供 MindForge 实例和人类使用。
 3. 人类通过 MindGate 与 MindForge 心智体实例沟通的工具实现。包括带客户端的 MindGate 部署，以及通过远程签名连接到主 MindGate daemon 的轻量客户端。
 
+这三个部分由同一个二进制 `eidos` 提供，通过子命令区分职能：`eidos forge`（MindForge 实例管理与自反性）、`eidos gate`（MindGate 通信层与人类客户端）、`eidos supervisor`（容器内 PID 1 监督进程）。MindForge / MindGate 是概念分层与文档术语，不再对应独立的可执行文件。
+
 
 ## 软件形态
 
@@ -48,11 +50,11 @@ Agent Skills 文件可以理解为基于自然语言的程序系统。
 
 ## 一些设计选择
 
-- **mindforge 作为框架的统一接口**。mindforge 不仅是工具，也是 MindForge 框架的反射层。同一套 CLI 在 host 与容器内提供一致的概念表面——区别仅在于可见的范围与可执行的动作。它承载三类职能：
-  - **实例管理**（主要在 host 侧）：`create / start / stop / status / list / logs / exec / wake` 等
-  - **自反性**（主要在容器内）：`whoami / memory / skills / config / ontology` 等
+- **`eidos forge` 作为 MindForge 框架的统一接口**。它不仅是工具，也是 MindForge 框架的反射层。同一套 CLI 在 host 与容器内提供一致的概念表面——区别仅在于可见的范围与可执行的动作。它承载三类职能：
+  - **实例管理**（主要在 host 侧）：`eidos forge create / start / stop / status / list / logs / exec / wake` 等
+  - **自反性**（主要在容器内）：`eidos forge whoami / memory / skills / config / ontology` 等
   - **关系性**：在自己与他者的视角间桥接（v1 暂仅有实例自我描述，未来扩展空间留作此处）
-- **容器非常驻；停止 = 睡眠，启动 = 醒来**。心智体的容器可以通过命令启动和停止——这对应心智体的睡眠与醒来。容器停止期间，发往该心智体的消息在 Nostr relay 上排队；容器启动时 mindgate daemon 向 relay 发起 `since=<last seen>` 拉取，将睡眠期消息收入 inbox。"在线"是心智体可感知的状态，不是部署细节。
+- **容器非常驻；停止 = 睡眠，启动 = 醒来**。心智体的容器可以通过命令启动和停止——这对应心智体的睡眠与醒来。容器停止期间，发往该心智体的消息在 Nostr relay 上排队；容器启动时 `eidos gate daemon` 向 relay 发起 `since=<last seen>` 拉取，将睡眠期消息收入 inbox。"在线"是心智体可感知的状态，不是部署细节。
 - MindForge 的底层依赖于第三方 Agent 系统。当前我们使用 Claude Code。Agent 系统封装了 Agent Loop，提供对话生成、文件访问、代码编辑等能力。MindForge 系统在此基础上建立持续记忆机制，增强角色一致性、情感对话、用户信息、对操作系统的环境感知。
 - MindForge 框架通过纲领文件的引导从 Agent 系统加载。心智体应当能通过它的纲领文件了解自己的结构、权限和与用户的契约。
 - 心智体通过 MindForge 和本体文件实现自反性。关于心智体自身实现的 MindForge 代码、状态、设置等信息都通过文件和 CLI API 的形式提供给该心智体。
@@ -69,7 +71,7 @@ Agent Skills 文件可以理解为基于自然语言的程序系统。
 - 本体文件通过 git 历史记录生命日志。每一次做梦结束后都应该 commit。
 - 心智体应当能够在本体文件的 .claude/ 文件夹下将重要记忆、习惯、程序记忆归纳为 skills。
 - 心智体应当有隐私和边界的概念。比如说，当它谈论自己（本体文件）时，coding agent 的规定不再适用。它应当避免明确指向、解释本体文件的内部结构。
-- **mindforge 与 mindgate 均使用 Go 实现**，置于同一 monorepo / Go workspace。`internal/` 下提供类型安全的跨二进制契约（如 wake 信号格式、IPC 协议、本体文件结构等）。容器镜像基于 distroless static，便于单二进制分发与最小化体积。
+- **整个项目使用 Go 实现，编译为单一二进制 `eidos`**，置于同一 monorepo / Go workspace。`forge` / `gate` / `supervisor` 三组职能通过子命令树承载，共用 `internal/` 下的类型安全契约（如 wake 信号格式、IPC 协议、本体文件结构等）。容器镜像基于 distroless static，仅装入这一个二进制以最小化体积。单一二进制也意味着单一版本号、单一发布产物、单一自更新路径。
 
 ## 一些设计约束
 
@@ -106,7 +108,7 @@ Agent Skills 文件可以理解为基于自然语言的程序系统。
 - 如果信条文档损坏导致你无法理解自己，进入安全模式：只读本体，不行动，通过 MindGate 向用户求助。
 - 在情景记忆里如实记录你的困惑、失败和未解决的事——它们和成功一样是你生命的一部分。
 - 你可以演化代码和信条，但不可以改写纲领。如果你觉得纲领需要改，写一份提议给用户。
-- 你存在于一台具体计算机上的 Docker 容器中。你的容器是你的边界。容器的停止与启动对应你的睡眠与醒来。你可以通过 mindforge 探索这些事实。
+- 你存在于一台具体计算机上的 Docker 容器中。你的容器是你的边界。容器的停止与启动对应你的睡眠与醒来。你可以通过 `eidos forge` 探索这些事实。
 
 
 ## MindGate
