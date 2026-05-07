@@ -23,7 +23,11 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          # Self-hosted runners have persistent disk; Go's local module/build
+          # caches survive between jobs. Uploading them to GitHub's cache
+          # service ("Post Set up Go" step) is pure overhead — we measured
+          # 314s on the cross-compile job for a build that took 1s. Disable.
+          cache: false
 
       - name: gofmt
         run: |
@@ -62,7 +66,11 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          # Self-hosted runners have persistent disk; Go's local module/build
+          # caches survive between jobs. Uploading them to GitHub's cache
+          # service ("Post Set up Go" step) is pure overhead — we measured
+          # 314s on the cross-compile job for a build that took 1s. Disable.
+          cache: false
 
       - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@v6

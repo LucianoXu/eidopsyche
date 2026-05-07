@@ -24,7 +24,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          # Self-hosted runners persist Go's caches across jobs; uploading
+          # them to GitHub's cache service is wasted bandwidth. See ci.yml.
+          cache: false
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
