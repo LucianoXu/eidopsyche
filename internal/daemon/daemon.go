@@ -15,6 +15,7 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
+	"github.com/LucianoXu/eidopsyche/internal/dashboard"
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
@@ -42,6 +43,7 @@ type Daemon struct {
 	kick        chan struct{}
 	mu          sync.Mutex
 	subs        []*ipc.Conn
+	dashSubs    []*dashSub
 	dedupe      map[string]struct{}
 	selfWrapIDs map[string]struct{}
 
@@ -118,6 +120,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.Log.Info("ipc listening", "socket", socket)
 
 	go d.runSubscriber(ctx)
+	go func() {
+		_ = dashboard.Run(ctx, NewDashboardAdapter(d), d.Cfg.Dashboard, d.Log)
+	}()
 
 	return srv.Serve(ctx)
 }
@@ -564,6 +569,17 @@ func (d *Daemon) broadcastContactAdded(data any) {
 	for _, c := range subs {
 		_ = c.PushEvent("contact.added", data)
 	}
+	// Convert the loose payload to a Contact pointer when possible so the
+	// dashboard event has structured fields. Fall back to a kind-only event.
+	if m, ok := data.(map[string]any); ok {
+		if pk, _ := m["pubkey"].(string); pk != "" {
+			if c, err := d.Repo.Get(context.Background(), pk); err == nil {
+				d.emitDashEvent(dashboard.Event{Kind: "contact.added", Contact: c})
+				return
+			}
+		}
+	}
+	d.emitDashEvent(dashboard.Event{Kind: "contact.added"})
 }
 
 // broadcastInbox pushes an inbox message to all live IPC subscribers.
@@ -574,6 +590,64 @@ func (d *Daemon) broadcastInbox(m inbox.Message) {
 	d.mu.Unlock()
 	for _, c := range subs {
 		_ = c.PushEvent("inbox.message", m)
+	}
+	mc := m
+	d.emitDashEvent(dashboard.Event{Kind: "inbox.message", Message: &mc})
+}
+
+// dashSub is a single dashboard subscriber: a buffered event channel plus a
+// done channel that signals "no more sends, please". This pair lets cancel()
+// stop emit() from racing into a closed channel: emit selects on both.
+type dashSub struct {
+	ch   chan dashboard.Event
+	done chan struct{}
+	once sync.Once
+}
+
+// subscribeDashboard registers a new SSE-bound subscriber. The returned
+// cancel function closes the done channel (idempotent) and removes the
+// subscriber from the fan-out list. The event channel is never closed by
+// cancel() so concurrent emit() sends cannot panic; emit() picks done as
+// the abandon signal instead.
+func (d *Daemon) subscribeDashboard() (<-chan dashboard.Event, func()) {
+	sub := &dashSub{
+		ch:   make(chan dashboard.Event, 4),
+		done: make(chan struct{}),
+	}
+	d.mu.Lock()
+	d.dashSubs = append(d.dashSubs, sub)
+	d.mu.Unlock()
+	cancel := func() {
+		d.mu.Lock()
+		for i, s := range d.dashSubs {
+			if s == sub {
+				d.dashSubs = append(d.dashSubs[:i], d.dashSubs[i+1:]...)
+				break
+			}
+		}
+		d.mu.Unlock()
+		sub.once.Do(func() { close(sub.done) })
+	}
+	return sub.ch, cancel
+}
+
+// emitDashEvent fans an event to all dashboard subscribers. Slow consumers
+// are dropped (logged) rather than blocking the broadcaster. A subscriber
+// whose done channel has been closed is skipped before any send so a
+// concurrent cancel cannot race emit into a closed channel.
+func (d *Daemon) emitDashEvent(ev dashboard.Event) {
+	d.mu.Lock()
+	subs := make([]*dashSub, len(d.dashSubs))
+	copy(subs, d.dashSubs)
+	d.mu.Unlock()
+	for _, sub := range subs {
+		select {
+		case <-sub.done:
+			// subscriber cancelled; skip without sending
+		case sub.ch <- ev:
+		default:
+			d.Log.Warn("dashboard subscriber slow; dropping event", "kind", ev.Kind)
+		}
 	}
 }
 

@@ -1,0 +1,419 @@
+/* eidos-gate dashboard — editorial paper, vermillion seal accent.
+ *
+ * Aesthetic direction: this is an operator's reading room, not a chat app.
+ * Restrained warm-paper palette; serif body for sustained reading; the
+ * single chromatic accent is vermillion (印泥红, the red of seal paste),
+ * used for: own-identity indicator, soft-reject chip, primary action,
+ * thread divisions. No rounded "chat bubbles" — messages are slips,
+ * marked left or right, separated by a thin rule.
+ */
+
+:root {
+  /* Warm-paper dark mode (default). Not blue-black; ink on smoked paper. */
+  --bg:        #1a1611;
+  --bg-2:      #221d17;
+  --bg-3:      #2a241d;
+  --fg:        #e8dfd1;
+  --fg-dim:    #8a8278;
+  --fg-mute:   #5e574d;
+  --rule:      rgba(232, 223, 209, 0.08);
+  --rule-2:    rgba(232, 223, 209, 0.18);
+  --seal:      #c4493a;        /* vermillion, the only chromatic note */
+  --seal-soft: rgba(196, 73, 58, 0.16);
+  --seal-mute: rgba(196, 73, 58, 0.06);
+  --warn:      #c4493a;
+  --warn-soft: rgba(196, 73, 58, 0.12);
+  --self-tint: rgba(196, 73, 58, 0.04);
+
+  --serif:     "Newsreader", "Iowan Old Style", "Sitka Text", "Charter", "Iowan Old Style BT", Georgia, "Apple Garamond", serif;
+  --mono:      "IBM Plex Mono", "JetBrains Mono", ui-monospace, "SF Mono", "Menlo", monospace;
+
+  --measure:   58ch;
+  --gap:       16px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg:        #f5efe3;        /* aged rice paper */
+    --bg-2:      #ede6d6;
+    --bg-3:      #e3dac8;
+    --fg:        #1a1611;
+    --fg-dim:    #5b574c;
+    --fg-mute:   #8a8278;
+    --rule:      rgba(26, 22, 17, 0.10);
+    --rule-2:    rgba(26, 22, 17, 0.22);
+    --seal:      #b03e30;
+    --seal-soft: rgba(176, 62, 48, 0.10);
+    --seal-mute: rgba(176, 62, 48, 0.04);
+    --warn:      #b03e30;
+    --warn-soft: rgba(176, 62, 48, 0.10);
+    --self-tint: rgba(176, 62, 48, 0.05);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { background: var(--bg); }
+
+body {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 15.5px;
+  font-weight: 400;
+  font-feature-settings: "liga" 1, "kern" 1, "onum" 1;     /* old-style numerals */
+  line-height: 1.55;
+  color: var(--fg);
+  background: var(--bg);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- header --- */
+
+header.topbar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 14px 28px 12px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg);
+}
+
+header.topbar > strong {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 18px;
+  letter-spacing: 0.02em;
+  font-style: italic;
+}
+
+header.topbar > strong::before {
+  content: "·";
+  color: var(--seal);
+  margin-right: 6px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.own-id {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-feature-settings: "tnum" 1, "zero" 1;
+  color: var(--fg-dim);
+  letter-spacing: 0.02em;
+}
+
+.own-id::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: var(--seal);
+  margin-right: 8px;
+  vertical-align: 1px;
+}
+
+/* --- layout --- */
+
+main.layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+aside.sidebar {
+  flex: 0 0 248px;
+  background: var(--bg);
+  border-right: 1px solid var(--rule);
+  overflow-y: auto;
+  padding: 4px 0 32px;
+  position: relative;
+}
+
+/* The two-stroke sidebar/main rule: a thin secondary line outside the
+   primary border gives the page a distinct vertical chop. */
+aside.sidebar::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0;
+  right: -4px;
+  width: 1px;
+  background: var(--rule);
+}
+
+aside.sidebar h3 {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--fg-mute);
+  padding: 24px 24px 8px;
+  margin: 0;
+}
+
+aside.sidebar h3:first-of-type { padding-top: 16px; }
+
+aside.sidebar a, aside.sidebar button {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 24px;
+  color: var(--fg);
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  width: 100%;
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  text-align: left;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+aside.sidebar a:hover, aside.sidebar button:hover {
+  color: var(--seal);
+}
+
+aside.sidebar a.active {
+  border-left-color: var(--seal);
+  color: var(--fg);
+  background: var(--seal-mute);
+}
+
+aside.sidebar a > span:first-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dim {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-feature-settings: "tnum" 1;
+  color: var(--fg-mute);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.tier-badge {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  margin-left: 6px;
+  border: 1px solid var(--rule-2);
+  color: var(--fg-dim);
+  vertical-align: 1.5px;
+}
+
+aside.sidebar a.active .tier-badge {
+  color: var(--seal);
+  border-color: var(--seal);
+}
+
+/* --- main pane --- */
+
+section.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.thread-header {
+  padding: 16px 32px 12px;
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.thread-header > strong {
+  font-weight: 500;
+  font-style: italic;
+  font-size: 19px;
+  letter-spacing: 0.01em;
+}
+
+/* --- thread / bubbles --- */
+
+.thread-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 32px 32px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.bubble {
+  max-width: var(--measure);
+  padding: 10px 18px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--rule-2);
+  word-wrap: break-word;
+  font-family: var(--serif);
+  font-size: 15.5px;
+  line-height: 1.6;
+  /* Make bubbles "appear" gently when delivered by SSE. */
+  animation: paper-fade 320ms ease-out both;
+}
+
+@keyframes paper-fade {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.bubble.self {
+  align-self: flex-end;
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-right: 2px solid var(--seal);
+  border-left: 1px solid var(--rule);
+  padding-right: 16px;
+}
+
+.bubble.malformed {
+  border-left-color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.bubble .meta {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: 0.04em;
+  color: var(--fg-mute);
+  margin-bottom: 6px;
+}
+
+.bubble.self .meta { text-align: right; color: var(--seal); }
+
+.reject-chip {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 6px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--bg);
+  background: var(--warn);
+}
+
+/* --- compose --- */
+
+.compose {
+  border-top: 1px solid var(--rule);
+  padding: 16px 32px;
+  display: flex;
+  gap: 12px;
+  background: var(--bg);
+}
+
+.compose input[type=text] {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid var(--rule-2);
+  background: var(--bg-2);
+  color: var(--fg);
+  font: inherit;
+  font-size: 15px;
+}
+
+.compose input[type=text]:focus {
+  outline: none;
+  border-color: var(--seal);
+}
+
+.compose button {
+  padding: 10px 22px;
+  background: var(--seal);
+  color: #fdf6e9;
+  border: 1px solid var(--seal);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: filter 120ms ease;
+}
+
+.compose button:hover { filter: brightness(1.08); }
+
+.compose .error {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--warn);
+  letter-spacing: 0.04em;
+  padding: 4px 0;
+}
+
+/* --- messages table (list view) --- */
+
+table.messages {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--serif);
+}
+
+table.messages th, table.messages td {
+  padding: 10px 32px;
+  text-align: left;
+  border-bottom: 1px solid var(--rule);
+  font-size: 14px;
+}
+
+table.messages th {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--fg-mute);
+  border-bottom: 1px solid var(--rule-2);
+  padding-top: 18px;
+  padding-bottom: 8px;
+}
+
+table.messages tbody tr { transition: background 120ms ease; }
+table.messages tbody tr:hover { background: var(--seal-mute); cursor: pointer; }
+table.messages tr.malformed td { color: var(--warn); }
+table.messages tr.malformed td:nth-child(4) { color: var(--fg-mute); }
+
+table.messages td:nth-child(1),  /* time */
+table.messages td:nth-child(2),  /* dir */
+table.messages td:nth-child(5)   /* reason */ {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: 0.02em;
+  color: var(--fg-dim);
+}
+
+/* --- empty state --- */
+
+.empty {
+  padding: 48px 32px;
+  text-align: center;
+  color: var(--fg-mute);
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 14.5px;
+}
+
+/* --- focus visible (keyboard) --- */
+
+a:focus-visible, button:focus-visible, input:focus-visible {
+  outline: 2px solid var(--seal);
+  outline-offset: 2px;
+}

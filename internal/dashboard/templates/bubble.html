@@ -1,0 +1,7 @@
+{{define "bubble"}}<div class="bubble{{if .Self}} self{{end}}{{if .Malformed}} malformed{{end}}" data-event-id="{{.EventID}}">
+  <div class="meta">
+    {{.From}} · <span title="{{.At.Format "2006-01-02 15:04:05"}}">{{reltime .At}}</span>
+    {{if .Malformed}}<span class="reject-chip">{{.RejectReason}}</span>{{end}}
+  </div>
+  <div>{{.Text}}</div>
+</div>{{end}}

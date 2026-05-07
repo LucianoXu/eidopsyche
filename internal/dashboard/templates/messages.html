@@ -1,0 +1,32 @@
+{{define "messages"}}
+<div class="thread-header">
+  <strong>{{if .OnlyMal}}Soft-rejected{{else}}All messages{{end}}</strong>
+</div>
+<table class="messages">
+  <thead>
+    <tr>
+      <th>Time</th>
+      <th>Dir</th>
+      <th>Counterpart</th>
+      <th>Preview</th>
+      {{if .OnlyMal}}<th>Reason</th>{{end}}
+    </tr>
+  </thead>
+  <tbody>
+    {{range .Rows}}
+    <tr class="{{if .Malformed}}malformed{{end}}"
+        hx-get="/thread/{{.Pubkey}}"
+        hx-target="#main"
+        hx-push-url="true">
+      <td><span title="{{.At.Format "2006-01-02 15:04:05"}}">{{reltime .At}}</span></td>
+      <td>{{.Direction}}</td>
+      <td>{{.From}}</td>
+      <td>{{truncate 80 .Preview}}</td>
+      {{if $.OnlyMal}}<td>{{.RejectReason}}</td>{{end}}
+    </tr>
+    {{else}}
+    <tr><td colspan="5" class="empty">No messages.</td></tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}

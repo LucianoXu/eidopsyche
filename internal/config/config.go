@@ -15,6 +15,12 @@ type Config struct {
 	Relay     RelayConfig     `toml:"relay"`
 	Publish   PublishConfig   `toml:"publish"`
 	Subscribe SubscribeConfig `toml:"subscribe"`
+	Dashboard DashboardConfig `toml:"dashboard"`
+}
+
+type DashboardConfig struct {
+	Enabled bool   `toml:"enabled"`
+	Listen  string `toml:"listen"`
 }
 
 type DaemonConfig struct {
@@ -54,6 +60,10 @@ func Defaults() Config {
 			Mode:    "paired",
 			Listen:  "0.0.0.0:22895",
 			DataDir: "relay",
+		},
+		Dashboard: DashboardConfig{
+			Enabled: true,
+			Listen:  "127.0.0.1:22893",
 		},
 	}
 }
