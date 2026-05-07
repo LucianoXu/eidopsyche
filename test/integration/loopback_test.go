@@ -158,6 +158,51 @@ func addContact(t *testing.T, owner, peer *instance) {
 	}
 }
 
+func TestSendByLabel(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	alice := bringUp(t, "alice")
+	bob := bringUp(t, "bob")
+	addContact(t, alice, bob) // adds peer with label "peer"
+	addContact(t, bob, alice)
+	time.Sleep(800 * time.Millisecond)
+
+	bobIPC := dialIPC(t, bob)
+	var ack map[string]bool
+	if e, err := bobIPC.Call("inbox.tail", nil, &ack); err != nil || e != nil {
+		t.Fatalf("inbox.tail: %v %+v", err, e)
+	}
+
+	aliceIPC := dialIPC(t, alice)
+	// Send using the label "peer" rather than Bob's npub.
+	var sendResp map[string]any
+	if e, err := aliceIPC.Call("send", map[string]string{
+		"to":      "peer",
+		"content": "by label",
+	}, &sendResp); err != nil || e != nil {
+		t.Fatalf("send by label: %v %+v", err, e)
+	}
+
+	deadline := time.After(8 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for inbox.message after send-by-label")
+		case ev := <-bobIPC.Events():
+			if ev.Event != "inbox.message" {
+				continue
+			}
+			var msg map[string]any
+			_ = json.Unmarshal(ev.Data, &msg)
+			if msg["content"] != "by label" {
+				t.Fatalf("content %v", msg["content"])
+			}
+			return
+		}
+	}
+}
+
 func TestAliceBobLoopback(t *testing.T) {
 	if testing.Short() {
 		t.Skip()

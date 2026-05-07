@@ -36,4 +36,5 @@ const (
 	ErrRelayRejected     = "RELAY_REJECTED"
 	ErrNoRelaysReachable = "NO_RELAYS_REACHABLE"
 	ErrInternal          = "INTERNAL"
+	ErrLabelAmbiguous    = "LABEL_AMBIGUOUS"
 )

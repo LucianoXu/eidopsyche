@@ -62,6 +62,35 @@ func TestAddDuplicate(t *testing.T) {
 	}
 }
 
+func TestGetByLabelUniqueAndAmbiguous(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	if err := repo.Add(ctx, Contact{Pubkey: "aa11", Label: "Bob"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Add(ctx, Contact{Pubkey: "bb22", Label: "Carol"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetByLabel(ctx, "Bob")
+	if err != nil || got.Pubkey != "aa11" {
+		t.Fatalf("unique: got=%+v err=%v", got, err)
+	}
+	if _, err := repo.GetByLabel(ctx, "Dave"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing: got %v want ErrNotFound", err)
+	}
+	if err := repo.Add(ctx, Contact{Pubkey: "cc33", Label: "Bob"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = repo.GetByLabel(ctx, "Bob")
+	var amb *AmbiguousLabelError
+	if !errors.As(err, &amb) {
+		t.Fatalf("ambiguous: got %v want AmbiguousLabelError", err)
+	}
+	if len(amb.Pubkeys) != 2 {
+		t.Fatalf("expected 2 pubkeys in error, got %v", amb.Pubkeys)
+	}
+}
+
 func TestRemoveCascadesRelays(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()

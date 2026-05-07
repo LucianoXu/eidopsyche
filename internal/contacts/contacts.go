@@ -169,6 +169,47 @@ func (r *Repo) AllRelaysUnion(ctx context.Context) ([]string, error) {
 	return out, rows.Err()
 }
 
+// AmbiguousLabelError is returned when more than one contact shares a label.
+type AmbiguousLabelError struct {
+	Label   string
+	Pubkeys []string
+}
+
+func (e *AmbiguousLabelError) Error() string {
+	return fmt.Sprintf("multiple contacts share label %q: %v", e.Label, e.Pubkeys)
+}
+
+// GetByLabel returns the unique contact with this label.
+// ErrNotFound when no match. ErrLabelAmbiguous when multiple match.
+func (r *Repo) GetByLabel(ctx context.Context, label string) (*Contact, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT pubkey FROM contacts WHERE label=?`, label)
+	if err != nil {
+		return nil, err
+	}
+	var pks []string
+	for rows.Next() {
+		var pk string
+		if err := rows.Scan(&pk); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		pks = append(pks, pk)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	switch len(pks) {
+	case 0:
+		return nil, ErrNotFound
+	case 1:
+		return r.Get(ctx, pks[0])
+	default:
+		return nil, &AmbiguousLabelError{Label: label, Pubkeys: pks}
+	}
+}
+
 func isUniqueErr(err error) bool {
 	if err == nil {
 		return false

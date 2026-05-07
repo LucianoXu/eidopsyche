@@ -96,6 +96,21 @@ $ mindgate inbox --tail
 - `mindgate send --stdin` — read message body from stdin instead of argument
 - `mindgate outbox --to <npub>` — filter outbox by recipient
 
+## Targeting a contact: npub / hex / label
+
+Wherever a `<npub>` argument appears (`send`, `inbox --from`, `outbox --to`,
+`remove-contact`), you may pass any of:
+
+- a bech32 npub: `npub1alice...`
+- a 64-char hex pubkey: `79be667ef9dcbbac...`
+- a contact label: `Alice` (matched case-sensitively against the `label` you
+  set when adding the contact)
+
+If multiple contacts share a label, mindgate refuses to disambiguate and asks
+you to use the npub instead. `add-contact` continues to take only an npub or a
+`mindgate://` URI — labels are an output convenience, not a way to introduce
+new identities.
+
 ## Running two instances on one host (debugging)
 
 Each instance needs its own state directory and its own relay port:

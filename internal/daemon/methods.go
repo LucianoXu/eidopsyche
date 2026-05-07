@@ -142,15 +142,15 @@ func contactList(ctx context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage)
 	return out, nil
 }
 
-// contactRemove removes a contact by npub.
+// contactRemove removes a contact by npub, hex pubkey, or label.
 func contactRemove(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p struct{ Npub string }
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
 	}
-	pk, err := identity.DecodeNpub(p.Npub)
-	if err != nil {
-		return nil, &ipc.Error{Code: ipc.ErrInvalidNpub, Message: err.Error()}
+	pk, ipcErr := resolveTarget(ctx, d, p.Npub)
+	if ipcErr != nil {
+		return nil, ipcErr
 	}
 	if err := d.Repo.Remove(ctx, pk); err != nil {
 		if errors.Is(err, contacts.ErrNotFound) {
@@ -224,13 +224,9 @@ func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
 	}
-	pk := p.To
-	if strings.HasPrefix(p.To, "npub1") {
-		hex, err := identity.DecodeNpub(p.To)
-		if err != nil {
-			return nil, &ipc.Error{Code: ipc.ErrInvalidNpub, Message: err.Error()}
-		}
-		pk = hex
+	pk, ipcErr := resolveTarget(ctx, d, p.To)
+	if ipcErr != nil {
+		return nil, ipcErr
 	}
 	c, err := d.Repo.Get(ctx, pk)
 	if err != nil {
@@ -313,7 +309,7 @@ func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 }
 
 // inboxList returns inbox messages filtered by since/from/limit.
-func inboxList(_ context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+func inboxList(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p struct {
 		Since *int64 `json:"since"`
 		From  string `json:"from"`
@@ -329,10 +325,10 @@ func inboxList(_ context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage
 		t := time.Unix(*p.Since, 0)
 		sincePtr = &t
 	}
-	if p.From != "" && strings.HasPrefix(p.From, "npub1") {
-		hex, err := identity.DecodeNpub(p.From)
-		if err != nil {
-			return nil, &ipc.Error{Code: ipc.ErrInvalidNpub, Message: err.Error()}
+	if p.From != "" {
+		hex, ipcErr := resolveTarget(ctx, d, p.From)
+		if ipcErr != nil {
+			return nil, ipcErr
 		}
 		p.From = hex
 	}
@@ -350,7 +346,7 @@ func inboxTail(ctx context.Context, d *Daemon, conn *ipc.Conn, _ json.RawMessage
 }
 
 // outboxList returns sent messages filtered by since/to/limit.
-func outboxList(_ context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+func outboxList(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p struct {
 		Since *int64 `json:"since"`
 		To    string `json:"to"`
@@ -366,10 +362,10 @@ func outboxList(_ context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessag
 		t := time.Unix(*p.Since, 0)
 		sincePtr = &t
 	}
-	if p.To != "" && strings.HasPrefix(p.To, "npub1") {
-		hex, err := identity.DecodeNpub(p.To)
-		if err != nil {
-			return nil, &ipc.Error{Code: ipc.ErrInvalidNpub, Message: err.Error()}
+	if p.To != "" {
+		hex, ipcErr := resolveTarget(ctx, d, p.To)
+		if ipcErr != nil {
+			return nil, ipcErr
 		}
 		p.To = hex
 	}
@@ -397,4 +393,61 @@ func subscribeRefresh(_ context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessa
 // internalErr wraps a Go error into an IPC internal error response.
 func internalErr(err error) *ipc.Error {
 	return &ipc.Error{Code: ipc.ErrInternal, Message: err.Error()}
+}
+
+// resolveTarget converts a user-supplied target string (npub / hex / label)
+// to a hex pubkey, returning an *ipc.Error suitable for direct propagation.
+func resolveTarget(ctx context.Context, d *Daemon, input string) (string, *ipc.Error) {
+	if input == "" {
+		return "", &ipc.Error{Code: ipc.ErrInvalidParams, Message: "empty target"}
+	}
+	if strings.HasPrefix(input, "npub1") {
+		hex, err := identity.DecodeNpub(input)
+		if err != nil {
+			return "", &ipc.Error{Code: ipc.ErrInvalidNpub, Message: err.Error()}
+		}
+		return hex, nil
+	}
+	if isHex64(input) {
+		return input, nil
+	}
+	c, err := d.Repo.GetByLabel(ctx, input)
+	if err != nil {
+		var amb *contacts.AmbiguousLabelError
+		if errors.As(err, &amb) {
+			npubs := make([]string, 0, len(amb.Pubkeys))
+			for _, pk := range amb.Pubkeys {
+				if np, e := identity.EncodeNpub(pk); e == nil {
+					npubs = append(npubs, np)
+				} else {
+					npubs = append(npubs, pk)
+				}
+			}
+			return "", &ipc.Error{
+				Code:    ipc.ErrLabelAmbiguous,
+				Message: fmt.Sprintf("multiple contacts share label %q: %s; use npub or hex instead", input, strings.Join(npubs, ", ")),
+			}
+		}
+		if errors.Is(err, contacts.ErrNotFound) {
+			return "", &ipc.Error{
+				Code:    ipc.ErrContactNotFound,
+				Message: fmt.Sprintf("no contact with label %q (also tried as npub/hex)", input),
+			}
+		}
+		return "", internalErr(err)
+	}
+	return c.Pubkey, nil
+}
+
+// isHex64 returns true if s is exactly 64 lowercase hexadecimal characters.
+func isHex64(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
