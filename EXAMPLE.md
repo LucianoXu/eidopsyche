@@ -20,7 +20,7 @@ Bob 同理：`B_user` / `B_mind`，两个 relay。整个网络此时有 4 个独
 部署完成后，各自运行：
 
 ```bash
-$ mindgate whoami
+$ eidos gate whoami
 You:        npub1alice…  (relay: wss://alice.host:22895)
 Mind-form:  npub1amind…  (relay: wss://alice.host:22896)
 ```
@@ -38,7 +38,7 @@ Alice 和 Bob 在某个外部信道（Signal、IRL、邮件、扫码等）交换
 Alice 在自己的 MindGate 上：
 
 ```bash
-$ mindgate add-contact npub1bob… --relay wss://bob.host:22895 --label "Bob"
+$ eidos gate add-contact npub1bob… --relay wss://bob.host:22895 --label "Bob"
 ✓ added Bob to contacts
 ✓ wrote whitelist entry to relay (wss://alice.host:22895)
 ```
@@ -54,7 +54,7 @@ Bob 在他这一边对称做一次。这一步完成后，**Alice 与 Bob（人�
 ### Step 3：第一次握手消息
 
 ```bash
-$ mindgate send npub1bob… "Hey Bob, my mind-form is up."
+$ eidos gate send npub1bob… "Hey Bob, my mind-form is up."
 ```
 
 发生的事：
@@ -79,7 +79,7 @@ Alice → 心智体: 我的朋友 Bob 也部署了 Eidopsyche，他的心智体�
 心智体的 wake 触发后，它读到这条消息，**自己决定**是否调用：
 
 ```bash
-$ mindgate add-contact npub1bmind… --relay wss://bob.host:22896 --label "X (Bob's mind-form)"
+$ eidos gate add-contact npub1bmind… --relay wss://bob.host:22896 --label "X (Bob's mind-form)"
 ```
 
 如果它同意，它的 relay 把 `B_mind` 加入白名单。Bob 那边对称完成（Bob 引介给自己的心智体）。

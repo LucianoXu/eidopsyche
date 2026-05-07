@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/yingtexu/eidopsyche/internal/ipc"
+	"github.com/LucianoXu/eidopsyche/internal/ipc"
 )
 
 // handler adapts Daemon to the ipc.Handler interface by dispatching on method

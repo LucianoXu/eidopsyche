@@ -1,4 +1,4 @@
-package main
+package gate
 
 import (
 	"context"
@@ -12,9 +12,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/yingtexu/eidopsyche/internal/config"
-	"github.com/yingtexu/eidopsyche/internal/identity"
-	"github.com/yingtexu/eidopsyche/internal/store"
+	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/identity"
+	"github.com/LucianoXu/eidopsyche/internal/store"
+	"github.com/LucianoXu/eidopsyche/internal/version"
 )
 
 var initLabel string
@@ -76,7 +77,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if err := db.SetMeta(ctx, "created_at", strconv.FormatInt(time.Now().Unix(), 10)); err != nil {
 		return err
 	}
-	if err := db.SetMeta(ctx, "mindgate_version", Version); err != nil {
+	if err := db.SetMeta(ctx, "mindgate_version", version.Version); err != nil {
 		return err
 	}
 	label := initLabel

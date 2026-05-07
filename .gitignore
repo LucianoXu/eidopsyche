@@ -1,5 +1,7 @@
 # Build artifacts
 /bin/
+/dist/
+/eidos
 /mindgate
 *.test
 *.out

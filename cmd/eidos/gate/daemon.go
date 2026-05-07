@@ -1,4 +1,4 @@
-package main
+package gate
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/yingtexu/eidopsyche/internal/config"
-	"github.com/yingtexu/eidopsyche/internal/daemon"
+	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/daemon"
 )
 
 var daemonCmd = &cobra.Command{

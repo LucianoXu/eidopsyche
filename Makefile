@@ -1,4 +1,4 @@
-.PHONY: build test integration lint staticcheck e2e ci clean install uninstall
+.PHONY: build test integration lint staticcheck e2e ci clean install uninstall snapshot
 
 # Resolve `go` at parse time: PATH first, then common install locations.
 # Override at any time with `make build GO=/path/to/go`.
@@ -25,7 +25,7 @@ DESTDIR ?=
 BINDIR  ?= $(DESTDIR)$(PREFIX)/bin
 
 build:
-	$(GO) build -o bin/mindgate ./cmd/mindgate
+	$(GO) build -o bin/eidos ./cmd/eidos
 
 test:
 	$(GO) test ./...
@@ -44,20 +44,26 @@ staticcheck:
 	@command -v $(GOBIN)/staticcheck >/dev/null 2>&1 || $(GO) install honnef.co/go/tools/cmd/staticcheck@latest
 	$(GOBIN)/staticcheck ./...
 
+# Snapshot release: cross-compiles for all targets and produces archives in
+# dist/, but does NOT publish. Validates .goreleaser.yml end-to-end.
+snapshot:
+	@command -v $(GOBIN)/goreleaser >/dev/null 2>&1 || $(GO) install github.com/goreleaser/goreleaser/v2@latest
+	$(GOBIN)/goreleaser release --snapshot --clean --skip=publish
+
 ci: lint staticcheck test integration
 
 clean:
-	rm -rf bin/ coverage.out
+	rm -rf bin/ dist/ coverage.out
 
 install: build
 	@mkdir -p $(BINDIR)
-	@install -m 0755 bin/mindgate $(BINDIR)/mindgate
-	@echo "installed: $(BINDIR)/mindgate"
+	@install -m 0755 bin/eidos $(BINDIR)/eidos
+	@echo "installed: $(BINDIR)/eidos"
 	@case ":$$PATH:" in \
 	  *":$(BINDIR):"*) ;; \
-	  *) printf 'note: %s is not on $$PATH — add it (e.g. in ~/.bashrc) to call mindgate directly\n' '$(BINDIR)' ;; \
+	  *) printf 'note: %s is not on $$PATH — add it (e.g. in ~/.bashrc) to call eidos directly\n' '$(BINDIR)' ;; \
 	esac
 
 uninstall:
-	@rm -f $(BINDIR)/mindgate
-	@echo "removed:   $(BINDIR)/mindgate"
+	@rm -f $(BINDIR)/eidos
+	@echo "removed:   $(BINDIR)/eidos"

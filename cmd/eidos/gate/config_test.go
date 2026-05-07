@@ -1,10 +1,10 @@
-package main
+package gate
 
 import (
 	"strings"
 	"testing"
 
-	"github.com/yingtexu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/config"
 )
 
 // TestConfigKeys exercises the configKeys table directly without spawning a CLI process.

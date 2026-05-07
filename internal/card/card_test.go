@@ -3,7 +3,7 @@ package card_test
 import (
 	"testing"
 
-	"github.com/yingtexu/eidopsyche/internal/card"
+	"github.com/LucianoXu/eidopsyche/internal/card"
 )
 
 func TestRoundtrip(t *testing.T) {

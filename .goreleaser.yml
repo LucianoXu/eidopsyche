@@ -1,0 +1,91 @@
+version: 2
+
+project_name: eidos
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: eidos
+    main: ./cmd/eidos
+    binary: eidos
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w
+      - -X github.com/LucianoXu/eidopsyche/internal/version.Version={{ .Tag }}
+      - -X github.com/LucianoXu/eidopsyche/internal/version.Commit={{ .ShortCommit }}
+      - -X github.com/LucianoXu/eidopsyche/internal/version.BuildDate={{ .Date }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: eidos
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - src: SPEC.md
+      - src: EXAMPLE.md
+      - src: docs/INSTALL.md
+        dst: INSTALL.md
+      - src: docs/USAGE.md
+        dst: USAGE.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
+
+# Filter the auto-generated changelog: only user-facing types reach release
+# notes. refactor / chore / test / docs / build / ci are hidden.
+changelog:
+  use: github
+  sort: asc
+  filters:
+    include:
+      - "^feat"
+      - "^fix"
+      - "^perf"
+      - "^security"
+  groups:
+    - title: Features
+      regexp: "^feat"
+      order: 0
+    - title: Bug fixes
+      regexp: "^fix"
+      order: 1
+    - title: Performance
+      regexp: "^perf"
+      order: 2
+    - title: Security
+      regexp: "^security"
+      order: 3
+
+release:
+  github:
+    owner: LucianoXu
+    name: eidopsyche
+  draft: false
+  prerelease: auto
+  mode: replace
+
+# Docker images are deferred until the forge / supervisor subcommands are
+# implemented. Add a `dockers:` and `docker_manifests:` block here when the
+# container entrypoint becomes meaningful (currently the supervisor command
+# is a stub, so a published image would only embed a placeholder).

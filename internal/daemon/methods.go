@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yingtexu/eidopsyche/internal/card"
-	"github.com/yingtexu/eidopsyche/internal/contacts"
-	"github.com/yingtexu/eidopsyche/internal/identity"
-	"github.com/yingtexu/eidopsyche/internal/inbox"
-	"github.com/yingtexu/eidopsyche/internal/invite"
-	"github.com/yingtexu/eidopsyche/internal/invitedb"
-	"github.com/yingtexu/eidopsyche/internal/ipc"
-	"github.com/yingtexu/eidopsyche/internal/nostr"
+	"github.com/LucianoXu/eidopsyche/internal/card"
+	"github.com/LucianoXu/eidopsyche/internal/contacts"
+	"github.com/LucianoXu/eidopsyche/internal/identity"
+	"github.com/LucianoXu/eidopsyche/internal/inbox"
+	"github.com/LucianoXu/eidopsyche/internal/invite"
+	"github.com/LucianoXu/eidopsyche/internal/invitedb"
+	"github.com/LucianoXu/eidopsyche/internal/ipc"
+	"github.com/LucianoXu/eidopsyche/internal/nostr"
 )
 
 func init() {

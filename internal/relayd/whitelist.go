@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yingtexu/eidopsyche/internal/store"
+	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
 // WhitelistSource provides O(1) membership checks against a SQLite RO view,

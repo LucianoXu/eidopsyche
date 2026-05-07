@@ -1,11 +1,11 @@
-package main
+package gate
 
 import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/yingtexu/eidopsyche/internal/config"
-	"github.com/yingtexu/eidopsyche/internal/ipc"
+	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/ipc"
 )
 
 func newClient() (*ipc.Client, error) {

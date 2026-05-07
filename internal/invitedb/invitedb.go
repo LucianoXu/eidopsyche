@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yingtexu/eidopsyche/internal/store"
+	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
 // Status represents the lifecycle state of an invite.

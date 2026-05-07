@@ -1,4 +1,4 @@
-package main
+package gate
 
 import (
 	"context"
@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/yingtexu/eidopsyche/internal/config"
-	"github.com/yingtexu/eidopsyche/internal/relayd"
-	"github.com/yingtexu/eidopsyche/internal/store"
+	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/relayd"
+	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
 var (
