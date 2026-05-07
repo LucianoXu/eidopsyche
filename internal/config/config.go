@@ -29,6 +29,11 @@ type RelayConfig struct {
 	DataDir string `toml:"data_dir"`
 }
 
+// RelayEnabled reports whether the embedded relay should run on this host.
+// Single source of truth: every code path that asks "should I spin up the
+// relay" routes through this method.
+func (c Config) RelayEnabled() bool { return c.Relay.Enabled }
+
 type PublishConfig struct {
 	FallbackRelays []string `toml:"fallback_relays"`
 }
@@ -86,11 +91,6 @@ func Save(path string, cfg Config) error {
 // relay data, and IPC socket. Each invocation of `eidos gate` resolves the
 // same directory; multiple personas on one host run by setting different
 // $EIDOS_GATE_HOME values or passing distinct --state-dir flags.
-// RelayEnabled reports whether the embedded relay should run on this host.
-// Single source of truth: every code path that asks "should I spin up the
-// relay" routes through this method.
-func (c Config) RelayEnabled() bool { return c.Relay.Enabled }
-
 func ResolveStateDir(flagValue string) (string, error) {
 	if flagValue != "" {
 		return filepath.Abs(flagValue)

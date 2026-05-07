@@ -199,9 +199,11 @@ func TestSystemdInstallDaemonOnly(t *testing.T) {
 		UnitDir:    tmp,
 		WithRelay:  false,
 	}}
-	// Install short-circuits the systemctl daemon-reload on this stubbed
-	// path because PATH won't have systemctl in the test env. The file
-	// writes happen first; we only check those.
+	// Install attempts `systemctl daemon-reload` at the end of its body;
+	// in the test env systemctl typically isn't on PATH so that step
+	// errors. We deliberately discard the error here because the unit
+	// files are written *before* the daemon-reload call, and those file
+	// artifacts are what this test inspects.
 	_ = mgr.Install(context.Background())
 	if _, err := os.Stat(filepath.Join(tmp, DaemonUnitName+".service")); err != nil {
 		t.Errorf("daemon unit not written: %v", err)

@@ -4,11 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
-
-	"github.com/LucianoXu/eidopsyche/internal/config"
 )
 
 var startCmd = &cobra.Command{
@@ -26,17 +23,15 @@ After 'start' completes, 'eidos gate status' shows the current state of
 both units, and the daemon and relay survive your shell exiting (user-mode
 units may need 'loginctl enable-linger <user>' to survive a full logout).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		mgr, err := buildServiceManagerForStart()
+		cfg, stateDir, err := loadGateConfig()
+		if err != nil {
+			return err
+		}
+		mgr, err := buildServiceManager(cfg.RelayEnabled())
 		if err != nil {
 			return err
 		}
 		ctx := context.Background()
-
-		stateDir, err := config.ResolveStateDir(globalStateDir)
-		if err != nil {
-			return err
-		}
-		cfg, _ := config.Load(filepath.Join(stateDir, "config.toml"))
 
 		// Preflight the relay port only when we're going to install / start
 		// the relay unit. Daemon-only deployments don't bind any port from
