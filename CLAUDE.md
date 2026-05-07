@@ -39,6 +39,7 @@ eidopsyche/
 ├── .goreleaser.yml           # Release tooling config
 ├── .github/workflows/        # ci.yml + release.yml
 ├── README.md                 # User-facing entry point — install, quick start, docs index
+├── LICENSE                   # Apache License 2.0
 ├── SPEC.md                   # Project specification — source of truth for design intent
 ├── EXAMPLE.md                # Minimum deployment walkthrough
 └── CLAUDE.md                 # This file

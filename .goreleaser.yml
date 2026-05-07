@@ -39,6 +39,7 @@ archives:
           - zip
     files:
       - src: README.md
+      - src: LICENSE
       - src: SPEC.md
       - src: EXAMPLE.md
       - src: docs/INSTALL.md

@@ -187,5 +187,9 @@ PATCH is bug-fix only.
 
 ## License
 
-TBD. Treat this repository as source-available for the moment; a permissive
-license (likely Apache-2.0) will land before 1.0.
+Apache License 2.0 — see [`LICENSE`](LICENSE) for the full text.
+
+You can use, modify, redistribute, and build commercial products on top of
+Eidopsyche under the terms of that license. Apache-2.0 includes an explicit
+patent grant from contributors, which matters here because the project ships
+cryptographic code (Schnorr signatures, NIP-17 gift-wrap encryption).
