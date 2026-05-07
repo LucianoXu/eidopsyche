@@ -35,11 +35,17 @@ type Daemon struct {
 	Pool     *nostr.Pool
 	Log      *slog.Logger
 
+	startedAt time.Time
+
 	kick        chan struct{}
 	mu          sync.Mutex
 	subs        []*ipc.Conn
 	dedupe      map[string]struct{}
 	selfWrapIDs map[string]struct{}
+
+	// testSendChatReply, if non-nil, replaces sendChatReply during tests
+	// to avoid actual NIP-17 publish over the network.
+	testSendChatReply func(ctx context.Context, toPubkey string, text string) error
 }
 
 // Start loads state from stateDir and initialises the daemon without yet
@@ -72,6 +78,7 @@ func Start(stateDir string) (*Daemon, error) {
 		Box:         inbox.New(stateDir),
 		Pool:        nostr.NewPool(),
 		Log:         slog.New(slog.NewJSONHandler(os.Stderr, nil)),
+		startedAt:   time.Now(),
 		kick:        make(chan struct{}, 1),
 		dedupe:      make(map[string]struct{}, 1024),
 		selfWrapIDs: make(map[string]struct{}, 1024),
