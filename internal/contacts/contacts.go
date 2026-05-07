@@ -152,6 +152,23 @@ func (r *Repo) Remove(ctx context.Context, pubkey string) error {
 	return nil
 }
 
+// SetLabel updates the label of an existing contact identified by pubkey.
+// Returns ErrNotFound if no row matches.
+func (r *Repo) SetLabel(ctx context.Context, pubkey, label string) error {
+	now := time.Now().Unix()
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE contacts SET label=?, updated_at=? WHERE pubkey=?`,
+		label, now, pubkey)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *Repo) AllRelaysUnion(ctx context.Context) ([]string, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT relay_url FROM contact_relays`)
 	if err != nil {

@@ -44,9 +44,11 @@ notification when a newer version is available. To upgrade:
 eidos self-update
 ```
 
-`self-update` re-runs the install script and atomically replaces the binary
-at the same prefix. Disable update notifications with
-`EIDOS_NO_UPDATE_CHECK=1`.
+`self-update` first probes GitHub Releases for the latest tag. If you are
+already on it, the command exits as a no-op. Otherwise it re-runs the install
+script and atomically replaces the binary at the same prefix. Pass `--force`
+to reinstall the current version unconditionally. Disable update
+notifications with `EIDOS_NO_UPDATE_CHECK=1`.
 
 ## Build from source
 
@@ -72,8 +74,12 @@ this sentinel and skips itself entirely.
 
 ## Initialize a state directory
 
+`--label` is required: every identity must declare a non-empty label that
+peers see by default in your card URI. Change it later with
+`eidos gate set-label <new-label>`.
+
 ```sh
-eidos gate init
+eidos gate init --label alice
 ```
 
 Creates `~/.eidos/gate/` (override with `EIDOS_GATE_HOME`, `XDG_STATE_HOME`,

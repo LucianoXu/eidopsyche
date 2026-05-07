@@ -20,11 +20,13 @@ import (
 
 func init() {
 	register("whoami", whoami)
+	register("set-label", setOwnLabel)
 	register("card.export", cardExport)
 	register("card.parse", cardParse)
 	register("contact.add", contactAdd)
 	register("contact.list", contactList)
 	register("contact.remove", contactRemove)
+	register("contact.set-label", contactSetLabel)
 	register("relay.list", relayList)
 	register("relay.add", relayAdd)
 	register("relay.remove", relayRemove)
@@ -62,6 +64,23 @@ func whoami(ctx context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any
 		"label":       label,
 		"home_relays": relays,
 	}, nil
+}
+
+// setOwnLabel updates the label that this entity advertises (whoami / card).
+// Empty labels are rejected — every identity must show a non-empty name.
+func setOwnLabel(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p struct{ Label string }
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	label := strings.TrimSpace(p.Label)
+	if label == "" {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: "label must not be empty"}
+	}
+	if err := d.DB.SetMeta(ctx, "label", label); err != nil {
+		return nil, internalErr(err)
+	}
+	return map[string]string{"label": label}, nil
 }
 
 // cardExport serialises our identity into a MindGate card URI.
@@ -166,6 +185,33 @@ func contactRemove(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawM
 	}
 	d.Refresh()
 	return map[string]bool{"ok": true}, nil
+}
+
+// contactSetLabel renames an existing contact. Target accepts npub, hex
+// pubkey, or current label (subject to the usual ambiguity rules).
+func contactSetLabel(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p struct {
+		Target string
+		Label  string
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	label := strings.TrimSpace(p.Label)
+	if label == "" {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: "label must not be empty"}
+	}
+	pk, ipcErr := resolveTarget(ctx, d, p.Target)
+	if ipcErr != nil {
+		return nil, ipcErr
+	}
+	if err := d.Repo.SetLabel(ctx, pk, label); err != nil {
+		if errors.Is(err, contacts.ErrNotFound) {
+			return nil, &ipc.Error{Code: ipc.ErrContactNotFound, Message: pk}
+		}
+		return nil, internalErr(err)
+	}
+	return map[string]string{"pubkey": pk, "label": label}, nil
 }
 
 // relayList returns own relays ordered by role then URL.

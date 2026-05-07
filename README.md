@@ -66,16 +66,21 @@ notification on stderr when a newer version is available. To upgrade:
 eidos self-update
 ```
 
-`self-update` re-runs the install script (single source of truth for upgrade
-logic). Disable update notifications with `EIDOS_NO_UPDATE_CHECK=1`, by
-setting `[update] check = false` in `~/.config/eidos/config.toml`, or by
-running in any environment that sets `CI=true`.
+`self-update` first probes GitHub Releases for the latest tag — if you are
+already on it, the command exits as a no-op. Otherwise it re-runs the
+install script (single source of truth for upgrade logic). Pass `--force`
+to reinstall the current version (useful for repairing a corrupted binary
+or pinning via `EIDOS_VERSION=...`).
+
+Disable update notifications with `EIDOS_NO_UPDATE_CHECK=1`, by setting
+`[update] check = false` in `~/.config/eidos/config.toml`, or by running in
+any environment that sets `CI=true`.
 
 ## Quick start
 
 ```sh
-# 1. Initialize identity and state directory
-eidos gate init
+# 1. Initialize identity and state directory (--label is required)
+eidos gate init --label alice
 
 # 2. Start the daemon (NIP-17 receiver) and the embedded relay
 eidos gate daemon &

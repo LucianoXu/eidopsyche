@@ -4,8 +4,12 @@ Two-user walkthrough mirroring `EXAMPLE.md`.
 
 ## Step 0 — Both users initialize
 
+`--label` is required: every identity must declare a non-empty label that
+peers will see by default in your card URI. Change it later with
+`eidos gate set-label`.
+
 ```
-$ eidos gate init
+$ eidos gate init --label alice
 ✓ created /home/alice/.eidos/gate
 ✓ generated keypair → /home/alice/.eidos/gate/key (0600)
 ✓ wrote state.db (schema v1)
@@ -75,7 +79,11 @@ $ eidos gate inbox --tail
 ## Other commands
 
 - `eidos gate whoami` — your identity, label, home relays
+- `eidos gate set-label <new-label>` — change your own label (the one shown
+  in `whoami` and embedded in your card URI)
 - `eidos gate contacts` — list contacts
+- `eidos gate set-contact-label <target> <new-label>` — rename a contact
+  (target accepts npub / hex / current label)
 - `eidos gate remove-contact <npub>` — remove a contact
 - `eidos gate relays` — list own relays
 - `eidos gate relay-add <url>` — add a relay (`--role home|fallback`, default `fallback`)
@@ -83,6 +91,8 @@ $ eidos gate inbox --tail
 - `eidos gate outbox` — sent history
 - `eidos gate scan <uri>` — parse a card URI without storing
 - `eidos version` — print version, commit, build date
+- `eidos self-update` — upgrade to the latest published release; no-op when
+  already on latest. Pass `--force` to reinstall the same version.
 - `eidos gate reconnect` — force the daemon to recompute its relay subscription
   set and reattach. Useful after manual `config set` changes or to trigger a
   refresh without restarting.
