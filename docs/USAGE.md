@@ -92,3 +92,32 @@ $ mindgate inbox --tail
 - `mindgate inbox --limit <n>` — cap results (default 50)
 - `mindgate send --stdin` — read message body from stdin instead of argument
 - `mindgate outbox --to <npub>` — filter outbox by recipient
+
+## Running two instances on one host (debugging)
+
+Each instance needs its own state directory and its own relay port:
+
+```
+# Instance A
+$ mindgate --state-dir /tmp/mg-a init --label alice
+$ mindgate --state-dir /tmp/mg-a daemon &
+$ mindgate --state-dir /tmp/mg-a relay &
+
+# Instance B
+$ mindgate --state-dir /tmp/mg-b init --label bob --listen 127.0.0.1:7778
+$ mindgate --state-dir /tmp/mg-b daemon &
+$ mindgate --state-dir /tmp/mg-b relay &
+```
+
+The `--listen` flag aligns config.toml's `relay.listen` and the `own_relays` home row with the relay's actual bind address.
+
+## Changing settings after init
+
+```
+$ mindgate config get               # dump all scalar keys
+$ mindgate config get relay.listen
+$ mindgate config set log_level debug
+$ mindgate config set relay.mode public
+```
+
+`config` writes `config.toml` directly; the daemon and relay must be restarted to pick up changes. Adding/removing relay entries in the SQLite `own_relays` table goes through `mindgate relay-add` / `relay-remove` instead.
