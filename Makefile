@@ -1,8 +1,10 @@
 .PHONY: build test integration lint staticcheck e2e ci clean install uninstall
 
-# Install location. Override with `make install PREFIX=$HOME/.local` for a
-# user-local install, or with DESTDIR=/tmp/stage for staged packaging.
-PREFIX  ?= /usr/local
+# Install location.
+# Default: user-local (~/.local/bin) — no sudo needed.
+# System-wide: sudo make install PREFIX=/usr/local
+# Staged packaging: make install DESTDIR=/tmp/stage PREFIX=/usr/local
+PREFIX  ?= $(HOME)/.local
 DESTDIR ?=
 BINDIR  ?= $(DESTDIR)$(PREFIX)/bin
 
@@ -33,9 +35,13 @@ clean:
 
 install: build
 	@mkdir -p $(BINDIR)
-	install -m 0755 bin/mindgate $(BINDIR)/mindgate
+	@install -m 0755 bin/mindgate $(BINDIR)/mindgate
 	@echo "installed: $(BINDIR)/mindgate"
+	@case ":$$PATH:" in \
+	  *":$(BINDIR):"*) ;; \
+	  *) printf 'note: %s is not on $$PATH — add it (e.g. in ~/.bashrc) to call mindgate directly\n' '$(BINDIR)' ;; \
+	esac
 
 uninstall:
-	rm -f $(BINDIR)/mindgate
+	@rm -f $(BINDIR)/mindgate
 	@echo "removed:   $(BINDIR)/mindgate"

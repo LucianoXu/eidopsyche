@@ -21,13 +21,19 @@ Equivalent to `go build -o bin/mindgate ./cmd/mindgate`. The binary depends on n
 To put `mindgate` on your `$PATH`:
 
 ```
-sudo make install                        # → /usr/local/bin/mindgate
-make install PREFIX=$HOME/.local         # → ~/.local/bin/mindgate (no sudo)
-make install DESTDIR=/tmp/stage          # staged install for packaging
-make uninstall                           # symmetric removal
+make install                                       # → ~/.local/bin/mindgate (default; no sudo)
+sudo make install PREFIX=/usr/local                # → /usr/local/bin/mindgate (system-wide)
+make install DESTDIR=/tmp/stage PREFIX=/usr/local  # staged install for packaging
+make uninstall                                     # symmetric removal (matches the PREFIX you used)
 ```
 
-`PREFIX` defaults to `/usr/local`. `DESTDIR` is prepended for staged builds (e.g. when packaging into a `.deb` or `.tar.gz`).
+`PREFIX` defaults to `$HOME/.local` (XDG user-local convention; works without sudo). `DESTDIR` is prepended for staged builds (e.g. when packaging into a `.deb` or `.tar.gz`).
+
+If `~/.local/bin` is not yet on your `$PATH`, `make install` will print a note. Add this to your shell rc:
+
+```
+export PATH="$HOME/.local/bin:$PATH"
+```
 
 ## Initialize a state directory
 
