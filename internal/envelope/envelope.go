@@ -2,7 +2,10 @@
 // in MindGate. See docs/superpowers/specs/2026-05-07-envelope-v1-design.md.
 package envelope
 
-import "errors"
+import (
+	"encoding/json"
+	"errors"
+)
 
 type Type string
 
@@ -71,4 +74,55 @@ func Validate(e Envelope) error {
 		}
 	}
 	return nil
+}
+
+// Encode serializes an Envelope into a JSON string suitable for use as the
+// .content of a NIP-17 kind:14 rumor. The envelope is validated before
+// encoding; an invalid envelope returns an error and produces no output.
+func Encode(e Envelope) (string, error) {
+	if err := Validate(e); err != nil {
+		return "", err
+	}
+	b, err := json.Marshal(e)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// Decode parses a NIP-17 rumor .content string into an Envelope, returning
+// one of the sentinel errors on failure. The error vocabulary is:
+//
+//   - ErrNotEnvelope: not parseable as a JSON object, OR parses but lacks
+//     both `v` and `type` (callers can use this to distinguish "random JSON"
+//     from "intentional but broken envelope").
+//   - ErrUnsupportedVersion: `v` is present but is not the integer 1.
+//   - ErrSchemaViolation: shape is recognizable as an envelope but a field
+//     is missing/wrong/forbidden per spec §3.1.
+func Decode(content string) (Envelope, error) {
+	var probe struct {
+		V    *int    `json:"v"`
+		Type *string `json:"type"`
+	}
+	if err := json.Unmarshal([]byte(content), &probe); err != nil {
+		return Envelope{}, ErrNotEnvelope
+	}
+	if probe.V == nil && probe.Type == nil {
+		return Envelope{}, ErrNotEnvelope
+	}
+	if probe.V == nil || probe.Type == nil {
+		return Envelope{}, ErrSchemaViolation
+	}
+	if *probe.V != SchemaVersion {
+		return Envelope{}, ErrUnsupportedVersion
+	}
+
+	var e Envelope
+	if err := json.Unmarshal([]byte(content), &e); err != nil {
+		return Envelope{}, ErrSchemaViolation
+	}
+	if err := Validate(e); err != nil {
+		return Envelope{}, err
+	}
+	return e, nil
 }

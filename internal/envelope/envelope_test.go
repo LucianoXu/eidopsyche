@@ -1,6 +1,7 @@
 package envelope
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 )
@@ -40,6 +41,61 @@ func TestValidate_Cases(t *testing.T) {
 			got := Validate(tc.env)
 			if !errors.Is(got, tc.want) {
 				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEncodeDecode_RoundTrip(t *testing.T) {
+	cases := []Envelope{
+		{V: 1, Type: TypeChat, Text: "hello world"},
+		{V: 1, Type: TypeChat, Text: "hi", Client: &Client{Name: "eidos", Ver: "0.3.0"}},
+		{V: 1, Type: TypeCommand, Text: "/status", Command: &Command{Name: "status", Args: map[string]any{}}},
+	}
+	for i, in := range cases {
+		s, err := Encode(in)
+		if err != nil {
+			t.Fatalf("case %d Encode: %v", i, err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(s), &raw); err != nil {
+			t.Fatalf("case %d not JSON: %v", i, err)
+		}
+		out, err := Decode(s)
+		if err != nil {
+			t.Fatalf("case %d Decode: %v", i, err)
+		}
+		if out.V != in.V || out.Type != in.Type || out.Text != in.Text {
+			t.Fatalf("case %d round-trip mismatch: in=%+v out=%+v", i, in, out)
+		}
+	}
+}
+
+func TestDecode_Rejects(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    error
+	}{
+		{"plain text", "hello", ErrNotEnvelope},
+		{"json without v or type", `{"foo":"bar"}`, ErrNotEnvelope},
+		{"v=2", `{"v":2,"type":"chat","text":"hi"}`, ErrUnsupportedVersion},
+		{"unknown type", `{"v":1,"type":"frob","text":"hi"}`, ErrSchemaViolation},
+		{"chat missing text", `{"v":1,"type":"chat"}`, ErrSchemaViolation},
+		{"chat empty text", `{"v":1,"type":"chat","text":""}`, ErrSchemaViolation},
+		{"chat with command", `{"v":1,"type":"chat","text":"hi","command":{"name":"x","args":{}}}`, ErrSchemaViolation},
+		{"command missing command", `{"v":1,"type":"command"}`, ErrSchemaViolation},
+		{"command missing args", `{"v":1,"type":"command","command":{"name":"x"}}`, ErrSchemaViolation},
+		{"command empty name", `{"v":1,"type":"command","command":{"name":"","args":{}}}`, ErrSchemaViolation},
+		{"json array", `[1,2,3]`, ErrNotEnvelope},
+		{"empty string", "", ErrNotEnvelope},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Decode(tc.content)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("got %v, want %v", err, tc.want)
 			}
 		})
 	}
