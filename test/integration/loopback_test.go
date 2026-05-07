@@ -40,10 +40,19 @@ func freePort(t *testing.T) string {
 }
 
 // bringUp creates a state dir, generates an identity, writes meta + own_relays
-// + config.toml, starts a paired relay on a random localhost port and a daemon
+// + config.toml, starts a relay on a random localhost port and a daemon
 // against the resulting state dir.
-func bringUp(t *testing.T, name string) *instance {
+//
+// The optional modeOpt selects the relay mode (default: ModePaired, matching
+// the typical single-user install). Tests that need to model a shared /
+// community relay pass ModePublic so the relay accepts gift wraps for
+// pubkeys other than its host's.
+func bringUp(t *testing.T, name string, modeOpt ...relayd.Mode) *instance {
 	t.Helper()
+	mode := relayd.ModePaired
+	if len(modeOpt) > 0 {
+		mode = modeOpt[0]
+	}
 	dir := t.TempDir()
 
 	k, err := identity.Generate()
@@ -97,7 +106,7 @@ func bringUp(t *testing.T, name string) *instance {
 		t.Fatal(err)
 	}
 	rsrv, err := relayd.New(relayd.Config{
-		Mode:      relayd.ModePaired,
+		Mode:      mode,
 		Listen:    addr,
 		OwnerHex:  k.PublicHex,
 		Whitelist: wl,
