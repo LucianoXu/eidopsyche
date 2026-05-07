@@ -78,31 +78,54 @@ any environment that sets `CI=true`.
 
 ## Quick start
 
+`eidos gate init` requires `--label` and `--home`. The home URL is the
+relay peers will dial to reach you — pick the topology that fits your
+host:
+
 ```sh
-# 1. Initialize identity and state directory (--label is required)
-eidos gate init --label alice
+# Daemon-only against a public Nostr relay (zero infrastructure):
+eidos gate init --label alice --home wss://relay.damus.io
 
-# 2. Start the daemon and embedded relay as OS services (systemd on Linux,
-#    launchd on macOS). user-mode by default; --system installs to the
-#    machine-wide path.
-eidos gate start            # installs + enables + starts both
-eidos gate status           # show what's running
+# Self-host the embedded relay on this same machine:
+eidos gate init --label alice --home wss://alice.example.com \
+  --with-local-relay --listen 0.0.0.0:22895
 
-# 3. Print and share your card out-of-band
+# Single-host two-instance debug (loopback only):
+eidos gate init --label alice --home ws://127.0.0.1:22895 \
+  --with-local-relay --listen 127.0.0.1:22895
+```
+
+Then:
+
+```sh
+# 1. Start the gate as OS services (systemd on Linux, launchd on macOS).
+#    Only the daemon unit is installed unless --with-local-relay was set
+#    at init.
+eidos gate start
+eidos gate status
+
+# 2. Print and share your card out-of-band
 eidos gate card
-# → mindgate://npub1...@ws%3A%2F%2Fyour.host%3A22895/?label=you
+# → mindgate://npub1...@wss%3A%2F%2Fyour.host%2F?label=alice
 
-# 4. Add a peer's card and send a message
-eidos gate add-contact 'mindgate://npub1bob...@ws%3A%2F%2Fbob.host%3A22895/?label=Bob'
+# 3. Add a peer's card and send a message
+eidos gate add-contact 'mindgate://npub1bob...@wss%3A%2F%2Fbob.host%2F?label=Bob'
 eidos gate send npub1bob... "Hey Bob, my MindGate is up."
 
-# 5. See what arrived
+# 4. See what arrived
 eidos gate inbox --tail
 
 # Lifecycle: stop without uninstalling, or wipe everything
 eidos gate stop
 eidos gate purge --yes      # stops + uninstalls + deletes state dir
 ```
+
+> **v0.5 caveat:** the "public Nostr relay" topology is experimental.
+> Most public relays follow NIP-17's recommendation to require NIP-42
+> AUTH for `kind:1059` reads, and v0.5 has no NIP-42 client. If your
+> daemon's inbox stays empty against a public relay, that is the cause;
+> v0.6 ships the AUTH layer that closes this gap. The "self-hosted on
+> a separate host" and "shared / friend's relay" topologies work today.
 
 A one-step alternative to the symmetric `add-contact` flow exists via
 **signed invites** — Alice runs `eidos gate invite create`, Bob runs

@@ -2,54 +2,93 @@
 
 Two-user walkthrough mirroring `EXAMPLE.md`.
 
-## Step 0 — Both users initialize
+## Step 0 — Pick a topology
 
-`--label` is required: every identity must declare a non-empty label that
-peers will see by default in your card URI. Change it later with
-`eidos gate set-label`.
+`eidos gate init` requires two flags: `--label` (the name peers see by
+default) and `--home <url>` (the URL peers will dial to reach you). The
+home URL can point to three kinds of relay; pick the one that matches
+where you are running this gate:
+
+### A) Public Nostr relay (zero infrastructure)
 
 ```
-$ eidos gate init --label alice
-✓ created /home/alice/.eidos/gate
-✓ generated keypair → /home/alice/.eidos/gate/key (0600)
-✓ wrote state.db (schema v1)
-✓ wrote config.toml
-
-your identity:
-  npub: npub1alice...
-  hex:  <64-hex-chars>
-
-next steps:
-  1) start services: eidos gate start
-  2) share card:     eidos gate card
+$ eidos gate init --label alice --home wss://relay.damus.io
 ```
 
-## Step 1 — Each starts daemon and relay
+The relay operator sees gift-wrap metadata (who, when, how often).
+Content stays end-to-end encrypted via NIP-17.
+
+> **v0.5 caveat:** most public relays follow NIP-17's recommendation to
+> require NIP-42 AUTH for `kind:1059` reads, and v0.5 has no NIP-42
+> client. If your inbox stays empty against a public relay, this is the
+> cause; v0.6 ships the AUTH layer.
+
+### B) Self-hosted relay on a separate host (recommended)
+
+Run the relay on a box with a public address (a $5 VPS works); run the
+daemon wherever you actually use eidos.
+
+```
+# On the laptop / phone / NAT'd box (this gate):
+$ eidos gate init --label alice --home wss://my-vps.example.com
+
+# On the VPS, run a separate daemon-and-relay install whose --listen
+# binds publicly. Front it with TLS (Caddy / nginx / Cloudflare Tunnel)
+# so peers can reach the wss:// URL.
+```
+
+See `docs/INSTALL.md#self-hosting-the-embedded-relay` for the VPS side.
+
+### C) Bundled local relay (single-host two-instance debug, or
+self-hosting on the same box)
+
+```
+$ eidos gate init --label alice --home wss://alice.example.com \
+    --with-local-relay --listen 0.0.0.0:22895
+```
+
+`--with-local-relay` flips `relay.enabled = true` so `eidos gate start`
+also installs the relay unit. `--home` and `--listen` are independent:
+the relay binds to `--listen` (`0.0.0.0:22895`), but peers dial the URL
+in `--home` (`wss://alice.example.com`, typically a reverse-proxied
+TLS endpoint forwarding to the local port).
+
+For pure local debug (one host, two instances):
+
+```
+$ eidos gate init --label alice --home ws://127.0.0.1:22895 \
+    --with-local-relay --listen 127.0.0.1:22895
+```
+
+## Step 1 — Each starts services
 
 ```
 $ eidos gate start
 ✓ gate services started
   eidos-gate-daemon      active  pid=4123
-  eidos-gate-relay       active  pid=4131
+  eidos-gate-relay       not-installed       # daemon-only deployments
 ```
 
 `eidos gate start` installs the appropriate OS service units for the
-daemon and relay and brings both up: systemd units on Linux
+gate and brings them up: systemd units on Linux
 (`~/.config/systemd/user/`), launchd plists on macOS
-(`~/Library/LaunchAgents/`). Use `eidos gate status` to check,
-`eidos gate stop` to halt without uninstalling, and `eidos gate purge` to
-remove everything. Append `--system` to any of these to install to the
-system path (`/etc/systemd/system/` or `/Library/LaunchDaemons/`,
-respectively) — requires root.
+(`~/Library/LaunchAgents/`). The relay unit is only installed when
+`relay.enabled = true` (i.e. when you passed `--with-local-relay` at
+init). Use `eidos gate status` to check, `eidos gate stop` to halt
+without uninstalling, and `eidos gate purge` to remove everything.
+Append `--system` to any of these to install to the system path
+(`/etc/systemd/system/` or `/Library/LaunchDaemons/`, respectively) —
+requires root.
 
 On Linux user-mode, services survive your shell exiting; for survival
 across a full logout on a headless host, run
 `loginctl enable-linger <username>` once. macOS LaunchAgents auto-start
 at GUI login.
 
-For ad-hoc / debugging runs, the original `eidos gate daemon` and
-`eidos gate relay` foreground commands still work — those are exactly
-what the OS service units invoke.
+For ad-hoc / debugging runs, the foreground commands `eidos gate daemon`
+and `eidos gate relay` still work — those are exactly what the OS
+service units invoke. `eidos gate relay` refuses to start when
+`relay.enabled = false`.
 
 Logs:
 - Linux: `journalctl --user -u eidos-gate-daemon` (or `-u ...` for
@@ -58,7 +97,8 @@ Logs:
   `<state-dir>/logs/eidos-gate-{daemon,relay}.log`.
 
 Daemon startup line: `eidos-gate-daemon starting state_dir=...`. Relay
-startup line: `eidos-gate-relay listening 0.0.0.0:22895 mode=paired`.
+startup line (when enabled): `eidos-gate-relay listening 0.0.0.0:22895
+mode=paired`.
 
 ## Step 2 — Each prints their card
 
@@ -249,21 +289,27 @@ The token is a self-contained signed credential. Anyone who holds it can redeem 
 
 ## Running two instances on one host (debugging)
 
-Each instance needs its own state directory and its own relay port:
+Each instance needs its own state directory and (since they are running
+local relays) its own relay port:
 
 ```
 # Instance A
-$ eidos gate --state-dir /tmp/mg-a init --label alice
+$ eidos gate --state-dir /tmp/mg-a init --label alice \
+    --home ws://127.0.0.1:22895 --with-local-relay --listen 127.0.0.1:22895
 $ eidos gate --state-dir /tmp/mg-a daemon &
 $ eidos gate --state-dir /tmp/mg-a relay &
 
 # Instance B
-$ eidos gate --state-dir /tmp/mg-b init --label bob --listen 127.0.0.1:22896
+$ eidos gate --state-dir /tmp/mg-b init --label bob \
+    --home ws://127.0.0.1:22896 --with-local-relay --listen 127.0.0.1:22896
 $ eidos gate --state-dir /tmp/mg-b daemon &
 $ eidos gate --state-dir /tmp/mg-b relay &
 ```
 
-The `--listen` flag aligns config.toml's `relay.listen` and the `own_relays` home row with the relay's actual bind address.
+`--home` and `--listen` are independent flags. For local debug they
+typically point to the same `host:port`; in real deployments they
+diverge (relay binds `0.0.0.0:22895` while peers dial
+`wss://your.host`).
 
 Start order does not matter: if the daemon starts before its relay is
 listening, it will retry the subscription with exponential backoff (1 s, 2 s,

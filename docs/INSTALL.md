@@ -143,19 +143,73 @@ logout-survives experience on a headless host, run
 `loginctl enable-linger <username>` once. macOS LaunchAgents auto-start at
 GUI login.
 
-The default relay binds `0.0.0.0:22895` so peers on another host can reach
-it once you open the firewall and publish a real URL. Lock it down to
-loopback by setting `relay.listen` to `127.0.0.1:22895` if you only want
-local-host clients (single-host two-instance debug, or running behind a
-reverse proxy that connects to loopback). Either way, `relay.public_url`
-and the home row in `own_relays` must be set to the externally reachable
-WebSocket URL — peers cannot dial `0.0.0.0`, so the URL embedded in your
-card / invite has to be a real hostname or IP. Use `eidos gate init
---listen <host:port>`, or after init replace the home row with
-`eidos gate relay-remove ws://127.0.0.1:22895` followed by
-`eidos gate relay-add --role home <wss://your.host>`. After config
-changes, run `eidos gate start` again — it re-applies the unit files and
-is idempotent.
+By default, `eidos gate init` creates a daemon-only install: no embedded
+relay process is started and only the daemon unit is registered with
+your service manager. The `--home <url>` you pass to `init` tells peers
+how to dial you. See "Self-hosting the embedded relay" below if you
+want to run one on this host as well.
+
+### Self-hosting the embedded relay
+
+Pass `--with-local-relay` at init to also install and start the
+`eidos-gate-relay` unit. `--listen` controls the bind address (default
+`0.0.0.0:22895` when `--with-local-relay` is set without `--listen`).
+The `--home` URL embedded in your card / invite is independent — for a
+public deployment, you typically:
+
+1. Bind the relay to all interfaces (`--listen 0.0.0.0:22895`).
+2. Terminate TLS at a reverse proxy (Caddy / nginx / Cloudflare Tunnel)
+   that forwards `wss://your.host` to the local plain-WS port.
+3. Pass `--home wss://your.host` so peers dial the public URL.
+
+To toggle the local relay on or off after init:
+
+```sh
+eidos gate config set relay.enabled true|false
+eidos gate stop && eidos gate start
+```
+
+`relay.enabled = false` makes `eidos gate start` skip installing /
+starting the relay unit; any residual unit on disk from a previous opt-in
+is left alone (manage it via `systemctl` / `launchctl` directly, or
+clean up with `eidos gate purge`).
+
+### Migrating from v0.4
+
+v0.5 changes how the gate is initialized. Existing v0.4 state directories
+are detected by their absence of `[relay].enabled` in `config.toml` and
+rejected at command entry with a pointer to this section.
+
+**Path A — re-init from scratch** (loses contacts, invites, inbox):
+
+```sh
+eidos gate purge --yes
+eidos gate init --label <your-label> --home <url> [--with-local-relay]
+```
+
+**Path B — migrate in place** (keeps state):
+
+```sh
+eidos gate stop
+
+# Edit ~/.eidos/gate/config.toml — replace the [relay] block with:
+#
+#   [relay]
+#     enabled  = true                  # set to false for daemon-only
+#     listen   = "127.0.0.1:22895"     # whatever your previous bind was
+#     mode     = "paired"
+#     data_dir = "relay"
+#
+# (Daemon-only) optionally replace the home row in own_relays:
+
+sqlite3 ~/.eidos/gate/state.db <<'SQL'
+  DELETE FROM own_relays WHERE role='home';
+  INSERT INTO own_relays(relay_url, role, added_at)
+    VALUES('wss://your-relay.example.com', 'home', strftime('%s','now'));
+SQL
+
+eidos gate start
+```
 
 ### Logs
 
