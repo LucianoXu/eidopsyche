@@ -58,7 +58,7 @@ Logs:
   `<state-dir>/logs/eidos-gate-{daemon,relay}.log`.
 
 Daemon startup line: `eidos-gate-daemon starting state_dir=...`. Relay
-startup line: `eidos-gate-relay listening 127.0.0.1:22895 mode=paired`.
+startup line: `eidos-gate-relay listening 0.0.0.0:22895 mode=paired`.
 
 ## Step 2 — Each prints their card
 
