@@ -66,7 +66,8 @@ func TestSSE_DeliversInboxMessage(t *testing.T) {
 	for time.Now().Before(deadline) {
 		n, _ := resp.Body.Read(buf)
 		seen += string(buf[:n])
-		if strings.Contains(seen, "event: inbox.message") {
+		// Event names are now counterpart-scoped: "inbox.message:<pk>"
+		if strings.Contains(seen, "event: inbox.message:p1") {
 			return
 		}
 		if n == 0 {

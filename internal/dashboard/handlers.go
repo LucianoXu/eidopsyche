@@ -165,6 +165,10 @@ func composeHandler(deps DashboardDeps, r *renderer, logger *slog.Logger) http.H
 // proximity to threadHandler. Implementation lives in sendChat below.
 func sendHandler(deps DashboardDeps, r *renderer, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		path := strings.TrimPrefix(req.URL.Path, "/thread/")
 		path = strings.TrimSuffix(path, "/send")
 		pk := path
@@ -180,6 +184,10 @@ func sendHandler(deps DashboardDeps, r *renderer, logger *slog.Logger) http.Hand
 // `to` field, not the URL path.
 func composeSendHandler(deps DashboardDeps, r *renderer, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		if err := req.ParseForm(); err != nil {
 			http.Error(w, "bad form", http.StatusBadRequest)
 			return
@@ -194,6 +202,12 @@ func composeSendHandler(deps DashboardDeps, r *renderer, logger *slog.Logger) ht
 }
 
 func sendChat(w http.ResponseWriter, req *http.Request, deps DashboardDeps, r *renderer, logger *slog.Logger, pk string) {
+	// Defence in depth: refuse non-POST even when the route handler
+	// already checked. Side effects must never happen on safe methods.
+	if req.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	if err := req.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
@@ -285,21 +299,22 @@ func lastSeenByContact(deps DashboardDeps) map[string]time.Time {
 }
 
 func buildMessagesView(deps DashboardDeps, onlyMal bool, cursor string) messagesData {
-	var since *time.Time
-	if c := decodeCursor(cursor); c > 0 {
-		t := time.Unix(c, 0)
-		since = &t
-	}
+	// v1 returns the newest page only. Cursor / "Load more" pagination
+	// requires a "before" (upper-bound) timestamp filter that the inbox
+	// store does not yet expose; building it on top of the existing
+	// "since" (lower-bound) API was racy and shipped broken in the
+	// initial draft. Deferred to v2 alongside a store API extension.
+	_ = cursor
 	rows := []messageRow{}
 
 	if !onlyMal {
-		if sents, err := deps.ListOutbox(since, "", messagesPageSize); err == nil {
+		if sents, err := deps.ListOutbox(nil, "", messagesPageSize); err == nil {
 			for _, s := range sents {
 				rows = append(rows, sentToRow(s))
 			}
 		}
 	}
-	if msgs, err := deps.ListInbox(since, "", messagesPageSize); err == nil {
+	if msgs, err := deps.ListInbox(nil, "", messagesPageSize); err == nil {
 		for _, m := range msgs {
 			if onlyMal && !m.Malformed {
 				continue
@@ -316,11 +331,7 @@ func buildMessagesView(deps DashboardDeps, onlyMal bool, cursor string) messages
 	if len(rows) > messagesPageSize {
 		rows = rows[:messagesPageSize]
 	}
-	view := messagesData{Rows: rows, OnlyMal: onlyMal}
-	if len(rows) == messagesPageSize {
-		view.NextCursor = encodeCursor(rows[len(rows)-1].At.Unix() - 1)
-	}
-	return view
+	return messagesData{Rows: rows, OnlyMal: onlyMal}
 }
 
 func msgToRow(m inbox.Message) messageRow {

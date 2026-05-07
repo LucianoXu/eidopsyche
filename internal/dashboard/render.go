@@ -26,10 +26,13 @@ func newRenderer() (*renderer, error) {
 	funcs := template.FuncMap{
 		"reltime": func(t time.Time) string { return relativeTime(t, time.Now()) },
 		"truncate": func(n int, s string) string {
-			if len(s) <= n {
+			// Rune-aware: avoid splitting multi-byte UTF-8 characters
+			// (CJK, emoji) in the middle of a glyph.
+			r := []rune(s)
+			if len(r) <= n {
 				return s
 			}
-			return s[:n] + "…"
+			return string(r[:n]) + "…"
 		},
 	}
 	t, err := template.New("").Funcs(funcs).ParseFS(templatesFS, "templates/*.html")

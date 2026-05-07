@@ -53,8 +53,10 @@ func TestDashboard_PostSendThenThreadShowsBubble(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 
 	form := strings.NewReader("text=hello+from+web")
-	req, _ := http.NewRequest("POST", dashboardURL(alice)+"/thread/"+bob.daemon.Key.PublicHex+"/send", form)
+	postURL := dashboardURL(alice) + "/thread/" + bob.daemon.Key.PublicHex + "/send"
+	req, _ := http.NewRequest("POST", postURL, form)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", dashboardURL(alice))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +146,8 @@ func TestDashboard_SSEDeliversInboxOnPeerSend(t *testing.T) {
 	for time.Now().Before(deadline) {
 		n, err := resp.Body.Read(buf)
 		seen += string(buf[:n])
-		if strings.Contains(seen, "event: inbox.message") {
+		// Event names are counterpart-scoped: "inbox.message:<bob's pk>"
+		if strings.Contains(seen, "event: inbox.message:"+bob.daemon.Key.PublicHex) {
 			return
 		}
 		if err != nil {

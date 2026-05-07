@@ -49,11 +49,11 @@ func (h *sseHub) handler(r *renderer, logger *slog.Logger) http.HandlerFunc {
 				if !ok {
 					return
 				}
-				html := renderEvent(r, ev, logger)
-				if html == "" {
+				eventName, html := renderEvent(r, ev, logger)
+				if eventName == "" || html == "" {
 					continue
 				}
-				_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Kind, escapeSSEData(html))
+				_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventName, escapeSSEData(html))
 				flusher.Flush()
 			}
 		}
@@ -61,35 +61,40 @@ func (h *sseHub) handler(r *renderer, logger *slog.Logger) http.HandlerFunc {
 }
 
 // renderEvent maps an Event to the HTML fragment payload htmx will swap.
-// Returns "" if the event has no UI projection.
-func renderEvent(r *renderer, ev Event, logger *slog.Logger) string {
+// Returns ("", "") if the event has no UI projection.
+//
+// inbox.message and outbox.message are emitted under a counterpart-scoped
+// event name (e.g. "inbox.message:<hex>") so a thread view subscribed to
+// "inbox.message:<bob>" only receives bubbles from Bob — without this,
+// every chat thread would mix every other contact's bubbles into its
+// scroll. Sidebar-targeted events (contact.added/removed/relabeled) are
+// emitted under their bare kind name.
+func renderEvent(r *renderer, ev Event, logger *slog.Logger) (string, string) {
 	switch ev.Kind {
 	case "inbox.message":
 		if ev.Message == nil {
-			return ""
+			return "", ""
 		}
 		out, err := r.Render("bubble", msgToBubble(*ev.Message))
 		if err != nil {
 			logger.Warn("render inbox bubble for SSE", "err", err)
-			return ""
+			return "", ""
 		}
-		return out
+		return "inbox.message:" + ev.Message.From, out
 	case "outbox.message":
 		if ev.Sent == nil {
-			return ""
+			return "", ""
 		}
 		out, err := r.Render("bubble", sentToBubble(*ev.Sent))
 		if err != nil {
 			logger.Warn("render outbox bubble for SSE", "err", err)
-			return ""
+			return "", ""
 		}
-		return out
+		return "outbox.message:" + ev.Sent.To, out
 	case "contact.added", "contact.removed", "contact.relabeled":
-		// hx-trigger on the sidebar element does the refresh; payload is
-		// just a marker.
-		return "(refresh)"
+		return ev.Kind, "(refresh)"
 	default:
-		return ""
+		return "", ""
 	}
 }
 

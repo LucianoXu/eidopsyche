@@ -3,7 +3,7 @@
   <strong>{{.Counterpart.Label}}</strong>
   <span class="tier-badge">{{.Counterpart.Tier}}</span>
 </div>
-<div class="thread-body" id="thread-body" sse-swap="inbox.message,outbox.message" hx-swap="beforeend">
+<div class="thread-body" id="thread-body" sse-swap="inbox.message:{{.Counterpart.Pubkey}},outbox.message:{{.Counterpart.Pubkey}}" hx-swap="beforeend">
   {{range .Bubbles}}
     {{template "bubble" .}}
   {{else}}

@@ -43,7 +43,7 @@ type Daemon struct {
 	kick        chan struct{}
 	mu          sync.Mutex
 	subs        []*ipc.Conn
-	dashSubs    []chan dashboard.Event
+	dashSubs    []*dashSub
 	dedupe      map[string]struct{}
 	selfWrapIDs map[string]struct{}
 
@@ -595,43 +595,56 @@ func (d *Daemon) broadcastInbox(m inbox.Message) {
 	d.emitDashEvent(dashboard.Event{Kind: "inbox.message", Message: &mc})
 }
 
+// dashSub is a single dashboard subscriber: a buffered event channel plus a
+// done channel that signals "no more sends, please". This pair lets cancel()
+// stop emit() from racing into a closed channel: emit selects on both.
+type dashSub struct {
+	ch   chan dashboard.Event
+	done chan struct{}
+	once sync.Once
+}
+
 // subscribeDashboard registers a new SSE-bound subscriber. The returned
-// cancel function closes the channel and removes the subscriber from the
-// fan-out list. Channel buffer is small (4) so a slow client falls behind
-// quickly; on send-blocked, broadcast drops the event for that subscriber.
+// cancel function closes the done channel (idempotent) and removes the
+// subscriber from the fan-out list. The event channel is never closed by
+// cancel() so concurrent emit() sends cannot panic; emit() picks done as
+// the abandon signal instead.
 func (d *Daemon) subscribeDashboard() (<-chan dashboard.Event, func()) {
-	ch := make(chan dashboard.Event, 4)
+	sub := &dashSub{
+		ch:   make(chan dashboard.Event, 4),
+		done: make(chan struct{}),
+	}
 	d.mu.Lock()
-	d.dashSubs = append(d.dashSubs, ch)
+	d.dashSubs = append(d.dashSubs, sub)
 	d.mu.Unlock()
-	closed := false
 	cancel := func() {
 		d.mu.Lock()
-		for i, c := range d.dashSubs {
-			if c == ch {
+		for i, s := range d.dashSubs {
+			if s == sub {
 				d.dashSubs = append(d.dashSubs[:i], d.dashSubs[i+1:]...)
 				break
 			}
 		}
 		d.mu.Unlock()
-		if !closed {
-			closed = true
-			close(ch)
-		}
+		sub.once.Do(func() { close(sub.done) })
 	}
-	return ch, cancel
+	return sub.ch, cancel
 }
 
 // emitDashEvent fans an event to all dashboard subscribers. Slow consumers
-// are dropped (logged) rather than blocking the broadcaster.
+// are dropped (logged) rather than blocking the broadcaster. A subscriber
+// whose done channel has been closed is skipped before any send so a
+// concurrent cancel cannot race emit into a closed channel.
 func (d *Daemon) emitDashEvent(ev dashboard.Event) {
 	d.mu.Lock()
-	subs := make([]chan dashboard.Event, len(d.dashSubs))
+	subs := make([]*dashSub, len(d.dashSubs))
 	copy(subs, d.dashSubs)
 	d.mu.Unlock()
-	for _, ch := range subs {
+	for _, sub := range subs {
 		select {
-		case ch <- ev:
+		case <-sub.done:
+			// subscriber cancelled; skip without sending
+		case sub.ch <- ev:
 		default:
 			d.Log.Warn("dashboard subscriber slow; dropping event", "kind", ev.Kind)
 		}

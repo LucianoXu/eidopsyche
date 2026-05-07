@@ -29,10 +29,4 @@
     {{end}}
   </tbody>
 </table>
-{{if .NextCursor}}
-<div style="padding:16px;text-align:center">
-  <button hx-get="/messages?cursor={{.NextCursor}}{{if .OnlyMal}}&malformed=1{{end}}"
-          hx-target="closest div" hx-swap="outerHTML">Load more</button>
-</div>
-{{end}}
 {{end}}

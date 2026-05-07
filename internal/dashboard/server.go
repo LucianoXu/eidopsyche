@@ -78,15 +78,28 @@ func isLoopback(addr string) bool {
 	return ip.IsLoopback()
 }
 
-// sameOriginGuard rejects requests whose Origin header is set and does not
-// match Host. Browsers omit Origin on plain GETs from the address bar, so
-// missing Origin is treated as same-origin. POSTs from cross-origin
-// contexts always carry Origin and will be rejected.
+// sameOriginGuard rejects requests whose Origin header does not match Host.
+// Browsers omit Origin on safe-method address-bar navigation (GET/HEAD), so
+// a missing Origin is treated as same-origin only for those methods. For
+// any other method (POST, PUT, DELETE, ...) Origin must be present AND
+// match Host; an empty Origin or the literal string "null" (sandboxed
+// iframes, file://, some non-standard contexts) is rejected for mutating
+// methods so cross-origin contexts cannot bypass the check.
 func sameOriginGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin == "" || origin == "null" {
-			next.ServeHTTP(w, r)
+		safeMethod := r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions
+
+		if origin == "" {
+			if safeMethod {
+				next.ServeHTTP(w, r)
+				return
+			}
+			http.Error(w, "missing Origin on mutating request", http.StatusForbidden)
+			return
+		}
+		if origin == "null" {
+			http.Error(w, "Origin: null rejected", http.StatusForbidden)
 			return
 		}
 		if i := strings.Index(origin, "://"); i >= 0 {

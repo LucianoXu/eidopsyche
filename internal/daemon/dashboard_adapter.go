@@ -107,7 +107,14 @@ func (a dashboardAdapter) Send(ctx context.Context, toPubkey string, env envelop
 		AcceptedBy:  accepted,
 		Final:       true,
 	}
-	_ = a.d.Box.AppendOutbox(sent)
+	if err := a.d.Box.AppendOutbox(sent); err != nil {
+		// Match the IPC sendMessage handler's behaviour: persisting the
+		// outbox row is part of the contract. If it fails, the publish
+		// already succeeded but the local record is missing — surface
+		// the error so the caller renders a failure rather than showing
+		// a sent-bubble that vanishes on next reload.
+		return "", fmt.Errorf("append outbox: %w", err)
+	}
 	sc := sent
 	a.d.emitDashEvent(dashboard.Event{Kind: "outbox.message", Sent: &sc})
 	return wrapBob.ID, nil
