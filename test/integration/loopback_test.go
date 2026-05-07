@@ -13,6 +13,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/daemon"
+	"github.com/LucianoXu/eidopsyche/internal/envelope"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
 	"github.com/LucianoXu/eidopsyche/internal/relayd"
@@ -177,9 +178,10 @@ func TestSendByLabel(t *testing.T) {
 	aliceIPC := dialIPC(t, alice)
 	// Send using the label "peer" rather than Bob's npub.
 	var sendResp map[string]any
-	if e, err := aliceIPC.Call("send", map[string]string{
-		"to":      "peer",
-		"content": "by label",
+	chatEnv := envelope.Envelope{V: 1, Type: envelope.TypeChat, Text: "by label"}
+	if e, err := aliceIPC.Call("send", map[string]any{
+		"to":       "peer",
+		"envelope": chatEnv,
 	}, &sendResp); err != nil || e != nil {
 		t.Fatalf("send by label: %v %+v", err, e)
 	}
@@ -195,8 +197,13 @@ func TestSendByLabel(t *testing.T) {
 			}
 			var msg map[string]any
 			_ = json.Unmarshal(ev.Data, &msg)
-			if msg["content"] != "by label" {
-				t.Fatalf("content %v", msg["content"])
+			content, _ := msg["content"].(string)
+			env, err := envelope.Decode(content)
+			if err != nil {
+				t.Fatalf("decode: %v (raw=%q)", err, content)
+			}
+			if env.Text != "by label" {
+				t.Fatalf("text %v", env.Text)
 			}
 			return
 		}
@@ -229,9 +236,10 @@ func TestAliceBobLoopback(t *testing.T) {
 
 	aliceIPC := dialIPC(t, alice)
 	var sendResp map[string]any
-	if e, err := aliceIPC.Call("send", map[string]string{
-		"to":      bob.daemon.Key.Npub,
-		"content": "hello bob",
+	chatEnv := envelope.Envelope{V: 1, Type: envelope.TypeChat, Text: "hello bob"}
+	if e, err := aliceIPC.Call("send", map[string]any{
+		"to":       bob.daemon.Key.Npub,
+		"envelope": chatEnv,
 	}, &sendResp); err != nil || e != nil {
 		t.Fatalf("send: %v %+v", err, e)
 	}
@@ -248,8 +256,13 @@ func TestAliceBobLoopback(t *testing.T) {
 			}
 			var msg map[string]any
 			_ = json.Unmarshal(ev.Data, &msg)
-			if msg["content"] != "hello bob" {
-				t.Fatalf("unexpected content %v", msg["content"])
+			content, _ := msg["content"].(string)
+			env, err := envelope.Decode(content)
+			if err != nil {
+				t.Fatalf("decode: %v (raw=%q)", err, content)
+			}
+			if env.Text != "hello bob" {
+				t.Fatalf("unexpected text %v", env.Text)
 			}
 			if msg["from"] != alice.daemon.Key.PublicHex {
 				t.Fatalf("from mismatch: got %v want %v", msg["from"], alice.daemon.Key.PublicHex)

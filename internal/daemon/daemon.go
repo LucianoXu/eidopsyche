@@ -326,10 +326,14 @@ func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *
 
 	switch env.Type {
 	case envelope.TypeChat:
-		c, err := d.Repo.Get(ctx, rumor.PubKey)
-		if err != nil || c.Tier == contacts.TierBlocked {
-			d.Log.Debug("dropped non-contact / blocked", "from", rumor.PubKey)
-			return
+		// Chats from self (e.g., command replies, self-notes) bypass the
+		// contact filter — self is always trusted.
+		if rumor.PubKey != d.Key.PublicHex {
+			c, err := d.Repo.Get(ctx, rumor.PubKey)
+			if err != nil || c.Tier == contacts.TierBlocked {
+				d.Log.Debug("dropped non-contact / blocked", "from", rumor.PubKey)
+				return
+			}
 		}
 		msg := inbox.Message{
 			EventID:    ev.ID,
