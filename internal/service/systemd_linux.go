@@ -149,16 +149,6 @@ func (s *systemd) Status(ctx context.Context) ([]Status, error) {
 	return out, nil
 }
 
-// writeUnitIfChanged writes content to path only when it differs from the
-// existing file. Avoids gratuitous mtime updates and unit reloads.
-func writeUnitIfChanged(path, content string) error {
-	existing, err := os.ReadFile(path)
-	if err == nil && string(existing) == content {
-		return nil
-	}
-	return os.WriteFile(path, []byte(content), 0o644)
-}
-
 func (s *systemd) daemonUnit() string {
 	envLine := ""
 	if s.cfg.StateDir != "" {
