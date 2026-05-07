@@ -61,6 +61,15 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
+// LoadWithMeta is Load + the BurntSushi/toml MetaData so callers can
+// distinguish "field absent" from "field present with zero value". Used by
+// v0.4 state-directory detection in cmd/eidos/gate.
+func LoadWithMeta(path string) (Config, toml.MetaData, error) {
+	cfg := Defaults()
+	meta, err := toml.DecodeFile(path, &cfg)
+	return cfg, meta, err
+}
+
 func Save(path string, cfg Config) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
