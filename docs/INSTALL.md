@@ -122,29 +122,47 @@ next steps:
 ## Start the daemon and relay
 
 ```sh
-eidos gate start    # installs systemd user units, enables and starts both
+eidos gate start    # installs OS service units and starts both
 eidos gate status   # show installed / enabled / active state per unit
 eidos gate stop     # stop without uninstalling
 ```
 
-`start` writes `eidos-gate-daemon.service` and `eidos-gate-relay.service`
-under `~/.config/systemd/user/`, then `systemctl --user enable --now`s them.
-The units restart on failure and survive your shell exiting. To survive a
-full logout (e.g., on a headless server), enable lingering once for your
-user: `loginctl enable-linger <username>`.
+`start` writes the appropriate unit files for your OS and asks the OS
+service manager to enable + start them. Both units restart on non-zero
+exit (`Restart=on-failure` on systemd; `KeepAlive`+`SuccessfulExit=false`
+on launchd) so a clean `eidos gate stop` actually stops, while a crash
+brings the service back automatically.
+
+| OS | Service manager | User-mode unit path | System-mode unit path |
+|---|---|---|---|
+| Linux | systemd | `~/.config/systemd/user/eidos-gate-{daemon,relay}.service` | `/etc/systemd/system/eidos-gate-{daemon,relay}.service` |
+| macOS | launchd | `~/Library/LaunchAgents/eidos-gate-{daemon,relay}.plist` | `/Library/LaunchDaemons/eidos-gate-{daemon,relay}.plist` |
+
+On Linux user-mode, services survive your shell exiting; for a full
+logout-survives experience on a headless host, run
+`loginctl enable-linger <username>` once. macOS LaunchAgents auto-start at
+GUI login.
 
 The default relay binds `127.0.0.1:22895`. To accept inbound from a peer on
 another host, change `relay.listen` in `config.toml` to `0.0.0.0:22895` (and
 configure firewall / DNS accordingly). The relay also requires
 `relay.public_url` to be set to the externally reachable WebSocket URL so
 that your card URI is correct. After config changes, run `eidos gate start`
-again — it re-applies the unit files and is idempotent — or restart with
-`systemctl --user restart eidos-gate-{daemon,relay}`.
+again — it re-applies the unit files and is idempotent.
+
+### Logs
+
+- Linux: `journalctl --user -u eidos-gate-daemon` (and similarly for relay)
+  or `journalctl -u ...` for `--system`.
+- macOS: launchd does not aggregate logs the way journald does, so the
+  plist redirects stdout / stderr to
+  `<state-dir>/logs/eidos-gate-{daemon,relay}.log`. Tail with
+  `tail -f ~/.eidos/gate/logs/eidos-gate-daemon.log`.
 
 ### System-wide install
 
-For shared / production hosts, write units to `/etc/systemd/system/`
-instead so they survive across users and start at boot:
+For shared / production hosts, run with `--system` so units land in the
+system path (and survive across users / reboots):
 
 ```sh
 sudo eidos gate start --system
@@ -152,14 +170,15 @@ sudo eidos gate status --system
 sudo eidos gate stop --system
 ```
 
-System-mode units run as root by default; tighten with a dedicated
-service-level `User=` directive if you need least-privilege.
+System-mode units run as root by default; tighten with the appropriate
+`User=` (systemd) or `UserName` (launchd) directive if you need
+least-privilege.
 
 ### Foreground mode
 
-The original `eidos gate daemon` and `eidos gate relay` commands still work
-and run in the foreground — useful for debugging or for environments
-without systemd. They are exactly what `eidos gate start`'s units invoke.
+The original `eidos gate daemon` and `eidos gate relay` commands still
+work and run in the foreground — useful for debugging or on hosts without
+systemd / launchd. They are exactly what `eidos gate start`'s units invoke.
 
 ## Backup
 
@@ -179,10 +198,12 @@ eidos gate purge          # confirms first
 eidos gate purge --yes    # for scripts / CI
 ```
 
-`purge` stops the services, removes the systemd unit files, reloads
-systemd, and deletes the gate state directory (key, state.db, config.toml,
-relay/). It is idempotent on partially-installed setups, so it is safe to
-run as a teardown step in test harnesses.
+`purge` stops the services, removes the OS service unit files (systemd
+.service or launchd .plist depending on platform), reloads the service
+manager where applicable, and deletes the gate state directory (key,
+state.db, config.toml, relay/, and the launchd `logs/` directory). It is
+idempotent on partially-installed setups, so it is safe to run as a
+teardown step in test harnesses.
 
 ## Resetting to a fresh identity
 

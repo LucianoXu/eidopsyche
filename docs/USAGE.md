@@ -33,21 +33,32 @@ $ eidos gate start
   eidos-gate-relay       active  pid=4131
 ```
 
-`eidos gate start` installs systemd user units for the daemon and relay and
-brings both up. They survive your shell exiting; on a headless server, run
-`loginctl enable-linger <username>` once to keep them running across full
-logouts. Use `eidos gate status` to check, `eidos gate stop` to halt without
-uninstalling, and `eidos gate purge` to remove everything. Append `--system`
-to any of these to manage `/etc/systemd/system/` units instead of user
-units (requires root).
+`eidos gate start` installs the appropriate OS service units for the
+daemon and relay and brings both up: systemd units on Linux
+(`~/.config/systemd/user/`), launchd plists on macOS
+(`~/Library/LaunchAgents/`). Use `eidos gate status` to check,
+`eidos gate stop` to halt without uninstalling, and `eidos gate purge` to
+remove everything. Append `--system` to any of these to install to the
+system path (`/etc/systemd/system/` or `/Library/LaunchDaemons/`,
+respectively) — requires root.
+
+On Linux user-mode, services survive your shell exiting; for survival
+across a full logout on a headless host, run
+`loginctl enable-linger <username>` once. macOS LaunchAgents auto-start
+at GUI login.
 
 For ad-hoc / debugging runs, the original `eidos gate daemon` and
-`eidos gate relay` foreground commands still work — those are exactly what
-the systemd units invoke.
+`eidos gate relay` foreground commands still work — those are exactly
+what the OS service units invoke.
 
-The daemon logs to stderr (visible via `journalctl --user -u eidos-gate-daemon`):
-`eidos-gate-daemon starting state_dir=...`. The relay logs:
-`eidos-gate-relay listening 127.0.0.1:22895 mode=paired`.
+Logs:
+- Linux: `journalctl --user -u eidos-gate-daemon` (or `-u ...` for
+  `--system` mode).
+- macOS: launchd redirects stdout/stderr to
+  `<state-dir>/logs/eidos-gate-{daemon,relay}.log`.
+
+Daemon startup line: `eidos-gate-daemon starting state_dir=...`. Relay
+startup line: `eidos-gate-relay listening 127.0.0.1:22895 mode=paired`.
 
 ## Step 2 — Each prints their card
 
@@ -93,12 +104,14 @@ $ eidos gate inbox --tail
 ## Other commands
 
 Service lifecycle:
-- `eidos gate start` — install + start the daemon and relay as systemd units
+- `eidos gate start` — install + start the daemon and relay as OS service
+  units (systemd on Linux, launchd on macOS)
 - `eidos gate stop` — stop without uninstalling
 - `eidos gate status` — show installed / enabled / active state per unit
 - `eidos gate purge` — stop, uninstall units, and delete the state directory
   (`--yes` skips the confirmation prompt; `--system` operates on
-  `/etc/systemd/system/` units instead of user units)
+  the system path — `/etc/systemd/system/` on Linux,
+  `/Library/LaunchDaemons/` on macOS — instead of user units)
 
 Foreground (debug) mode:
 - `eidos gate daemon` — run the daemon in the foreground
