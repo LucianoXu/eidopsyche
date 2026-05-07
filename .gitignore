@@ -30,5 +30,8 @@ coverage.out
 # Claude Code worktrees / scratch (never commit; created by `git worktree add`)
 /.claude/
 
+# Superpowers brainstorming session scratch (mockups, server state)
+/.superpowers/
+
 # Notebook Ideas
 /NOTEBOOK.md
