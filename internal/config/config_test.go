@@ -70,6 +70,16 @@ func TestRelayEnabledHelper(t *testing.T) {
 	}
 }
 
+func TestDefaults_Dashboard(t *testing.T) {
+	d := Defaults()
+	if !d.Dashboard.Enabled {
+		t.Error("dashboard enabled by default")
+	}
+	if d.Dashboard.Listen != "127.0.0.1:22893" {
+		t.Errorf("dashboard listen default: got %q want 127.0.0.1:22893", d.Dashboard.Listen)
+	}
+}
+
 func TestSaveLoadRoundtrip(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "config.toml")
