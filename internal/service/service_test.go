@@ -189,3 +189,42 @@ func TestConfigWithRelayDefault(t *testing.T) {
 		t.Errorf("zero-value Config.WithRelay = true, want false")
 	}
 }
+
+func TestSystemdInstallDaemonOnly(t *testing.T) {
+	tmp := t.TempDir()
+	mgr := &systemd{cfg: Config{
+		BinaryPath: "/usr/local/bin/eidos",
+		StateDir:   "/tmp/test-state",
+		Scope:      ScopeUser,
+		UnitDir:    tmp,
+		WithRelay:  false,
+	}}
+	// Install short-circuits the systemctl daemon-reload on this stubbed
+	// path because PATH won't have systemctl in the test env. The file
+	// writes happen first; we only check those.
+	_ = mgr.Install(context.Background())
+	if _, err := os.Stat(filepath.Join(tmp, DaemonUnitName+".service")); err != nil {
+		t.Errorf("daemon unit not written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, RelayUnitName+".service")); !os.IsNotExist(err) {
+		t.Errorf("relay unit was written despite WithRelay=false; err=%v", err)
+	}
+}
+
+func TestSystemdInstallBothUnits(t *testing.T) {
+	tmp := t.TempDir()
+	mgr := &systemd{cfg: Config{
+		BinaryPath: "/usr/local/bin/eidos",
+		StateDir:   "/tmp/test-state",
+		Scope:      ScopeUser,
+		UnitDir:    tmp,
+		WithRelay:  true,
+	}}
+	_ = mgr.Install(context.Background())
+	if _, err := os.Stat(filepath.Join(tmp, DaemonUnitName+".service")); err != nil {
+		t.Errorf("daemon unit not written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, RelayUnitName+".service")); err != nil {
+		t.Errorf("relay unit not written despite WithRelay=true: %v", err)
+	}
+}

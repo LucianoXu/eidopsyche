@@ -66,8 +66,10 @@ func (s *systemd) Install(ctx context.Context) error {
 	if err := writeUnitIfChanged(filepath.Join(dir, DaemonUnitName+".service"), s.daemonUnit()); err != nil {
 		return err
 	}
-	if err := writeUnitIfChanged(filepath.Join(dir, RelayUnitName+".service"), s.relayUnit()); err != nil {
-		return err
+	if s.cfg.WithRelay {
+		if err := writeUnitIfChanged(filepath.Join(dir, RelayUnitName+".service"), s.relayUnit()); err != nil {
+			return err
+		}
 	}
 	if out, err := s.systemctl(ctx, "daemon-reload"); err != nil {
 		return fmt.Errorf("systemctl daemon-reload: %w (output: %s)", err, strings.TrimSpace(string(out)))
@@ -79,7 +81,12 @@ func (s *systemd) Start(ctx context.Context) error {
 	if err := s.Install(ctx); err != nil {
 		return err
 	}
-	out, err := s.systemctl(ctx, "enable", "--now", DaemonUnitName, RelayUnitName)
+	units := []string{DaemonUnitName}
+	if s.cfg.WithRelay {
+		units = append(units, RelayUnitName)
+	}
+	args := append([]string{"enable", "--now"}, units...)
+	out, err := s.systemctl(ctx, args...)
 	if err != nil {
 		return fmt.Errorf("systemctl enable --now: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}
