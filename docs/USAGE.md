@@ -187,6 +187,45 @@ NIP-17 client that sends raw text) are persisted in your inbox marked as
 `[malformed: not_envelope]` and are not delivered to your mind-form. See
 the spec at `docs/superpowers/specs/2026-05-07-envelope-v1-design.md`.
 
+## Web Dashboard
+
+The daemon serves a local web dashboard at `http://127.0.0.1:22893` whenever
+it is running. It is **loopback-only** by default — anyone with shell access
+to the host already has access to your gate state, so the dashboard inherits
+that trust boundary and adds no auth on top.
+
+Open the dashboard:
+
+```
+$ eidos gate dashboard
+http://127.0.0.1:22893
+# (browser opens)
+```
+
+Use `--no-open` for a headless host:
+
+```
+$ eidos gate dashboard --no-open
+http://127.0.0.1:22893
+```
+
+If `eidos gate dashboard` errors with "dashboard not reachable", start the
+daemon first (`eidos gate start` or `eidos gate daemon`).
+
+Disable the dashboard entirely by setting `[dashboard] enabled = false` in
+`config.toml`. Non-loopback bind (e.g. `0.0.0.0:22893`) is refused in v1
+with an error log line; for remote access, use SSH port-forwarding:
+
+```
+$ ssh -L 22893:localhost:22893 user@your-server
+$ open http://localhost:22893    # in another terminal on your laptop
+```
+
+What's in v1: chat thread per contact (primary), all-messages /
+soft-rejected list views, in-place compose, compose-to-npub for new
+recipients. Setup actions (`init`, contact / relay / invite management,
+label changes) stay in the CLI.
+
 ## Other commands
 
 Service lifecycle:
