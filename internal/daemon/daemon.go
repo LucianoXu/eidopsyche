@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,6 +18,7 @@ import (
 	"github.com/yingtexu/eidopsyche/internal/contacts"
 	"github.com/yingtexu/eidopsyche/internal/identity"
 	"github.com/yingtexu/eidopsyche/internal/inbox"
+	"github.com/yingtexu/eidopsyche/internal/invitedb"
 	"github.com/yingtexu/eidopsyche/internal/ipc"
 	"github.com/yingtexu/eidopsyche/internal/nostr"
 	"github.com/yingtexu/eidopsyche/internal/store"
@@ -28,6 +31,7 @@ type Daemon struct {
 	Key      *identity.Keypair
 	DB       *store.DB
 	Repo     *contacts.Repo
+	Invites  *invitedb.Repo
 	Box      *inbox.Store
 	Pool     *nostr.Pool
 	Log      *slog.Logger
@@ -65,6 +69,7 @@ func Start(stateDir string) (*Daemon, error) {
 		Key:         k,
 		DB:          db,
 		Repo:        contacts.New(db),
+		Invites:     invitedb.New(db),
 		Box:         inbox.New(stateDir),
 		Pool:        nostr.NewPool(),
 		Log:         slog.New(slog.NewJSONHandler(os.Stderr, nil)),
@@ -256,7 +261,7 @@ func (d *Daemon) subscriptionURLs(ctx context.Context) ([]string, error) {
 }
 
 // handleIncoming processes a single inbound gift-wrap event: deduplication,
-// unwrap, contact filter, inbox append, and subscriber broadcast.
+// unwrap, and dispatch by inner rumor kind.
 func (d *Daemon) handleIncoming(ctx context.Context, ev *gnostr.Event) {
 	d.mu.Lock()
 	if _, dup := d.dedupe[ev.ID]; dup {
@@ -280,6 +285,20 @@ func (d *Daemon) handleIncoming(ctx context.Context, ev *gnostr.Event) {
 		d.Log.Debug("self-copy echo dropped (sender=self)", "event_id", ev.ID)
 		return
 	}
+
+	switch rumor.Kind {
+	case 14:
+		d.handleChatMessage(ctx, ev, rumor)
+	case 25001:
+		d.handleInviteRedemption(ctx, ev, rumor)
+	default:
+		d.Log.Warn("ignored unknown rumor kind", "kind", rumor.Kind, "from", rumor.PubKey)
+	}
+}
+
+// handleChatMessage is the existing chat message path: contact filter, inbox
+// append, broadcast.
+func (d *Daemon) handleChatMessage(ctx context.Context, ev *gnostr.Event, rumor *gnostr.Event) {
 	c, err := d.Repo.Get(ctx, rumor.PubKey)
 	if err != nil || c.Tier == contacts.TierBlocked {
 		d.Log.Debug("dropped non-contact / blocked", "from", rumor.PubKey)
@@ -299,6 +318,114 @@ func (d *Daemon) handleIncoming(ctx context.Context, ev *gnostr.Event) {
 		return
 	}
 	d.broadcastInbox(msg)
+}
+
+// handleInviteRedemption processes an incoming kind:25001 invite-redemption rumor.
+func (d *Daemon) handleInviteRedemption(ctx context.Context, _ *gnostr.Event, rumor *gnostr.Event) {
+	var body struct {
+		V                 int    `json:"v"`
+		InviteID          string `json:"invite_id"`
+		RedeemerRelay     string `json:"redeemer_relay"`
+		RedeemerLabelHint string `json:"redeemer_label_hint"`
+	}
+	if err := json.Unmarshal([]byte(rumor.Content), &body); err != nil {
+		d.Log.Warn("invite redemption: malformed content", "from", rumor.PubKey, "err", err)
+		return
+	}
+	if body.InviteID == "" {
+		d.Log.Warn("invite redemption: missing invite_id", "from", rumor.PubKey)
+		return
+	}
+
+	inv, err := d.Invites.Get(ctx, body.InviteID)
+	if err != nil {
+		d.Log.Info("invite redemption: invite not found", "invite_id", body.InviteID)
+		return
+	}
+
+	if inv.Status == invitedb.StatusRevoked {
+		d.Log.Info("invite redemption: invite is revoked", "invite_id", body.InviteID)
+		return
+	}
+
+	now := time.Now()
+	if !inv.ExpiresAt.IsZero() && now.After(inv.ExpiresAt) {
+		_ = d.Invites.MarkExpired(ctx, body.InviteID)
+		d.Log.Info("invite redemption: invite has expired", "invite_id", body.InviteID)
+		return
+	}
+	if inv.MaxUses != 0 && inv.Uses >= inv.MaxUses {
+		_ = d.Invites.MarkExpired(ctx, body.InviteID)
+		d.Log.Info("invite redemption: invite exhausted", "invite_id", body.InviteID)
+		return
+	}
+
+	updated, err := d.Invites.RecordRedemption(ctx, body.InviteID, rumor.PubKey)
+	if err != nil {
+		if errors.Is(err, invitedb.ErrAlreadyRedeemed) {
+			d.Log.Info("invite redemption: already redeemed by this key", "from", rumor.PubKey)
+			return
+		}
+		d.Log.Error("invite redemption: record failed", "err", err)
+		return
+	}
+
+	// Determine label for the new contact.
+	label := inv.RedeemerLabel
+	if label == "" {
+		label = body.RedeemerLabelHint
+	}
+	if label == "" {
+		shortID := body.InviteID
+		if len(shortID) > 8 {
+			shortID = shortID[:8]
+		}
+		label = fmt.Sprintf("invitee-%s", shortID)
+	}
+
+	// Add the redeemer as a contact (idempotent: ErrExists is OK).
+	var relays []string
+	if body.RedeemerRelay != "" {
+		relays = []string{body.RedeemerRelay}
+	}
+	addErr := d.Repo.Add(ctx, contacts.Contact{
+		Pubkey: rumor.PubKey,
+		Label:  label,
+		Tier:   contacts.TierFriend,
+		Relays: relays,
+	})
+	if addErr != nil && !errors.Is(addErr, contacts.ErrExists) {
+		d.Log.Error("invite redemption: add contact failed", "err", addErr)
+		return
+	}
+
+	// If uses now equal max_uses (and unlimited is not in effect), expire the invite.
+	if updated.MaxUses != 0 && updated.Uses >= updated.MaxUses {
+		_ = d.Invites.MarkExpired(ctx, body.InviteID)
+	}
+
+	d.Refresh()
+
+	// Push contact.added event to inbox.tail subscribers.
+	npub, _ := identity.EncodeNpub(rumor.PubKey)
+	d.broadcastContactAdded(map[string]any{
+		"npub":      npub,
+		"pubkey":    rumor.PubKey,
+		"label":     label,
+		"source":    "invite",
+		"invite_id": body.InviteID,
+	})
+}
+
+// broadcastContactAdded pushes a contact.added push event to all live IPC subscribers.
+func (d *Daemon) broadcastContactAdded(data any) {
+	d.mu.Lock()
+	subs := make([]*ipc.Conn, len(d.subs))
+	copy(subs, d.subs)
+	d.mu.Unlock()
+	for _, c := range subs {
+		_ = c.PushEvent("contact.added", data)
+	}
 }
 
 // broadcastInbox pushes an inbox message to all live IPC subscribers.

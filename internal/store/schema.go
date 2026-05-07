@@ -42,4 +42,26 @@ CREATE VIEW IF NOT EXISTS relay_whitelist AS
   SELECT value AS pubkey FROM meta WHERE key = 'owner_pubkey';
 `
 
-const SchemaVersion = 1
+const SchemaVersion = 2
+
+const schemaV2 = `
+CREATE TABLE IF NOT EXISTS invites (
+  id              TEXT PRIMARY KEY,
+  created_at      INTEGER NOT NULL,
+  expires_at      INTEGER NOT NULL,
+  max_uses        INTEGER NOT NULL,
+  uses            INTEGER NOT NULL DEFAULT 0,
+  issuer_label    TEXT NOT NULL,
+  redeemer_label  TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'active'
+                  CHECK(status IN ('active','expired','revoked'))
+);
+CREATE TABLE IF NOT EXISTS invite_redemptions (
+  invite_id       TEXT NOT NULL,
+  redeemer_pk     TEXT NOT NULL,
+  redeemed_at     INTEGER NOT NULL,
+  PRIMARY KEY (invite_id, redeemer_pk),
+  FOREIGN KEY (invite_id) REFERENCES invites(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_invites_status ON invites(status, expires_at);
+`

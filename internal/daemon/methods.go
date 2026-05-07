@@ -12,6 +12,8 @@ import (
 	"github.com/yingtexu/eidopsyche/internal/contacts"
 	"github.com/yingtexu/eidopsyche/internal/identity"
 	"github.com/yingtexu/eidopsyche/internal/inbox"
+	"github.com/yingtexu/eidopsyche/internal/invite"
+	"github.com/yingtexu/eidopsyche/internal/invitedb"
 	"github.com/yingtexu/eidopsyche/internal/ipc"
 	"github.com/yingtexu/eidopsyche/internal/nostr"
 )
@@ -32,6 +34,10 @@ func init() {
 	register("outbox.list", outboxList)
 	register("version", versionMethod)
 	register("subscribe.refresh", subscribeRefresh)
+	register("invite.create", inviteCreate)
+	register("invite.list", inviteList)
+	register("invite.revoke", inviteRevoke)
+	register("invite.redeem", inviteRedeem)
 }
 
 // whoami returns our public identity plus configured home relays.
@@ -437,6 +443,261 @@ func resolveTarget(ctx context.Context, d *Daemon, input string) (string, *ipc.E
 		return "", internalErr(err)
 	}
 	return c.Pubkey, nil
+}
+
+// inviteCreate creates a new invite token.
+func inviteCreate(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p struct {
+		SingleUse      bool   `json:"single_use"`
+		MaxUses        int    `json:"max_uses"`
+		ExpiresSeconds int64  `json:"expires_seconds"`
+		IssuerLabel    string `json:"issuer_label"`
+		RedeemerLabel  string `json:"redeemer_label"`
+		Unlimited      bool   `json:"unlimited"`
+	}
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+		}
+	}
+
+	maxUses := p.MaxUses
+	if p.Unlimited {
+		maxUses = 0
+	} else if maxUses == 0 && !p.Unlimited {
+		// Default to single-use when no explicit max_uses or unlimited.
+		maxUses = 1
+	}
+	if p.SingleUse {
+		maxUses = 1
+	}
+
+	var expiresAt int64
+	switch {
+	case p.ExpiresSeconds < 0:
+		expiresAt = 0 // no expiry
+	case p.ExpiresSeconds == 0:
+		expiresAt = time.Now().Add(7 * 24 * time.Hour).Unix() // default 7d
+	default:
+		expiresAt = time.Now().Add(time.Duration(p.ExpiresSeconds) * time.Second).Unix()
+	}
+
+	issuerLabel := p.IssuerLabel
+	if issuerLabel == "" {
+		issuerLabel, _ = d.DB.GetMeta(ctx, "label")
+	}
+
+	var homeRelay string
+	_ = d.DB.QueryRowContext(ctx,
+		`SELECT relay_url FROM own_relays WHERE role='home' LIMIT 1`).Scan(&homeRelay)
+
+	id, err := invite.RandomID()
+	if err != nil {
+		return nil, internalErr(err)
+	}
+
+	payload := invite.Payload{
+		V:                 1,
+		IssuerNpub:        d.Key.Npub,
+		IssuerRelay:       homeRelay,
+		IssuerLabelHint:   issuerLabel,
+		RedeemerLabelHint: p.RedeemerLabel,
+		ID:                id,
+		ExpiresAt:         expiresAt,
+		MaxUses:           maxUses,
+	}
+	if err := payload.Sign(d.Key.PrivateHex); err != nil {
+		return nil, internalErr(err)
+	}
+
+	uri, err := payload.Encode()
+	if err != nil {
+		return nil, internalErr(err)
+	}
+
+	inv := invitedb.Invite{
+		ID:            id,
+		CreatedAt:     time.Now(),
+		MaxUses:       maxUses,
+		IssuerLabel:   issuerLabel,
+		RedeemerLabel: p.RedeemerLabel,
+	}
+	if expiresAt != 0 {
+		inv.ExpiresAt = time.Unix(expiresAt, 0)
+	}
+	if err := d.Invites.Insert(ctx, inv); err != nil {
+		return nil, internalErr(err)
+	}
+
+	return map[string]any{
+		"id":         id,
+		"uri":        uri,
+		"expires_at": expiresAt,
+		"max_uses":   maxUses,
+	}, nil
+}
+
+// inviteList returns invites filtered by status.
+func inviteList(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p struct {
+		Status string `json:"status"`
+	}
+	if len(params) > 0 {
+		_ = json.Unmarshal(params, &p)
+	}
+	invites, err := d.Invites.List(ctx, p.Status)
+	if err != nil {
+		return nil, internalErr(err)
+	}
+	out := make([]map[string]any, 0, len(invites))
+	for _, inv := range invites {
+		var expiresAt int64
+		if !inv.ExpiresAt.IsZero() {
+			expiresAt = inv.ExpiresAt.Unix()
+		}
+		out = append(out, map[string]any{
+			"id":             inv.ID,
+			"created_at":     inv.CreatedAt.Unix(),
+			"expires_at":     expiresAt,
+			"max_uses":       inv.MaxUses,
+			"uses":           inv.Uses,
+			"status":         string(inv.Status),
+			"issuer_label":   inv.IssuerLabel,
+			"redeemer_label": inv.RedeemerLabel,
+		})
+	}
+	return out, nil
+}
+
+// inviteRevoke revokes an invite by id prefix.
+func inviteRevoke(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p struct {
+		IDPrefix string `json:"id_prefix"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	if p.IDPrefix == "" {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: "id_prefix required"}
+	}
+	inv, err := d.Invites.FindByPrefix(ctx, p.IDPrefix)
+	if err != nil {
+		if errors.Is(err, invitedb.ErrNotFound) {
+			return nil, &ipc.Error{Code: ipc.ErrInviteInvalidToken, Message: "invite not found"}
+		}
+		if errors.Is(err, invitedb.ErrPrefixAmbiguous) {
+			return nil, &ipc.Error{Code: ipc.ErrInvitePrefixAmbiguous, Message: "prefix matches multiple invites"}
+		}
+		return nil, internalErr(err)
+	}
+	if err := d.Invites.MarkRevoked(ctx, inv.ID); err != nil {
+		return nil, internalErr(err)
+	}
+	return map[string]any{
+		"ok":      true,
+		"full_id": inv.ID,
+	}, nil
+}
+
+// inviteRedeem redeems an invite token: verifies it, adds the issuer as a
+// contact, publishes a kind:25001 gift wrap to the issuer's relay.
+func inviteRedeem(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	payload, err := invite.Decode(p.Token)
+	if err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInviteInvalidToken, Message: err.Error()}
+	}
+	if err := payload.Verify(); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInviteInvalidToken, Message: err.Error()}
+	}
+	if payload.ExpiresAt != 0 && time.Now().Unix() >= payload.ExpiresAt {
+		return nil, &ipc.Error{Code: ipc.ErrInviteExpired, Message: "invite has expired"}
+	}
+
+	issuerHex, err := identity.DecodeNpub(payload.IssuerNpub)
+	if err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidNpub, Message: err.Error()}
+	}
+
+	// Add issuer as contact (idempotent).
+	contact := contacts.Contact{
+		Pubkey: issuerHex,
+		Label:  payload.IssuerLabelHint,
+		Tier:   contacts.TierFriend,
+		Relays: []string{payload.IssuerRelay},
+	}
+	if addErr := d.Repo.Add(ctx, contact); addErr != nil && !errors.Is(addErr, contacts.ErrExists) {
+		return nil, internalErr(addErr)
+	}
+
+	// Get our own home relay for the redemption message.
+	var ownHomeRelay string
+	_ = d.DB.QueryRowContext(ctx,
+		`SELECT relay_url FROM own_relays WHERE role='home' LIMIT 1`).Scan(&ownHomeRelay)
+
+	rumorContent := map[string]any{
+		"v":                   1,
+		"invite_id":           payload.ID,
+		"redeemer_relay":      ownHomeRelay,
+		"redeemer_label_hint": payload.RedeemerLabelHint,
+	}
+	rb, _ := json.Marshal(rumorContent)
+
+	wrap, _, err := nostr.WrapKind(d.Key.PrivateHex, issuerHex, string(rb), 25001)
+	if err != nil {
+		return nil, internalErr(err)
+	}
+
+	// Self-copy (dedupe suppression on echo).
+	selfWrap, _, _ := nostr.WrapKind(d.Key.PrivateHex, d.Key.PublicHex, string(rb), 25001)
+	d.recordSelfWrap(selfWrap.ID)
+
+	// Collect publish targets: issuer relay + own relays + fallbacks.
+	targets := map[string]struct{}{payload.IssuerRelay: {}}
+	rows, _ := d.DB.QueryContext(ctx, `SELECT relay_url FROM own_relays`)
+	if rows != nil {
+		for rows.Next() {
+			var u string
+			_ = rows.Scan(&u)
+			targets[u] = struct{}{}
+		}
+		rows.Close()
+	}
+	for _, u := range d.Cfg.Publish.FallbackRelays {
+		targets[u] = struct{}{}
+	}
+	urls := make([]string, 0, len(targets))
+	for u := range targets {
+		urls = append(urls, u)
+	}
+
+	pubCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	res := d.Pool.Publish(pubCtx, urls, wrap)
+	_ = d.Pool.Publish(pubCtx, urls, selfWrap)
+
+	accepted := []string{}
+	for _, r := range res {
+		if r.OK {
+			accepted = append(accepted, r.Relay)
+		}
+	}
+	if len(accepted) == 0 {
+		return nil, &ipc.Error{Code: ipc.ErrNoRelaysReachable, Message: "issuer relay unreachable"}
+	}
+
+	d.Refresh()
+
+	return map[string]any{
+		"issuer_npub":  payload.IssuerNpub,
+		"issuer_relay": payload.IssuerRelay,
+		"accepted_by":  accepted,
+	}, nil
 }
 
 // isHex64 returns true if s is exactly 64 lowercase hexadecimal characters.

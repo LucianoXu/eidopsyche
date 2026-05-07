@@ -20,13 +20,20 @@ import (
 //
 // Returns the wrap event, the inner rumor's ID, and any error.
 func Wrap(senderSK, recipientPK, content string) (wrap *gnostr.Event, rumorID string, err error) {
+	return WrapKind(senderSK, recipientPK, content, gnostr.KindDirectMessage)
+}
+
+// WrapKind builds a NIP-17 gift wrap with a custom inner rumor kind.
+// senderSK and recipientPK are hex-encoded. The kind field is set on the inner
+// rumor before encrypting; the outer wrap is always kind 1059 per NIP-17.
+func WrapKind(senderSK, recipientPK, content string, kind int) (wrap *gnostr.Event, rumorID string, err error) {
 	senderPK, err := gnostr.GetPublicKey(senderSK)
 	if err != nil {
 		return nil, "", fmt.Errorf("derive sender pubkey: %w", err)
 	}
 
 	rumor := gnostr.Event{
-		Kind:      gnostr.KindDirectMessage, // kind 14
+		Kind:      kind,
 		Content:   content,
 		Tags:      gnostr.Tags{gnostr.Tag{"p", recipientPK}},
 		CreatedAt: gnostr.Now(),

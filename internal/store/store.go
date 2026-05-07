@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strconv"
 
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" //nolint:blank-imports
 )
 
 type DB struct {
@@ -35,16 +35,11 @@ func (db *DB) Migrate(ctx context.Context) error {
 	if _, err := db.ExecContext(ctx, schemaV1); err != nil {
 		return fmt.Errorf("apply schema v1: %w", err)
 	}
-	current, err := db.SchemaVersion(ctx)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
+	if _, err := db.ExecContext(ctx, schemaV2); err != nil {
+		return fmt.Errorf("apply schema v2: %w", err)
 	}
-	if current == 0 {
-		_, err := db.ExecContext(ctx,
-			`INSERT INTO meta(key,value) VALUES('schema_version', ?)`, strconv.Itoa(SchemaVersion))
-		if err != nil {
-			return fmt.Errorf("write schema_version: %w", err)
-		}
+	if err := db.SetMeta(ctx, "schema_version", strconv.Itoa(SchemaVersion)); err != nil {
+		return fmt.Errorf("write schema_version: %w", err)
 	}
 	return nil
 }

@@ -111,6 +111,44 @@ you to use the npub instead. `add-contact` continues to take only an npub or a
 `mindgate://` URI — labels are an output convenience, not a way to introduce
 new identities.
 
+## Inviting a contact (one-step)
+
+The `add-contact` flow requires both sides to exchange and add each other manually. For most cases, an **invite** does it in one OOB hop:
+
+```
+# Alice creates an invite (default: single-use, expires in 7 days)
+$ mindgate invite create --issuer-label "Alice" --redeemer-label "Bob"
+mindgate-invite://eyJ2IjoxLCJpc3N1ZXJfbnB1YiI6Im5wdWIxYWxpY2UuLi4i...
+id=ab12cd34ef56  max_uses=1  expires=2026-05-14T22:14:01+00:00
+
+# Alice sends the URI to Bob via Signal/email/etc.
+# Bob runs:
+$ mindgate redeem mindgate-invite://eyJ2IjoxLCJp...
+redeemed: npub1alice...
+relay:    ws://alice.host:22895
+accepted_by:
+  ws://alice.host:22895
+  ws://127.0.0.1:22895
+```
+
+Both ends now have each other in `contacts`. Alice sees a `contact.added` event in `mindgate inbox --tail` if she's listening.
+
+Reusable invites:
+
+```
+mindgate invite create --max-uses 5 --expires 24h --issuer-label "Alice"
+mindgate invite create --unlimited --no-expiry          # for a public-ish self-promo
+```
+
+Manage:
+
+```
+mindgate invite list
+mindgate invite revoke <id-prefix>     # 12 chars usually unique
+```
+
+The token is a self-contained signed credential. Anyone who holds it can redeem (until exhausted/revoked/expired); share it only via channels you trust.
+
 ## Running two instances on one host (debugging)
 
 Each instance needs its own state directory and its own relay port:
