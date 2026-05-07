@@ -1,15 +1,17 @@
 package inbox
 
 type Message struct {
-	V          int      `json:"v"`
-	EventID    string   `json:"event_id"`
-	InnerID    string   `json:"inner_id,omitempty"`
-	From       string   `json:"from"`
-	Kind       int      `json:"kind"`
-	Content    string   `json:"content"`
-	RumorAt    int64    `json:"rumor_at"`
-	ReceivedAt int64    `json:"received_at"`
-	Relays     []string `json:"relays,omitempty"`
+	V            int      `json:"v"`
+	EventID      string   `json:"event_id"`
+	InnerID      string   `json:"inner_id,omitempty"`
+	From         string   `json:"from"`
+	Kind         int      `json:"kind"`
+	Content      string   `json:"content"`
+	RumorAt      int64    `json:"rumor_at"`
+	ReceivedAt   int64    `json:"received_at"`
+	Relays       []string `json:"relays,omitempty"`
+	Malformed    bool     `json:"malformed,omitempty"`
+	RejectReason string   `json:"reject_reason,omitempty"`
 }
 
 type Sent struct {

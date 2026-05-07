@@ -15,12 +15,14 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
+	"github.com/LucianoXu/eidopsyche/internal/envelope"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
 	"github.com/LucianoXu/eidopsyche/internal/invitedb"
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
 	"github.com/LucianoXu/eidopsyche/internal/nostr"
 	"github.com/LucianoXu/eidopsyche/internal/store"
+	"github.com/LucianoXu/eidopsyche/internal/version"
 )
 
 // Daemon holds all runtime state for a running MindGate instance.
@@ -35,11 +37,17 @@ type Daemon struct {
 	Pool     *nostr.Pool
 	Log      *slog.Logger
 
+	startedAt time.Time
+
 	kick        chan struct{}
 	mu          sync.Mutex
 	subs        []*ipc.Conn
 	dedupe      map[string]struct{}
 	selfWrapIDs map[string]struct{}
+
+	// testSendChatReply, if non-nil, replaces sendChatReply during tests
+	// to avoid actual NIP-17 publish over the network.
+	testSendChatReply func(ctx context.Context, toPubkey string, text string) error
 }
 
 // Start loads state from stateDir and initialises the daemon without yet
@@ -72,6 +80,7 @@ func Start(stateDir string) (*Daemon, error) {
 		Box:         inbox.New(stateDir),
 		Pool:        nostr.NewPool(),
 		Log:         slog.New(slog.NewJSONHandler(os.Stderr, nil)),
+		startedAt:   time.Now(),
 		kick:        make(chan struct{}, 1),
 		dedupe:      make(map[string]struct{}, 1024),
 		selfWrapIDs: make(map[string]struct{}, 1024),
@@ -280,14 +289,16 @@ func (d *Daemon) handleIncoming(ctx context.Context, ev *gnostr.Event) {
 		d.Log.Warn("unwrap failed", "event_id", ev.ID, "err", err)
 		return
 	}
-	if rumor.PubKey == d.Key.PublicHex {
-		d.Log.Debug("self-copy echo dropped (sender=self)", "event_id", ev.ID)
-		return
-	}
+
+	// Self-copy echo detection happens upstream via selfWrapIDs (matched on
+	// the outer wrap ID). We deliberately do NOT drop solely on
+	// rumor.PubKey == self.PublicHex here, because envelope-v1 commands are
+	// authorized only when sender == self (spec §5.1) and must reach
+	// dispatchEnvelope.
 
 	switch rumor.Kind {
 	case 14:
-		d.handleChatMessage(ctx, ev, rumor)
+		d.dispatchEnvelope(ctx, ev, rumor)
 	case 25001:
 		d.handleInviteRedemption(ctx, ev, rumor)
 	default:
@@ -295,28 +306,156 @@ func (d *Daemon) handleIncoming(ctx context.Context, ev *gnostr.Event) {
 	}
 }
 
-// handleChatMessage is the existing chat message path: contact filter, inbox
-// append, broadcast.
-func (d *Daemon) handleChatMessage(ctx context.Context, ev *gnostr.Event, rumor *gnostr.Event) {
-	c, err := d.Repo.Get(ctx, rumor.PubKey)
-	if err != nil || c.Tier == contacts.TierBlocked {
-		d.Log.Debug("dropped non-contact / blocked", "from", rumor.PubKey)
+// dispatchEnvelope decodes the kind:14 rumor's content as a v1 envelope and
+// dispatches per spec §9.1. Decode errors and forbidden combinations are
+// soft-rejected: persisted to inbox with Malformed=true and a RejectReason,
+// without triggering chat or command paths.
+func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *gnostr.Event) {
+	env, err := envelope.Decode(rumor.Content)
+	if err != nil {
+		reason := "schema_violation"
+		switch {
+		case errors.Is(err, envelope.ErrNotEnvelope):
+			reason = "not_envelope"
+		case errors.Is(err, envelope.ErrUnsupportedVersion):
+			reason = "unsupported_version"
+		}
+		d.persistSoftReject(ev, rumor, reason)
 		return
 	}
+
+	switch env.Type {
+	case envelope.TypeChat:
+		// Chats from self (e.g., command replies, self-notes) bypass the
+		// contact filter — self is always trusted.
+		if rumor.PubKey != d.Key.PublicHex {
+			c, err := d.Repo.Get(ctx, rumor.PubKey)
+			if err != nil || c.Tier == contacts.TierBlocked {
+				d.Log.Debug("dropped non-contact / blocked", "from", rumor.PubKey)
+				return
+			}
+		}
+		msg := inbox.Message{
+			EventID:    ev.ID,
+			InnerID:    rumor.ID,
+			From:       rumor.PubKey,
+			Kind:       rumor.Kind,
+			Content:    rumor.Content,
+			RumorAt:    int64(rumor.CreatedAt),
+			ReceivedAt: time.Now().Unix(),
+		}
+		if err := d.Box.AppendInbox(msg); err != nil {
+			d.Log.Error("append inbox", "err", err)
+			return
+		}
+		d.broadcastInbox(msg)
+
+	case envelope.TypeCommand:
+		if rumor.PubKey != d.Key.PublicHex {
+			d.persistSoftReject(ev, rumor, "unauthorized_command")
+			return
+		}
+		reply, ok, runErr := dispatchCommand(ctx, d, env.Command.Name, env.Command.Args)
+		if !ok {
+			d.persistSoftReject(ev, rumor, "unknown_command")
+			return
+		}
+		if runErr != nil {
+			reply = "error: " + runErr.Error()
+		}
+		if err := d.sendChatReply(ctx, rumor.PubKey, reply); err != nil {
+			d.Log.Warn("command reply failed", "err", err)
+		}
+	}
+}
+
+// persistSoftReject appends the rumor to inbox with Malformed=true and the
+// given reason, then broadcasts. The Content field stores rumor.Content
+// as-received so operators can debug interop issues.
+func (d *Daemon) persistSoftReject(ev *gnostr.Event, rumor *gnostr.Event, reason string) {
+	d.Log.Info("soft-reject", "reason", reason, "from", rumor.PubKey, "event_id", ev.ID)
 	msg := inbox.Message{
-		EventID:    ev.ID,
-		InnerID:    rumor.ID,
-		From:       rumor.PubKey,
-		Kind:       rumor.Kind,
-		Content:    rumor.Content,
-		RumorAt:    int64(rumor.CreatedAt),
-		ReceivedAt: time.Now().Unix(),
+		EventID:      ev.ID,
+		InnerID:      rumor.ID,
+		From:         rumor.PubKey,
+		Kind:         rumor.Kind,
+		Content:      rumor.Content,
+		RumorAt:      int64(rumor.CreatedAt),
+		ReceivedAt:   time.Now().Unix(),
+		Malformed:    true,
+		RejectReason: reason,
 	}
 	if err := d.Box.AppendInbox(msg); err != nil {
-		d.Log.Error("append inbox", "err", err)
+		d.Log.Error("append inbox (soft-reject)", "err", err)
 		return
 	}
 	d.broadcastInbox(msg)
+}
+
+// sendChatReply wraps text in a v1 chat envelope and publishes a NIP-17
+// gift wrap to the given pubkey (which, for v1 commands, is always self).
+// Returns an error when no relay accepts the publish so the caller can log
+// the failure; in tests, d.testSendChatReply takes precedence to avoid
+// network I/O.
+func (d *Daemon) sendChatReply(ctx context.Context, toPubkey string, text string) error {
+	if d.testSendChatReply != nil {
+		return d.testSendChatReply(ctx, toPubkey, text)
+	}
+	env := envelope.Envelope{
+		V:      envelope.SchemaVersion,
+		Type:   envelope.TypeChat,
+		Text:   text,
+		Client: &envelope.Client{Name: "eidos", Ver: version.Version},
+	}
+	content, err := envelope.Encode(env)
+	if err != nil {
+		return err
+	}
+	wrap, _, err := nostr.Wrap(d.Key.PrivateHex, toPubkey, content)
+	if err != nil {
+		return err
+	}
+	urls, err := d.ownRelayURLs(ctx)
+	if err != nil {
+		return fmt.Errorf("own relays: %w", err)
+	}
+	if len(urls) == 0 {
+		return errors.New("no own relays configured for reply")
+	}
+	publishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	res := d.Pool.Publish(publishCtx, urls, wrap)
+	for _, r := range res {
+		if r.OK {
+			return nil
+		}
+	}
+	return fmt.Errorf("publish failed on all %d relays", len(urls))
+}
+
+// ownRelayURLs returns the URLs from own_relays for command-reply publish.
+// Returns an error if the query or any row scan fails, so callers can
+// surface storage-layer problems rather than silently returning an empty
+// list (which would otherwise be indistinguishable from "no relays
+// configured").
+func (d *Daemon) ownRelayURLs(ctx context.Context) ([]string, error) {
+	rows, err := d.DB.QueryContext(ctx, `SELECT relay_url FROM own_relays`)
+	if err != nil {
+		return nil, fmt.Errorf("query own_relays: %w", err)
+	}
+	defer rows.Close()
+	var urls []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return nil, fmt.Errorf("scan own_relays: %w", err)
+		}
+		urls = append(urls, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate own_relays: %w", err)
+	}
+	return urls, nil
 }
 
 // handleInviteRedemption processes an incoming kind:25001 invite-redemption rumor.

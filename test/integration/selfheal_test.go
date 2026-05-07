@@ -12,6 +12,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/daemon"
+	"github.com/LucianoXu/eidopsyche/internal/envelope"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
 	"github.com/LucianoXu/eidopsyche/internal/relayd"
@@ -78,9 +79,10 @@ func TestSelfHealDaemonBeforeRelay(t *testing.T) {
 
 	aliceIPC := dialIPCDir(t, dirA)
 	var sendResp map[string]any
-	if e, err := aliceIPC.Call("send", map[string]string{
-		"to":      kB.Npub,
-		"content": "self-heal works",
+	chatEnv := envelope.Envelope{V: 1, Type: envelope.TypeChat, Text: "self-heal works"}
+	if e, err := aliceIPC.Call("send", map[string]any{
+		"to":       kB.Npub,
+		"envelope": chatEnv,
 	}, &sendResp); err != nil || e != nil {
 		t.Fatalf("send: %v %+v", err, e)
 	}
@@ -97,8 +99,13 @@ func TestSelfHealDaemonBeforeRelay(t *testing.T) {
 			}
 			var msg map[string]any
 			_ = json.Unmarshal(ev.Data, &msg)
-			if msg["content"] != "self-heal works" {
-				t.Fatalf("content mismatch: %v", msg["content"])
+			content, _ := msg["content"].(string)
+			env, err := envelope.Decode(content)
+			if err != nil {
+				t.Fatalf("decode: %v (raw=%q)", err, content)
+			}
+			if env.Text != "self-heal works" {
+				t.Fatalf("content mismatch: %v", env.Text)
 			}
 			return
 		}

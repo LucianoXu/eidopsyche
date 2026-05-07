@@ -3,9 +3,12 @@ package gate
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/LucianoXu/eidopsyche/internal/envelope"
 )
 
 var (
@@ -39,8 +42,7 @@ var inboxCmd = &cobra.Command{
 			return err
 		}
 		for _, m := range resp {
-			ts := time.Unix(int64(m["received_at"].(float64)), 0)
-			fmt.Printf("%s  %.16s  %s\n", ts.Format("2006-01-02 15:04:05"), m["from"], m["content"])
+			fmt.Println(formatInboxRow(m))
 		}
 		if !inboxTailFlag {
 			return nil
@@ -55,11 +57,38 @@ var inboxCmd = &cobra.Command{
 			}
 			var data map[string]any
 			_ = json.Unmarshal(ev.Data, &data)
-			ts := time.Unix(int64(data["received_at"].(float64)), 0)
-			fmt.Printf("%s  %.16s  %s\n", ts.Format("2006-01-02 15:04:05"), data["from"], data["content"])
+			fmt.Println(formatInboxRow(data))
 		}
 		return nil
 	},
+}
+
+// formatInboxRow renders one inbox row. The format is:
+//
+//	YYYY-MM-DD HH:MM:SS  <from-prefix>  [malformed: <reason>] <body>
+//
+// For envelope-decoded chat rows the body is the parsed text. For malformed
+// rows the prefix carries the reason; the body falls back to whatever
+// content arrived (so operators can debug interop). Legacy plain-text rows
+// (pre-envelope, no Malformed flag) render their content as-is.
+func formatInboxRow(m map[string]any) string {
+	tsRaw, _ := m["received_at"].(float64)
+	ts := time.Unix(int64(tsRaw), 0)
+	from, _ := m["from"].(string)
+	content, _ := m["content"].(string)
+
+	var prefix string
+	if mal, _ := m["malformed"].(bool); mal {
+		reason, _ := m["reject_reason"].(string)
+		prefix = fmt.Sprintf("[malformed: %s] ", reason)
+	}
+
+	body := content
+	if env, err := envelope.Decode(content); err == nil && env.Type == envelope.TypeChat {
+		body = env.Text
+	}
+	return fmt.Sprintf("%s  %.16s  %s%s",
+		ts.Format("2006-01-02 15:04:05"), from, prefix, strings.TrimRight(body, "\n"))
 }
 
 func init() {

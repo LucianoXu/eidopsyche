@@ -58,7 +58,7 @@ Logs:
   `<state-dir>/logs/eidos-gate-{daemon,relay}.log`.
 
 Daemon startup line: `eidos-gate-daemon starting state_dir=...`. Relay
-startup line: `eidos-gate-relay listening 127.0.0.1:22895 mode=paired`.
+startup line: `eidos-gate-relay listening 0.0.0.0:22895 mode=paired`.
 
 ## Step 2 — Each prints their card
 
@@ -100,6 +100,52 @@ Bob (in another terminal):
 $ eidos gate inbox --tail
 2026-05-06 22:14:01  npub1alice...0000  Hey Bob, my MindGate is up.
 ```
+
+### Sending an operator command
+
+You can send a v1 command envelope to your own daemon (e.g., from a
+thin-client device) using `--command`:
+
+```
+$ eidos gate send <your-own-npub> --command status
+event_id: 5f8e...
+accepted_by:
+  ws://127.0.0.1:22895
+```
+
+The reply lands in your own inbox a moment later:
+
+```
+$ eidos gate inbox --tail
+2026-05-07 10:14:18  npub1self...0000  eidos-gate v0.4.0  uptime 2h 3m
+contacts: 1 master, 4 friend, 0 acquaintance, 0 blocked
+relays:   2 configured
+forge:    n/a (forge subcommand not yet integrated)
+```
+
+Commands are only executed when the sender pubkey matches your own
+identity. Other senders' commands are stored in your inbox marked
+`[malformed: unauthorized_command]` and never run.
+
+Available commands in this release: `status` (read-only).
+
+### Message wire format
+
+MindGate puts a structured v1 envelope in the NIP-17 rumor content:
+
+```json
+{
+  "v": 1,
+  "type": "chat",
+  "text": "hello",
+  "client": { "name": "eidos", "ver": "0.4.0" }
+}
+```
+
+Messages from peers running a pre-envelope MindGate version (or any other
+NIP-17 client that sends raw text) are persisted in your inbox marked as
+`[malformed: not_envelope]` and are not delivered to your mind-form. See
+the spec at `docs/superpowers/specs/2026-05-07-envelope-v1-design.md`.
 
 ## Other commands
 

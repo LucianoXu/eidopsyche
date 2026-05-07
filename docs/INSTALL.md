@@ -143,12 +143,19 @@ logout-survives experience on a headless host, run
 `loginctl enable-linger <username>` once. macOS LaunchAgents auto-start at
 GUI login.
 
-The default relay binds `127.0.0.1:22895`. To accept inbound from a peer on
-another host, change `relay.listen` in `config.toml` to `0.0.0.0:22895` (and
-configure firewall / DNS accordingly). The relay also requires
-`relay.public_url` to be set to the externally reachable WebSocket URL so
-that your card URI is correct. After config changes, run `eidos gate start`
-again — it re-applies the unit files and is idempotent.
+The default relay binds `0.0.0.0:22895` so peers on another host can reach
+it once you open the firewall and publish a real URL. Lock it down to
+loopback by setting `relay.listen` to `127.0.0.1:22895` if you only want
+local-host clients (single-host two-instance debug, or running behind a
+reverse proxy that connects to loopback). Either way, `relay.public_url`
+and the home row in `own_relays` must be set to the externally reachable
+WebSocket URL — peers cannot dial `0.0.0.0`, so the URL embedded in your
+card / invite has to be a real hostname or IP. Use `eidos gate init
+--listen <host:port>`, or after init replace the home row with
+`eidos gate relay-remove ws://127.0.0.1:22895` followed by
+`eidos gate relay-add --role home <wss://your.host>`. After config
+changes, run `eidos gate start` again — it re-applies the unit files and
+is idempotent.
 
 ### Logs
 
