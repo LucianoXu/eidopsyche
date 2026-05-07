@@ -15,7 +15,7 @@ concurrency:
 jobs:
   test:
     name: Lint, vet, staticcheck, unit & integration tests
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v4
 
@@ -54,7 +54,7 @@ jobs:
 
   cross-build:
     name: Cross-compile (snapshot)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v4
 
