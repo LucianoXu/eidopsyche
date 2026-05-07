@@ -11,12 +11,23 @@ MindGate is a single binary (`mindgate`) that provides three modes:
 ```
 git clone <repo> eidopsyche
 cd eidopsyche
-go build -o bin/mindgate ./cmd/mindgate
+make build
 ```
 
-Or `make build`.
+Equivalent to `go build -o bin/mindgate ./cmd/mindgate`. The binary depends on no system libraries (pure-Go SQLite via `modernc.org/sqlite`); it runs on Linux/macOS/Windows.
 
-The binary depends on no system libraries (pure-Go SQLite via `modernc.org/sqlite`); it runs on Linux/macOS/Windows.
+## Install
+
+To put `mindgate` on your `$PATH`:
+
+```
+sudo make install                        # → /usr/local/bin/mindgate
+make install PREFIX=$HOME/.local         # → ~/.local/bin/mindgate (no sudo)
+make install DESTDIR=/tmp/stage          # staged install for packaging
+make uninstall                           # symmetric removal
+```
+
+`PREFIX` defaults to `/usr/local`. `DESTDIR` is prepended for staged builds (e.g. when packaging into a `.deb` or `.tar.gz`).
 
 ## Initialize a state directory
 

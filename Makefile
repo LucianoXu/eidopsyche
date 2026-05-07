@@ -1,4 +1,10 @@
-.PHONY: build test integration lint staticcheck e2e ci clean
+.PHONY: build test integration lint staticcheck e2e ci clean install uninstall
+
+# Install location. Override with `make install PREFIX=$HOME/.local` for a
+# user-local install, or with DESTDIR=/tmp/stage for staged packaging.
+PREFIX  ?= /usr/local
+DESTDIR ?=
+BINDIR  ?= $(DESTDIR)$(PREFIX)/bin
 
 build:
 	go build -o bin/mindgate ./cmd/mindgate
@@ -24,3 +30,12 @@ ci: lint staticcheck test integration
 
 clean:
 	rm -rf bin/ coverage.out
+
+install: build
+	@mkdir -p $(BINDIR)
+	install -m 0755 bin/mindgate $(BINDIR)/mindgate
+	@echo "installed: $(BINDIR)/mindgate"
+
+uninstall:
+	rm -f $(BINDIR)/mindgate
+	@echo "removed:   $(BINDIR)/mindgate"

@@ -13,6 +13,9 @@ coverage.out
 /test/integration/.tmp/
 /.testdata-tmp/
 
+# Deploy Test
+/deploy-test/
+
 # SQLite WAL/SHM stragglers
 *.db-wal
 *.db-shm
