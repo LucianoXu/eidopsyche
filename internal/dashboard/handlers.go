@@ -2,7 +2,6 @@ package dashboard
 
 import (
 	"context"
-	"errors"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -426,6 +425,3 @@ func shortenPubkey(pk string) string {
 	return pk[:8] + "…" + pk[len(pk)-4:]
 }
 
-// errStubFailure is used by tests to inject a failure into fakeDeps.Send
-// without depending on a specific error class.
-var errStubFailure = errors.New("stub: no relay accepted")
