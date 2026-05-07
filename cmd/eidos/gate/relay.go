@@ -30,6 +30,10 @@ var relayCmd = &cobra.Command{
 			return err
 		}
 		cfg, _ := config.Load(filepath.Join(dir, "config.toml"))
+		if !cfg.RelayEnabled() {
+			return fmt.Errorf(`local relay is disabled (relay.enabled = false in config.toml).
+to enable: eidos gate config set relay.enabled true && eidos gate config set relay.listen <host:port>`)
+		}
 		mode := relayMode
 		if mode == "" {
 			mode = cfg.Relay.Mode
