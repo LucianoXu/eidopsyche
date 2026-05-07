@@ -20,20 +20,34 @@ your identity:
   hex:  <64-hex-chars>
 
 next steps:
-  1) start daemon: eidos gate daemon
-  2) start relay:  eidos gate relay
-  3) share card:   eidos gate card
+  1) start services: eidos gate start
+  2) share card:     eidos gate card
 ```
 
 ## Step 1 — Each starts daemon and relay
 
 ```
-$ eidos gate daemon &
-$ eidos gate relay &
+$ eidos gate start
+✓ gate services started
+  eidos-gate-daemon      active  pid=4123
+  eidos-gate-relay       active  pid=4131
 ```
 
-The daemon logs to stderr: `eidos-gate-daemon starting state_dir=...`
-The relay logs to stderr: `eidos-gate-relay listening 127.0.0.1:22895 mode=paired`
+`eidos gate start` installs systemd user units for the daemon and relay and
+brings both up. They survive your shell exiting; on a headless server, run
+`loginctl enable-linger <username>` once to keep them running across full
+logouts. Use `eidos gate status` to check, `eidos gate stop` to halt without
+uninstalling, and `eidos gate purge` to remove everything. Append `--system`
+to any of these to manage `/etc/systemd/system/` units instead of user
+units (requires root).
+
+For ad-hoc / debugging runs, the original `eidos gate daemon` and
+`eidos gate relay` foreground commands still work — those are exactly what
+the systemd units invoke.
+
+The daemon logs to stderr (visible via `journalctl --user -u eidos-gate-daemon`):
+`eidos-gate-daemon starting state_dir=...`. The relay logs:
+`eidos-gate-relay listening 127.0.0.1:22895 mode=paired`.
 
 ## Step 2 — Each prints their card
 
@@ -78,6 +92,19 @@ $ eidos gate inbox --tail
 
 ## Other commands
 
+Service lifecycle:
+- `eidos gate start` — install + start the daemon and relay as systemd units
+- `eidos gate stop` — stop without uninstalling
+- `eidos gate status` — show installed / enabled / active state per unit
+- `eidos gate purge` — stop, uninstall units, and delete the state directory
+  (`--yes` skips the confirmation prompt; `--system` operates on
+  `/etc/systemd/system/` units instead of user units)
+
+Foreground (debug) mode:
+- `eidos gate daemon` — run the daemon in the foreground
+- `eidos gate relay` — run the embedded relay in the foreground
+
+Identity & contacts:
 - `eidos gate whoami` — your identity, label, home relays
 - `eidos gate set-label <new-label>` — change your own label (the one shown
   in `whoami` and embedded in your card URI)
@@ -90,12 +117,14 @@ $ eidos gate inbox --tail
 - `eidos gate relay-remove <url>` — remove a relay
 - `eidos gate outbox` — sent history
 - `eidos gate scan <uri>` — parse a card URI without storing
-- `eidos version` — print version, commit, build date
-- `eidos self-update` — upgrade to the latest published release; no-op when
-  already on latest. Pass `--force` to reinstall the same version.
 - `eidos gate reconnect` — force the daemon to recompute its relay subscription
   set and reattach. Useful after manual `config set` changes or to trigger a
   refresh without restarting.
+
+Top-level:
+- `eidos version` — print version, commit, build date
+- `eidos self-update` — upgrade to the latest published release; no-op when
+  already on latest. Pass `--force` to reinstall the same version.
 
 ### Flags common to most commands
 

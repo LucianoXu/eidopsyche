@@ -82,9 +82,9 @@ any environment that sets `CI=true`.
 # 1. Initialize identity and state directory (--label is required)
 eidos gate init --label alice
 
-# 2. Start the daemon (NIP-17 receiver) and the embedded relay
-eidos gate daemon &
-eidos gate relay &
+# 2. Start the daemon and embedded relay as systemd user services
+eidos gate start            # installs + enables + starts both
+eidos gate status           # show what's running
 
 # 3. Print and share your card out-of-band
 eidos gate card
@@ -96,6 +96,10 @@ eidos gate send npub1bob... "Hey Bob, my MindGate is up."
 
 # 5. See what arrived
 eidos gate inbox --tail
+
+# Lifecycle: stop without uninstalling, or wipe everything
+eidos gate stop
+eidos gate purge --yes      # stops + uninstalls + deletes state dir
 ```
 
 A one-step alternative to the symmetric `add-contact` flow exists via
@@ -148,6 +152,7 @@ eidopsyche/
 │   ├── inbox/                 # Inbox query & filter helpers
 │   ├── store/                 # SQLite schema and migrations
 │   ├── config/                # Config + state-dir resolution
+│   ├── service/               # systemd unit installer / lifecycle (Linux)
 │   ├── update/                # Update check + prompt + cache
 │   └── version/               # Build-time ldflags vars
 ├── install.sh                 # One-line installer / self-update target
