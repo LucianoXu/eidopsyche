@@ -4,13 +4,38 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
 // This file holds the platform-neutral parts of the macOS launchd manager:
-// plist content rendering and on-disk path resolution. They are pure functions
-// so the unit tests run on the linux CI host even though the launchctl
-// integration lives behind //go:build darwin in launchd_darwin.go.
+// plist content rendering, on-disk path resolution, and the launchctl-print
+// parser. They are pure functions so the unit tests run on the linux CI host
+// even though the launchctl invocations live behind //go:build darwin in
+// launchd_darwin.go.
+
+// parseLaunchctlPrintPID extracts the `pid = N` line from `launchctl print`
+// output. Returns 0 when the line is absent or malformed — which is launchd's
+// own way of saying "this service has no live process right now". Active
+// state is derived from this signal rather than parsing the `state = ...`
+// field because the latter has at least three observed values (running,
+// "spawn scheduled", waiting) whose distinctions don't matter to the user
+// and whose first-token forms collide with our regex.
+func parseLaunchctlPrintPID(out string) int {
+	m := launchdPIDRE.FindStringSubmatch(out)
+	if len(m) < 2 {
+		return 0
+	}
+	v, _ := strconv.Atoi(m[1])
+	if v < 0 {
+		return 0
+	}
+	return v
+}
+
+// (?m) makes ^ match each line; tolerant of launchctl print's indentation.
+var launchdPIDRE = regexp.MustCompile(`(?m)^\s*pid\s*=\s*(\d+)`)
 
 // launchdPlistDir returns the directory where a LaunchAgent / LaunchDaemon
 // .plist for the given Scope belongs. An override is honoured (for tests).

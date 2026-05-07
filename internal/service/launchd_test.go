@@ -116,6 +116,64 @@ func TestLaunchdPlistDir(t *testing.T) {
 	}
 }
 
+func TestParseLaunchctlPrintPID(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want int
+	}{
+		{
+			name: "running",
+			in: `gui/501/eidos-gate-daemon = {
+    active count = 1
+    state = running
+    pid = 33294
+}`,
+			want: 33294,
+		},
+		{
+			// The bug reported in v0.4.0: relay was misclassified as
+			// enabled-but-stopped because state was "spawn scheduled" right
+			// after bootstrap, even though the process had already been
+			// allocated a PID. Trust the PID, not the state string.
+			name: "spawn_scheduled",
+			in: `gui/501/eidos-gate-relay = {
+    active count = 1
+    state = spawn scheduled
+    pid = 33297
+}`,
+			want: 33297,
+		},
+		{
+			// Loaded but stopped — no pid line at all.
+			name: "no_pid_line",
+			in: `gui/501/eidos-gate-daemon = {
+    active count = 0
+    state = not running
+}`,
+			want: 0,
+		},
+		{
+			name: "empty_input",
+			in:   "",
+			want: 0,
+		},
+		{
+			// Tabs instead of spaces.
+			name: "tab_indent",
+			in:   "gui/0/x = {\n\tpid = 4242\n}",
+			want: 4242,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseLaunchctlPrintPID(tc.in); got != tc.want {
+				t.Errorf("got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLaunchdLogPath(t *testing.T) {
 	got := launchdLogPath("/state", "eidos-gate-daemon")
 	want := filepath.Join("/state", "logs", "eidos-gate-daemon.log")

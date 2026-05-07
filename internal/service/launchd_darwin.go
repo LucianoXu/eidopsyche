@@ -8,8 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 )
 
@@ -165,14 +163,15 @@ func (l *launchd) Status(ctx context.Context) ([]Status, error) {
 
 		if b, err := l.launchctl(ctx, "print", l.serviceTarget(u.label)); err == nil {
 			st.Enabled = true
-			text := string(b)
-			if state := launchdStateRE.FindStringSubmatch(text); len(state) > 1 && state[1] == "running" {
+			if pid := parseLaunchctlPrintPID(string(b)); pid > 0 {
+				st.PID = pid
+				// Presence of a PID in `launchctl print` is launchd's own
+				// answer to "does this service have a live process". We
+				// previously gated Active on parsing `state = running`,
+				// which misreported services in the brief
+				// `state = spawn scheduled` window after bootstrap as
+				// stopped (despite having a PID). Trust the PID instead.
 				st.Active = true
-			}
-			if pid := launchdPIDRE.FindStringSubmatch(text); len(pid) > 1 {
-				if v, _ := strconv.Atoi(pid[1]); v > 0 {
-					st.PID = v
-				}
 			}
 		}
 
@@ -194,10 +193,3 @@ func (l *launchd) units() []unitDef {
 		{label: RelayUnitName, args: []string{"gate", "relay"}},
 	}
 }
-
-// launchctl print's output is human-readable but stable across recent macOS
-// versions in the lines we care about. Lenient regex tolerates indentation.
-var (
-	launchdPIDRE   = regexp.MustCompile(`(?m)^\s*pid\s*=\s*(\d+)`)
-	launchdStateRE = regexp.MustCompile(`(?m)^\s*state\s*=\s*(\w+)`)
-)
