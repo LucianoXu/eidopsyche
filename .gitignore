@@ -27,5 +27,8 @@ coverage.out
 .vscode/
 .idea/
 
+# Claude Code worktrees / scratch (never commit; created by `git worktree add`)
+/.claude/
+
 # Notebook Ideas
 /NOTEBOOK.md
