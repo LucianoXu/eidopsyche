@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -39,6 +40,25 @@ var configKeys = map[string]configKey{
 			return nil
 		},
 	},
+	"relay.enabled": {
+		get: func(c *config.Config) string {
+			if c.Relay.Enabled {
+				return "true"
+			}
+			return "false"
+		},
+		set: func(c *config.Config, v string) error {
+			switch strings.ToLower(strings.TrimSpace(v)) {
+			case "true", "1", "yes", "on":
+				c.Relay.Enabled = true
+			case "false", "0", "no", "off":
+				c.Relay.Enabled = false
+			default:
+				return fmt.Errorf(`relay.enabled must be true or false, got %q`, v)
+			}
+			return nil
+		},
+	},
 	"relay.mode": {
 		get: func(c *config.Config) string { return c.Relay.Mode },
 		set: func(c *config.Config, v string) error {
@@ -52,16 +72,16 @@ var configKeys = map[string]configKey{
 	"relay.listen": {
 		get: func(c *config.Config) string { return c.Relay.Listen },
 		set: func(c *config.Config, v string) error {
+			v = strings.TrimSpace(v)
+			if v == "" {
+				return fmt.Errorf("relay.listen must be a non-empty host:port; to disable the local relay, set relay.enabled = false instead")
+			}
 			if _, _, err := net.SplitHostPort(v); err != nil {
 				return fmt.Errorf("relay.listen must be host:port, got %q: %w", v, err)
 			}
 			c.Relay.Listen = v
 			return nil
 		},
-	},
-	"relay.public_url": {
-		get: func(c *config.Config) string { return c.Relay.PublicURL },
-		set: func(c *config.Config, v string) error { c.Relay.PublicURL = v; return nil },
 	},
 	"relay.data_dir": {
 		get: func(c *config.Config) string { return c.Relay.DataDir },

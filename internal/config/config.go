@@ -23,10 +23,10 @@ type DaemonConfig struct {
 }
 
 type RelayConfig struct {
-	Mode      string `toml:"mode"`
-	Listen    string `toml:"listen"`
-	PublicURL string `toml:"public_url"`
-	DataDir   string `toml:"data_dir"`
+	Enabled bool   `toml:"enabled"`
+	Mode    string `toml:"mode"`
+	Listen  string `toml:"listen"`
+	DataDir string `toml:"data_dir"`
 }
 
 type PublishConfig struct {
@@ -45,10 +45,10 @@ func Defaults() Config {
 			ShutdownGraceSeconds: 5,
 		},
 		Relay: RelayConfig{
-			Mode:      "paired",
-			Listen:    "0.0.0.0:22895",
-			PublicURL: "ws://127.0.0.1:22895",
-			DataDir:   "relay",
+			Enabled: false,
+			Mode:    "paired",
+			Listen:  "0.0.0.0:22895",
+			DataDir: "relay",
 		},
 	}
 }
@@ -77,6 +77,11 @@ func Save(path string, cfg Config) error {
 // relay data, and IPC socket. Each invocation of `eidos gate` resolves the
 // same directory; multiple personas on one host run by setting different
 // $EIDOS_GATE_HOME values or passing distinct --state-dir flags.
+// RelayEnabled reports whether the embedded relay should run on this host.
+// Single source of truth: every code path that asks "should I spin up the
+// relay" routes through this method.
+func (c Config) RelayEnabled() bool { return c.Relay.Enabled }
+
 func ResolveStateDir(flagValue string) (string, error) {
 	if flagValue != "" {
 		return filepath.Abs(flagValue)

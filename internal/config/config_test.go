@@ -38,11 +38,44 @@ func TestResolveStateDirPriority(t *testing.T) {
 	}
 }
 
+func TestDefaultsRelayDisabled(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Relay.Enabled {
+		t.Errorf("Defaults().Relay.Enabled = true, want false")
+	}
+	if cfg.Relay.Listen != "0.0.0.0:22895" {
+		t.Errorf("Defaults().Relay.Listen = %q, want 0.0.0.0:22895", cfg.Relay.Listen)
+	}
+	if cfg.Relay.Mode != "paired" {
+		t.Errorf("Defaults().Relay.Mode = %q, want paired", cfg.Relay.Mode)
+	}
+}
+
+func TestRelayEnabledHelper(t *testing.T) {
+	cases := []struct {
+		name    string
+		enabled bool
+		want    bool
+	}{
+		{"explicit true", true, true},
+		{"explicit false", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Config{Relay: RelayConfig{Enabled: tc.enabled}}
+			if c.RelayEnabled() != tc.want {
+				t.Errorf("RelayEnabled() = %v, want %v", c.RelayEnabled(), tc.want)
+			}
+		})
+	}
+}
+
 func TestSaveLoadRoundtrip(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "config.toml")
 	cfg := Defaults()
 	cfg.LogLevel = "debug"
+	cfg.Relay.Enabled = true
 	if err := Save(p, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -52,6 +85,9 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	}
 	if loaded.LogLevel != "debug" {
 		t.Fatalf("got %q", loaded.LogLevel)
+	}
+	if !loaded.Relay.Enabled {
+		t.Fatalf("Relay.Enabled = false after roundtrip")
 	}
 	if _, err := os.Stat(p); err != nil {
 		t.Fatal(err)

@@ -29,7 +29,7 @@ var initCmd = &cobra.Command{
 
 func init() {
 	initCmd.Flags().StringVar(&initLabel, "label", "", "label for this identity (required; how others see your card by default — change later with `eidos gate set-label`)")
-	initCmd.Flags().StringVar(&initListen, "listen", "", "relay listen address as host:port (e.g. 127.0.0.1:22896); sets relay.listen, relay.public_url, and the home relay row")
+	initCmd.Flags().StringVar(&initListen, "listen", "", "relay listen address as host:port (e.g. 127.0.0.1:22896); sets relay.listen and the home relay row")
 	if err := initCmd.MarkFlagRequired("label"); err != nil {
 		panic(err) // Cobra returns nil for known flags; surfacing a panic here is appropriate for a setup bug.
 	}
@@ -101,7 +101,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 	cfg := config.Defaults()
 	if initListen != "" {
 		cfg.Relay.Listen = initListen
-		cfg.Relay.PublicURL = "ws://" + initListen
 	}
 	if err := config.Save(filepath.Join(dir, "config.toml"), cfg); err != nil {
 		return err

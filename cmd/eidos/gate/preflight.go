@@ -59,8 +59,7 @@ Find the holder with one of:
 
 Then either stop the conflicting process, or change the gate's listen
 address with:
-  eidos gate config set relay.listen <new-host:port>
-  eidos gate config set relay.public_url ws://<new-host:port>`,
+  eidos gate config set relay.listen <new-host:port>`,
 			listen, port, port, port)
 	}
 	return fmt.Errorf("preflight: bind %s: %w", listen, err)
