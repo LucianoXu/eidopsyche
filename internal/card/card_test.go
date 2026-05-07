@@ -9,7 +9,7 @@ import (
 func TestRoundtrip(t *testing.T) {
 	original := card.Card{
 		Npub:  "npub1abc",
-		Relay: "wss://alice.host:7777",
+		Relay: "wss://alice.host:22895",
 		Label: "Alice",
 	}
 	uri, err := original.URI()

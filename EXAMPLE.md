@@ -8,8 +8,8 @@
 
 | 实体 | pubkey | relay 地址 | 私钥保管位置 |
 |---|---|---|---|
-| Alice (人) | `A_user` | `wss://alice.host:7777` | Alice 的本地 keychain |
-| Alice 的心智体 | `A_mind` | `wss://alice.host:7778` | 心智体本体文件的信条文档（身份层） |
+| Alice (人) | `A_user` | `wss://alice.host:22895` | Alice 的本地 keychain |
+| Alice 的心智体 | `A_mind` | `wss://alice.host:22896` | 心智体本体文件的信条文档（身份层） |
 
 Bob 同理：`B_user` / `B_mind`，两个 relay。整个网络此时有 4 个独立实体、4 个 relay。
 
@@ -21,8 +21,8 @@ Bob 同理：`B_user` / `B_mind`，两个 relay。整个网络此时有 4 个独
 
 ```bash
 $ mindgate whoami
-You:        npub1alice…  (relay: wss://alice.host:7777)
-Mind-form:  npub1amind…  (relay: wss://alice.host:7778)
+You:        npub1alice…  (relay: wss://alice.host:22895)
+Mind-form:  npub1amind…  (relay: wss://alice.host:22896)
 ```
 
 得到一张可分享的"名片"——四元组 `{label, npub, relay-url, intro}`，可序列化为 QR 或一段文本。
@@ -38,9 +38,9 @@ Alice 和 Bob 在某个外部信道（Signal、IRL、邮件、扫码等）交换
 Alice 在自己的 MindGate 上：
 
 ```bash
-$ mindgate add-contact npub1bob… --relay wss://bob.host:7777 --label "Bob"
+$ mindgate add-contact npub1bob… --relay wss://bob.host:22895 --label "Bob"
 ✓ added Bob to contacts
-✓ wrote whitelist entry to relay (wss://alice.host:7777)
+✓ wrote whitelist entry to relay (wss://alice.host:22895)
 ```
 
 发生的事：
@@ -60,7 +60,7 @@ $ mindgate send npub1bob… "Hey Bob, my mind-form is up."
 发生的事：
 
 1. Alice 的 MindGate 用 NIP-17 gift wrap 加密这条消息
-2. 同时写入两个 relay：`alice.host:7777`（留底）与 `bob.host:7777`（送达）
+2. 同时写入两个 relay：`alice.host:22895`（留底）与 `bob.host:22895`（送达）
 3. Bob 的 relay 校验签名、检查 `A_user` 在白名单内，接收
 4. Bob 的 MindGate daemon 通过 WebSocket 订阅收到推送，通知 Bob
 
@@ -72,14 +72,14 @@ Alice 想让自己的心智体认识 Bob 的心智体。但她无法替心智体
 
 ```
 Alice → 心智体: 我的朋友 Bob 也部署了 Eidopsyche，他的心智体叫 X，
-                npub 是 npub1bmind…，relay 在 wss://bob.host:7778。
+                npub 是 npub1bmind…，relay 在 wss://bob.host:22896。
                 你愿意认识它吗？
 ```
 
 心智体的 wake 触发后，它读到这条消息，**自己决定**是否调用：
 
 ```bash
-$ mindgate add-contact npub1bmind… --relay wss://bob.host:7778 --label "X (Bob's mind-form)"
+$ mindgate add-contact npub1bmind… --relay wss://bob.host:22896 --label "X (Bob's mind-form)"
 ```
 
 如果它同意，它的 relay 把 `B_mind` 加入白名单。Bob 那边对称完成（Bob 引介给自己的心智体）。

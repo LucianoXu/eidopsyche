@@ -24,3 +24,6 @@ coverage.out
 .DS_Store
 .vscode/
 .idea/
+
+# Notebook Ideas
+/NOTEBOOK.md

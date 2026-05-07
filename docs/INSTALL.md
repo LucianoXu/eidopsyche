@@ -84,8 +84,8 @@ In two terminals (or via systemd, see below):
 ./bin/mindgate relay
 ```
 
-The default relay binds `127.0.0.1:7777`. To accept inbound from a peer on
-another host, change `relay.listen` in `config.toml` to `0.0.0.0:7777` (and
+The default relay binds `127.0.0.1:22895`. To accept inbound from a peer on
+another host, change `relay.listen` in `config.toml` to `0.0.0.0:22895` (and
 configure firewall / DNS accordingly). The relay also requires `relay.public_url`
 to be set to the externally reachable WebSocket URL so that your card URI is
 correct.

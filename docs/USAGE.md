@@ -29,13 +29,13 @@ $ mindgate relay &
 ```
 
 The daemon logs to stderr: `mindgate-daemon starting state_dir=...`
-The relay logs to stderr: `mindgate-relay listening 127.0.0.1:7777 mode=paired`
+The relay logs to stderr: `mindgate-relay listening 127.0.0.1:22895 mode=paired`
 
 ## Step 2 — Each prints their card
 
 ```
 $ mindgate card
-mindgate://npub1alice...@ws%3A%2F%2Falice.host%3A7777/?label=alice
+mindgate://npub1alice...@ws%3A%2F%2Falice.host%3A22895/?label=alice
 ```
 
 Send this URI to the peer out-of-band (Signal, email, scan, etc.).
@@ -45,7 +45,7 @@ Send this URI to the peer out-of-band (Signal, email, scan, etc.).
 Alice runs:
 
 ```
-$ mindgate add-contact 'mindgate://npub1bob...@wss%3A%2F%2Fbob.host%3A7777/?label=Bob'
+$ mindgate add-contact 'mindgate://npub1bob...@wss%3A%2F%2Fbob.host%3A22895/?label=Bob'
 added npub1bob...
 ```
 
@@ -61,8 +61,8 @@ Alice:
 $ mindgate send npub1bob... "Hey Bob, my MindGate is up."
 event_id: 5f8e...
 accepted_by:
-  ws://127.0.0.1:7777
-  wss://bob.host:7777
+  ws://127.0.0.1:22895
+  wss://bob.host:22895
 ```
 
 Bob (in another terminal):
@@ -122,7 +122,7 @@ $ mindgate --state-dir /tmp/mg-a daemon &
 $ mindgate --state-dir /tmp/mg-a relay &
 
 # Instance B
-$ mindgate --state-dir /tmp/mg-b init --label bob --listen 127.0.0.1:7778
+$ mindgate --state-dir /tmp/mg-b init --label bob --listen 127.0.0.1:22896
 $ mindgate --state-dir /tmp/mg-b daemon &
 $ mindgate --state-dir /tmp/mg-b relay &
 ```

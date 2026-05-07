@@ -285,7 +285,7 @@ This split mirrors what Claude Code and OpenClaw do for session logs. See discus
 {"v":1,"event_id":"<wrap hex>","inner_id":"<rumor hex>",
  "from":"<sender hex>","kind":14,"content":"hi",
  "rumor_at":1746531200,"received_at":1746531202,
- "relays":["wss://alice.host:7777"]}
+ "relays":["wss://alice.host:22895"]}
 ```
 
 `outbox/YYYY/MM/DD.jsonl` — one line per sent message:
@@ -295,7 +295,7 @@ This split mirrors what Claude Code and OpenClaw do for session logs. See discus
  "inner_id":"<rumor hex>",
  "to":"<recipient hex>","kind":14,"content":"hi",
  "rumor_at":1746531200,"sent_at":1746531200,
- "accepted_by":["ws://127.0.0.1:7777","wss://bob.host:7777"]}
+ "accepted_by":["ws://127.0.0.1:22895","wss://bob.host:22895"]}
 ```
 
 The `event_id` field is the recipient wrap's id — the same id Bob's inbox will record. `self_event_id` records the self-copy wrap so the daemon can recognize and skip the echo when it arrives via subscribe (see §5.3).
@@ -546,7 +546,7 @@ $ mindgate init
   → /home/alice/.mindgate/key (0600)
 ✓ wrote /home/alice/.mindgate/state.db (schema v1)
 ✓ wrote /home/alice/.mindgate/config.toml (defaults)
-  default home relay: ws://127.0.0.1:7777 (paired-mode local relay)
+  default home relay: ws://127.0.0.1:22895 (paired-mode local relay)
   label:              alice@hostname
 your identity:
   npub1alice...
@@ -572,8 +572,8 @@ INF mindgate-daemon version=0.0.1
 INF state_dir=/home/alice/.mindgate owner=npub1alice...
 INF ipc listening on /home/alice/.mindgate/sock
 INF relay-pool subscribing kind=1059 to self
-WRN relay ws://127.0.0.1:7777 unreachable; retrying
-INF relay ws://127.0.0.1:7777 connected (since=...)
+WRN relay ws://127.0.0.1:22895 unreachable; retrying
+INF relay ws://127.0.0.1:22895 connected (since=...)
 INF ready
 ```
 
@@ -584,7 +584,7 @@ INF ready
 ### 7.3 `mindgate relay`
 
 ```
-INF mindgate-relay mode=paired listen=127.0.0.1:7777
+INF mindgate-relay mode=paired listen=127.0.0.1:22895
 INF whitelist source=/home/alice/.mindgate/state.db (RO)
 INF whitelist size=1 (owner only; add contacts to expand)
 INF ready

@@ -28,7 +28,7 @@ var initCmd = &cobra.Command{
 
 func init() {
 	initCmd.Flags().StringVar(&initLabel, "label", "", "label for this identity (default user@hostname)")
-	initCmd.Flags().StringVar(&initListen, "listen", "", "relay listen address as host:port (e.g. 127.0.0.1:7778); sets relay.listen, relay.public_url, and the home relay row")
+	initCmd.Flags().StringVar(&initListen, "listen", "", "relay listen address as host:port (e.g. 127.0.0.1:22896); sets relay.listen, relay.public_url, and the home relay row")
 	rootCmd.AddCommand(initCmd)
 }
 
@@ -92,7 +92,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine home relay URL from --listen or default.
-	homeRelayURL := "ws://127.0.0.1:7777"
+	homeRelayURL := "ws://127.0.0.1:22895"
 	if initListen != "" {
 		homeRelayURL = "ws://" + initListen
 	}

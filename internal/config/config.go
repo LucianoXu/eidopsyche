@@ -46,8 +46,8 @@ func Defaults() Config {
 		},
 		Relay: RelayConfig{
 			Mode:      "paired",
-			Listen:    "127.0.0.1:7777",
-			PublicURL: "ws://127.0.0.1:7777",
+			Listen:    "127.0.0.1:22895",
+			PublicURL: "ws://127.0.0.1:22895",
 			DataDir:   "relay",
 		},
 	}
