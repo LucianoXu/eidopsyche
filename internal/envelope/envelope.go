@@ -94,11 +94,12 @@ func Encode(e Envelope) (string, error) {
 // one of the sentinel errors on failure. The error vocabulary is:
 //
 //   - ErrNotEnvelope: not parseable as a JSON object, OR parses but lacks
-//     both `v` and `type` (callers can use this to distinguish "random JSON"
-//     from "intentional but broken envelope").
+//     either `v` or `type`. Callers use this to distinguish "random JSON
+//     / plain text" from "intentional but broken envelope".
 //   - ErrUnsupportedVersion: `v` is present but is not the integer 1.
-//   - ErrSchemaViolation: shape is recognizable as an envelope but a field
-//     is missing/wrong/forbidden per spec §3.1.
+//   - ErrSchemaViolation: both `v` and `type` are present and `v == 1`,
+//     but a field is missing/wrong/forbidden per spec §3.1 (e.g.
+//     `type=chat` with empty text, `type=command` without `command`).
 func Decode(content string) (Envelope, error) {
 	var probe struct {
 		V    *int    `json:"v"`
@@ -107,11 +108,11 @@ func Decode(content string) (Envelope, error) {
 	if err := json.Unmarshal([]byte(content), &probe); err != nil {
 		return Envelope{}, ErrNotEnvelope
 	}
-	if probe.V == nil && probe.Type == nil {
-		return Envelope{}, ErrNotEnvelope
-	}
+	// Per spec §3.1: missing either v or type → ErrNotEnvelope. The shape
+	// must look like an envelope (both anchors present) before subsequent
+	// field problems are classified as schema violations.
 	if probe.V == nil || probe.Type == nil {
-		return Envelope{}, ErrSchemaViolation
+		return Envelope{}, ErrNotEnvelope
 	}
 	if *probe.V != SchemaVersion {
 		return Envelope{}, ErrUnsupportedVersion

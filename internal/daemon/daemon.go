@@ -394,7 +394,9 @@ func (d *Daemon) persistSoftReject(ev *gnostr.Event, rumor *gnostr.Event, reason
 
 // sendChatReply wraps text in a v1 chat envelope and publishes a NIP-17
 // gift wrap to the given pubkey (which, for v1 commands, is always self).
-// In tests, d.testSendChatReply takes precedence to avoid network I/O.
+// Returns an error when no relay accepts the publish so the caller can log
+// the failure; in tests, d.testSendChatReply takes precedence to avoid
+// network I/O.
 func (d *Daemon) sendChatReply(ctx context.Context, toPubkey string, text string) error {
 	if d.testSendChatReply != nil {
 		return d.testSendChatReply(ctx, toPubkey, text)
@@ -413,28 +415,47 @@ func (d *Daemon) sendChatReply(ctx context.Context, toPubkey string, text string
 	if err != nil {
 		return err
 	}
-	urls := d.ownRelayURLs(ctx)
+	urls, err := d.ownRelayURLs(ctx)
+	if err != nil {
+		return fmt.Errorf("own relays: %w", err)
+	}
+	if len(urls) == 0 {
+		return errors.New("no own relays configured for reply")
+	}
 	publishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	_ = d.Pool.Publish(publishCtx, urls, wrap)
-	return nil
+	res := d.Pool.Publish(publishCtx, urls, wrap)
+	for _, r := range res {
+		if r.OK {
+			return nil
+		}
+	}
+	return fmt.Errorf("publish failed on all %d relays", len(urls))
 }
 
 // ownRelayURLs returns the URLs from own_relays for command-reply publish.
-func (d *Daemon) ownRelayURLs(ctx context.Context) []string {
+// Returns an error if the query or any row scan fails, so callers can
+// surface storage-layer problems rather than silently returning an empty
+// list (which would otherwise be indistinguishable from "no relays
+// configured").
+func (d *Daemon) ownRelayURLs(ctx context.Context) ([]string, error) {
 	rows, err := d.DB.QueryContext(ctx, `SELECT relay_url FROM own_relays`)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("query own_relays: %w", err)
 	}
 	defer rows.Close()
 	var urls []string
 	for rows.Next() {
 		var u string
-		if err := rows.Scan(&u); err == nil {
-			urls = append(urls, u)
+		if err := rows.Scan(&u); err != nil {
+			return nil, fmt.Errorf("scan own_relays: %w", err)
 		}
+		urls = append(urls, u)
 	}
-	return urls
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate own_relays: %w", err)
+	}
+	return urls, nil
 }
 
 // handleInviteRedemption processes an incoming kind:25001 invite-redemption rumor.

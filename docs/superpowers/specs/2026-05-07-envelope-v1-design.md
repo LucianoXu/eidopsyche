@@ -106,10 +106,15 @@ Reply text (format is human-readable; not a stable machine-readable contract):
 ```
 eidos-gate v0.3.0  uptime 3d 4h 12m
 contacts: 1 master, 4 friend, 0 acquaintance, 0 blocked
-relays:   2/2 connected (home: ws://...; fallback: wss://...)
-inbox:    0 unread (last received 14m ago)
+relays:   2 configured
 forge:    n/a (forge subcommand not yet integrated)
 ```
+
+v1 reports `relays:` as a configured count (cardinality of `own_relays`).
+Live connection state and inbox unread/last-received summaries are
+deferred — the latter requires "last read" tracking that does not yet
+exist; the former requires exposing subscriber state. Both can be added
+without bumping `v` since the reply text is a non-stable contract.
 
 The reply is a normal `type=chat` envelope. Because the sender is self, the reply lands in the operator's own inbox and is trivially distinguishable from peer messages by sender pubkey.
 

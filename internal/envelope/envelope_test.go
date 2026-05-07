@@ -79,6 +79,8 @@ func TestDecode_Rejects(t *testing.T) {
 	}{
 		{"plain text", "hello", ErrNotEnvelope},
 		{"json without v or type", `{"foo":"bar"}`, ErrNotEnvelope},
+		{"json with v only", `{"v":1,"text":"hi"}`, ErrNotEnvelope},
+		{"json with type only", `{"type":"chat","text":"hi"}`, ErrNotEnvelope},
 		{"v=2", `{"v":2,"type":"chat","text":"hi"}`, ErrUnsupportedVersion},
 		{"unknown type", `{"v":1,"type":"frob","text":"hi"}`, ErrSchemaViolation},
 		{"chat missing text", `{"v":1,"type":"chat"}`, ErrSchemaViolation},

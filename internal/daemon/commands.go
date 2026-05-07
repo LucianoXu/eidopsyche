@@ -47,9 +47,11 @@ func statusCommand(ctx context.Context, d *Daemon, _ map[string]any) (string, er
 		tierCount[c.Tier]++
 	}
 
+	relayLine := "relays:   ? configured (db error)\n"
 	var relayN int
-	row := d.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM own_relays`)
-	_ = row.Scan(&relayN)
+	if err := d.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM own_relays`).Scan(&relayN); err == nil {
+		relayLine = fmt.Sprintf("relays:   %d configured\n", relayN)
+	}
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "eidos-gate %s  uptime %s\n", version.Version, uptime)
@@ -58,7 +60,7 @@ func statusCommand(ctx context.Context, d *Daemon, _ map[string]any) (string, er
 		tierCount[contacts.TierFriend],
 		tierCount[contacts.TierAcquaintance],
 		tierCount[contacts.TierBlocked])
-	fmt.Fprintf(&sb, "relays:   %d configured\n", relayN)
+	sb.WriteString(relayLine)
 	fmt.Fprintf(&sb, "forge:    n/a (forge subcommand not yet integrated)")
 	return sb.String(), nil
 }
