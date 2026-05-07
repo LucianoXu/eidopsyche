@@ -6,8 +6,8 @@ Two-user walkthrough mirroring `EXAMPLE.md`.
 
 ```
 $ eidos gate init
-✓ created /home/alice/.mindgate
-✓ generated keypair → /home/alice/.mindgate/key (0600)
+✓ created /home/alice/.eidos/gate
+✓ generated keypair → /home/alice/.eidos/gate/key (0600)
 ✓ wrote state.db (schema v1)
 ✓ wrote config.toml
 
@@ -89,7 +89,7 @@ $ eidos gate inbox --tail
 
 ### Flags common to most commands
 
-- `--state-dir <path>` — override the state directory (also via `$MINDGATE_HOME`)
+- `--state-dir <path>` — override the state directory (also via `$EIDOS_GATE_HOME`)
 - `eidos gate inbox --from <npub>` — filter inbox by sender
 - `eidos gate inbox --since <unix-seconds>` — show messages since timestamp
 - `eidos gate inbox --limit <n>` — cap results (default 50)

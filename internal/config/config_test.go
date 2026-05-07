@@ -7,7 +7,7 @@ import (
 )
 
 func TestResolveStateDirPriority(t *testing.T) {
-	t.Setenv("MINDGATE_HOME", "")
+	t.Setenv("EIDOS_GATE_HOME", "")
 	t.Setenv("XDG_STATE_HOME", "")
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -15,18 +15,18 @@ func TestResolveStateDirPriority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(tmp, ".mindgate")
+	want := filepath.Join(tmp, ".eidos", "gate")
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
 
 	t.Setenv("XDG_STATE_HOME", "/x")
 	got, _ = ResolveStateDir("")
-	if got != "/x/mindgate" {
+	if got != "/x/eidos/gate" {
 		t.Fatalf("xdg: got %q", got)
 	}
 
-	t.Setenv("MINDGATE_HOME", "/m")
+	t.Setenv("EIDOS_GATE_HOME", "/m")
 	got, _ = ResolveStateDir("")
 	if got != "/m" {
 		t.Fatalf("env: got %q", got)

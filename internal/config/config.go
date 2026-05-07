@@ -70,21 +70,26 @@ func Save(path string, cfg Config) error {
 	return toml.NewEncoder(f).Encode(cfg)
 }
 
-// ResolveStateDir picks the state directory using precedence:
-// flag (passed in) > $MINDGATE_HOME > $XDG_STATE_HOME/mindgate > $HOME/.mindgate.
+// ResolveStateDir picks the gate state directory using precedence:
+// flag (passed in) > $EIDOS_GATE_HOME > $XDG_STATE_HOME/eidos/gate > $HOME/.eidos/gate.
+//
+// The state directory holds the gate's identity key, SQLite metadata, embedded
+// relay data, and IPC socket. Each invocation of `eidos gate` resolves the
+// same directory; multiple personas on one host run by setting different
+// $EIDOS_GATE_HOME values or passing distinct --state-dir flags.
 func ResolveStateDir(flagValue string) (string, error) {
 	if flagValue != "" {
 		return filepath.Abs(flagValue)
 	}
-	if v := os.Getenv("MINDGATE_HOME"); v != "" {
+	if v := os.Getenv("EIDOS_GATE_HOME"); v != "" {
 		return filepath.Abs(v)
 	}
 	if v := os.Getenv("XDG_STATE_HOME"); v != "" {
-		return filepath.Abs(filepath.Join(v, "mindgate"))
+		return filepath.Abs(filepath.Join(v, "eidos", "gate"))
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".mindgate"), nil
+	return filepath.Join(home, ".eidos", "gate"), nil
 }

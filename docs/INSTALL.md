@@ -76,8 +76,8 @@ this sentinel and skips itself entirely.
 eidos gate init
 ```
 
-Creates `~/.mindgate/` (override with `MINDGATE_HOME`, `XDG_STATE_HOME`, or
-`--state-dir`):
+Creates `~/.eidos/gate/` (override with `EIDOS_GATE_HOME`, `XDG_STATE_HOME`,
+or `--state-dir`):
 
 - `key`         — your private key (mode 0600)
 - `state.db`    — SQLite for contacts, relays, metadata
@@ -87,19 +87,19 @@ Creates `~/.mindgate/` (override with `MINDGATE_HOME`, `XDG_STATE_HOME`, or
 State directory resolution precedence (highest to lowest):
 
 1. `--state-dir <path>` flag
-2. `$MINDGATE_HOME`
-3. `$XDG_STATE_HOME/mindgate`
-4. `~/.mindgate`
+2. `$EIDOS_GATE_HOME`
+3. `$XDG_STATE_HOME/eidos/gate`
+4. `~/.eidos/gate`
 
 `init` is **not** idempotent: it refuses to run if `key` already exists.
-Remove `~/.mindgate/key` deliberately if you want a fresh identity (or
-`rm -rf ~/.mindgate` to wipe everything).
+Remove `~/.eidos/gate/key` deliberately if you want a fresh identity (or
+`rm -rf ~/.eidos/gate` to wipe everything).
 
 Typical output:
 
 ```
-✓ created /home/alice/.mindgate
-✓ generated keypair → /home/alice/.mindgate/key (0600)
+✓ created /home/alice/.eidos/gate
+✓ generated keypair → /home/alice/.eidos/gate/key (0600)
 ✓ wrote state.db (schema v1)
 ✓ wrote config.toml
 
@@ -166,12 +166,13 @@ Then `systemctl --user enable --now eidos-gate-daemon eidos-gate-relay`.
 
 ## Backup
 
-`tar czf mindgate-state.tar.gz $MINDGATE_HOME/`. The archive contains
-everything that defines your identity and history. Restore by extracting on
-the target host and running `eidos gate daemon` (and `eidos gate relay` if
-you also run your own).
+`tar czf eidos-gate-state.tar.gz "${EIDOS_GATE_HOME:-$HOME/.eidos/gate}/"`.
+The archive contains everything that defines your identity and history.
+Restore by extracting on the target host and running `eidos gate daemon`
+(and `eidos gate relay` if you also run your own).
 
 ## Resetting
 
-To start over, stop the daemon and relay, then `rm -rf $MINDGATE_HOME`. The
-next `eidos gate init` generates a new identity (npub).
+To start over, stop the daemon and relay, then
+`rm -rf "${EIDOS_GATE_HOME:-$HOME/.eidos/gate}"`. The next `eidos gate init`
+generates a new identity (npub).
