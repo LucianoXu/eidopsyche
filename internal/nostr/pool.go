@@ -107,15 +107,12 @@ func (p *Pool) Publish(ctx context.Context, urls []string, ev *gnostr.Event) []P
 // Subscribe opens a subscription on each URL concurrently and fans all
 // matching events into a single output channel. The channel is buffered;
 // slow consumers may drop events if the buffer fills. Returns an error if no
-// relay could be connected.
+// relay could be connected. The channel is closed when ctx is canceled or
+// all per-URL pump goroutines exit.
 func (p *Pool) Subscribe(ctx context.Context, urls []string, filter gnostr.Filter) (<-chan *gnostr.Event, error) {
 	out := make(chan *gnostr.Event, 256)
-
-	var (
-		mu    sync.Mutex
-		anyOK bool
-	)
-
+	var wg sync.WaitGroup
+	var anyOK bool
 	for _, u := range urls {
 		r, err := p.Connect(ctx, u)
 		if err != nil {
@@ -125,24 +122,31 @@ func (p *Pool) Subscribe(ctx context.Context, urls []string, filter gnostr.Filte
 		if err != nil {
 			continue
 		}
-		mu.Lock()
 		anyOK = true
-		mu.Unlock()
-
-		go func() {
-			for ev := range sub.Events {
+		wg.Add(1)
+		go func(u string) {
+			defer wg.Done()
+			for {
 				select {
-				case out <- ev:
 				case <-ctx.Done():
 					return
+				case ev, ok := <-sub.Events:
+					if !ok {
+						return
+					}
+					select {
+					case out <- ev:
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
-		}()
+		}(u)
 	}
-
 	if !anyOK {
 		close(out)
-		return nil, errors.New("no relays subscribed")
+		return out, errors.New("no relays subscribed")
 	}
+	go func() { wg.Wait(); close(out) }()
 	return out, nil
 }

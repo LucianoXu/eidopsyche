@@ -83,6 +83,9 @@ $ mindgate inbox --tail
 - `mindgate outbox` — sent history
 - `mindgate scan <uri>` — parse a card URI without storing
 - `mindgate version` — print version (`mindgate 0.0.1`)
+- `mindgate reconnect` — force the daemon to recompute its relay subscription
+  set and reattach. Useful after manual `config set` changes or to trigger a
+  refresh without restarting.
 
 ### Flags common to most commands
 
@@ -110,6 +113,12 @@ $ mindgate --state-dir /tmp/mg-b relay &
 ```
 
 The `--listen` flag aligns config.toml's `relay.listen` and the `own_relays` home row with the relay's actual bind address.
+
+Start order does not matter: if the daemon starts before its relay is
+listening, it will retry the subscription with exponential backoff (1 s, 2 s,
+… up to 60 s) and reconnect automatically once the relay is reachable. Adding
+or removing a contact or relay via CLI also triggers an immediate refresh, so
+the new relay URL becomes live without restarting the daemon.
 
 ## Changing settings after init
 

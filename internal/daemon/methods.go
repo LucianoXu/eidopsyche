@@ -31,6 +31,7 @@ func init() {
 	register("inbox.tail", inboxTail)
 	register("outbox.list", outboxList)
 	register("version", versionMethod)
+	register("subscribe.refresh", subscribeRefresh)
 }
 
 // whoami returns our public identity plus configured home relays.
@@ -117,6 +118,7 @@ func contactAdd(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMess
 		}
 		return nil, internalErr(err)
 	}
+	d.Refresh()
 	return map[string]bool{"ok": true}, nil
 }
 
@@ -156,6 +158,7 @@ func contactRemove(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawM
 		}
 		return nil, internalErr(err)
 	}
+	d.Refresh()
 	return map[string]bool{"ok": true}, nil
 }
 
@@ -194,6 +197,7 @@ func relayAdd(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessag
 		p.URL, p.Role, time.Now().Unix()); err != nil {
 		return nil, internalErr(err)
 	}
+	d.Refresh()
 	return map[string]bool{"ok": true}, nil
 }
 
@@ -206,6 +210,7 @@ func relayRemove(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	if _, err := d.DB.ExecContext(ctx, `DELETE FROM own_relays WHERE relay_url=?`, p.URL); err != nil {
 		return nil, internalErr(err)
 	}
+	d.Refresh()
 	return map[string]bool{"ok": true}, nil
 }
 
@@ -381,6 +386,12 @@ func versionMethod(_ context.Context, _ *Daemon, _ *ipc.Conn, _ json.RawMessage)
 		"daemon_version": "0.0.1",
 		"schema_version": 1,
 	}, nil
+}
+
+// subscribeRefresh asks the daemon to recompute its relay set and reattach.
+func subscribeRefresh(_ context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
+	d.Refresh()
+	return map[string]bool{"ok": true}, nil
 }
 
 // internalErr wraps a Go error into an IPC internal error response.

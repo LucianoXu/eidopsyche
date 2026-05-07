@@ -32,6 +32,7 @@ type Daemon struct {
 	Pool     *nostr.Pool
 	Log      *slog.Logger
 
+	kick        chan struct{}
 	mu          sync.Mutex
 	subs        []*ipc.Conn
 	dedupe      map[string]struct{}
@@ -67,6 +68,7 @@ func Start(stateDir string) (*Daemon, error) {
 		Box:         inbox.New(stateDir),
 		Pool:        nostr.NewPool(),
 		Log:         slog.New(slog.NewJSONHandler(os.Stderr, nil)),
+		kick:        make(chan struct{}, 1),
 		dedupe:      make(map[string]struct{}, 1024),
 		selfWrapIDs: make(map[string]struct{}, 1024),
 	}
@@ -107,33 +109,116 @@ func (d *Daemon) Run(ctx context.Context) error {
 	return srv.Serve(ctx)
 }
 
+// Refresh asks the subscriber to recompute its relay set and reattach.
+// Non-blocking; if a refresh is already pending the call is a no-op.
+func (d *Daemon) Refresh() {
+	select {
+	case d.kick <- struct{}{}:
+	default:
+	}
+}
+
 // runSubscriber subscribes to gift-wrap events addressed to our pubkey on all
-// known relays and dispatches them through handleIncoming.
-func (d *Daemon) runSubscriber(ctx context.Context) {
-	urls, err := d.subscriptionURLs(ctx)
-	if err != nil {
-		d.Log.Error("subscription urls", "err", err)
-		return
+// known relays and dispatches them through handleIncoming. It retries with
+// exponential backoff on failure and can be kicked to refresh early via d.kick.
+func (d *Daemon) runSubscriber(parent context.Context) {
+	const (
+		baseBackoff = time.Second
+		maxBackoff  = 60 * time.Second
+	)
+	backoff := baseBackoff
+
+	for parent.Err() == nil {
+		subCtx, cancel := context.WithCancel(parent)
+
+		urls, err := d.subscriptionURLs(subCtx)
+		if err != nil {
+			d.Log.Warn("subscription urls", "err", err, "backoff", backoff)
+			cancel()
+			if !waitForRetry(parent, d.kick, backoff) {
+				return
+			}
+			backoff = nextBackoff(backoff, maxBackoff)
+			continue
+		}
+		if len(urls) == 0 {
+			d.Log.Warn("no relays in subscription set; will retry", "backoff", backoff)
+			cancel()
+			if !waitForRetry(parent, d.kick, backoff) {
+				return
+			}
+			backoff = nextBackoff(backoff, maxBackoff)
+			continue
+		}
+
+		since := gnostr.Timestamp(time.Now().Add(-48 * time.Hour).Unix())
+		filter := gnostr.Filter{
+			Kinds: []int{1059},
+			Tags:  gnostr.TagMap{"p": []string{d.Key.PublicHex}},
+			Since: &since,
+		}
+		ch, err := d.Pool.Subscribe(subCtx, urls, filter)
+		if err != nil {
+			d.Log.Warn("subscribe failed; will retry", "err", err, "backoff", backoff)
+			cancel()
+			if !waitForRetry(parent, d.kick, backoff) {
+				return
+			}
+			backoff = nextBackoff(backoff, maxBackoff)
+			continue
+		}
+		d.Log.Info("subscribed", "relays", urls)
+		backoff = baseBackoff
+
+		kicked := false
+	drain:
+		for {
+			select {
+			case <-parent.Done():
+				cancel()
+				return
+			case <-d.kick:
+				d.Log.Info("subscriber refresh requested")
+				kicked = true
+				break drain
+			case ev, ok := <-ch:
+				if !ok {
+					d.Log.Warn("subscription channel closed; reconnecting")
+					break drain
+				}
+				d.handleIncoming(parent, ev)
+			}
+		}
+		cancel()
+		if kicked {
+			// fast restart on explicit refresh
+			backoff = 100 * time.Millisecond
+		}
 	}
-	if len(urls) == 0 {
-		d.Log.Warn("no relays to subscribe; idle")
-		return
+}
+
+// waitForRetry sleeps for d, returning true to continue or false if ctx is done.
+// A kick signal short-circuits the sleep and returns true.
+func waitForRetry(ctx context.Context, kick <-chan struct{}, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-kick:
+		return true
+	case <-t.C:
+		return true
 	}
-	since := gnostr.Timestamp(time.Now().Add(-48 * time.Hour).Unix())
-	filter := gnostr.Filter{
-		Kinds: []int{1059},
-		Tags:  gnostr.TagMap{"p": []string{d.Key.PublicHex}},
-		Since: &since,
+}
+
+// nextBackoff doubles b up to max.
+func nextBackoff(b, max time.Duration) time.Duration {
+	next := b * 2
+	if next > max {
+		next = max
 	}
-	d.Log.Info("subscribing", "relays", urls)
-	ch, err := d.Pool.Subscribe(ctx, urls, filter)
-	if err != nil {
-		d.Log.Error("subscribe", "err", err)
-		return
-	}
-	for ev := range ch {
-		d.handleIncoming(ctx, ev)
-	}
+	return next
 }
 
 // subscriptionURLs returns the union of own relays, contact relays, and extra
