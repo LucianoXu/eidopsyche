@@ -32,8 +32,8 @@ type Server struct {
 func New(cfg Config) (*Server, error) {
 	r := khatru.NewRelay()
 	// Info is a *nip11.RelayInformationDocument, initialized by NewRelay.
-	r.Info.Name = "mindgate-relay"
-	r.Info.Software = "mindgate"
+	r.Info.Name = "eidos-gate-relay"
+	r.Info.Software = "eidopsyche"
 
 	switch cfg.Mode {
 	case ModePaired:

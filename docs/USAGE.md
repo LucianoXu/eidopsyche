@@ -28,8 +28,8 @@ $ eidos gate daemon &
 $ eidos gate relay &
 ```
 
-The daemon logs to stderr: `mindgate-daemon starting state_dir=...`
-The relay logs to stderr: `mindgate-relay listening 127.0.0.1:22895 mode=paired`
+The daemon logs to stderr: `eidos-gate-daemon starting state_dir=...`
+The relay logs to stderr: `eidos-gate-relay listening 127.0.0.1:22895 mode=paired`
 
 ## Step 2 — Each prints their card
 

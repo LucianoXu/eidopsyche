@@ -27,7 +27,7 @@ var daemonCmd = &cobra.Command{
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
-		fmt.Fprintf(os.Stderr, "mindgate-daemon starting state_dir=%s\n", dir)
+		fmt.Fprintf(os.Stderr, "eidos-gate-daemon starting state_dir=%s\n", dir)
 		return d.Run(ctx)
 	},
 }

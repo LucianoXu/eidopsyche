@@ -60,7 +60,7 @@ var relayCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(os.Stderr, "mindgate-relay listening %s mode=%s\n", listen, mode)
+		fmt.Fprintf(os.Stderr, "eidos-gate-relay listening %s mode=%s\n", listen, mode)
 		errc := make(chan error, 1)
 		go func() { errc <- srv.ListenAndServe() }()
 		select {
