@@ -60,36 +60,57 @@ func (a dashboardAdapter) Send(ctx context.Context, toPubkey string, env envelop
 	}
 	a.d.recordSelfWrap(wrapSelf.ID)
 
-	urls, err := a.d.ownRelayURLs(ctx)
-	if err != nil {
-		return "", err
+	// Union: own_relays + recipient.Relays (when known) + fallbacks. Mirrors
+	// the existing IPC sendMessage handler so dashboard sends behave the same.
+	targets := map[string]struct{}{}
+	if urls, err := a.d.ownRelayURLs(ctx); err == nil {
+		for _, u := range urls {
+			targets[u] = struct{}{}
+		}
 	}
+	if c, err := a.d.Repo.Get(ctx, toPubkey); err == nil {
+		for _, u := range c.Relays {
+			targets[u] = struct{}{}
+		}
+	}
+	for _, u := range a.d.Cfg.Publish.FallbackRelays {
+		targets[u] = struct{}{}
+	}
+	urls := make([]string, 0, len(targets))
+	for u := range targets {
+		urls = append(urls, u)
+	}
+
 	publishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	res := a.d.Pool.Publish(publishCtx, urls, wrapBob)
 	_ = a.d.Pool.Publish(publishCtx, urls, wrapSelf)
 
+	accepted := []string{}
 	for _, r := range res {
 		if r.OK {
-			now := time.Now().Unix()
-			sent := inbox.Sent{
-				EventID:     wrapBob.ID,
-				SelfEventID: wrapSelf.ID,
-				To:          toPubkey,
-				Kind:        14,
-				Content:     content,
-				RumorAt:     now,
-				SentAt:      now,
-				AcceptedBy:  []string{r.Relay},
-				Final:       true,
-			}
-			_ = a.d.Box.AppendOutbox(sent)
-			sc := sent
-			a.d.emitDashEvent(dashboard.Event{Kind: "outbox.message", Sent: &sc})
-			return wrapBob.ID, nil
+			accepted = append(accepted, r.Relay)
 		}
 	}
-	return "", fmt.Errorf("no relay accepted publish on %d urls", len(urls))
+	if len(accepted) == 0 {
+		return "", fmt.Errorf("no relay accepted publish on %d urls", len(urls))
+	}
+	now := time.Now().Unix()
+	sent := inbox.Sent{
+		EventID:     wrapBob.ID,
+		SelfEventID: wrapSelf.ID,
+		To:          toPubkey,
+		Kind:        14,
+		Content:     content,
+		RumorAt:     now,
+		SentAt:      now,
+		AcceptedBy:  accepted,
+		Final:       true,
+	}
+	_ = a.d.Box.AppendOutbox(sent)
+	sc := sent
+	a.d.emitDashEvent(dashboard.Event{Kind: "outbox.message", Sent: &sc})
+	return wrapBob.ID, nil
 }
 
 func (a dashboardAdapter) SubscribeEvents() (<-chan dashboard.Event, func()) {

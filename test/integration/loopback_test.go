@@ -90,7 +90,12 @@ func bringUp(t *testing.T, name string, modeOpt ...relayd.Mode) *instance {
 		db.Close()
 	}
 
-	if err := config.Save(filepath.Join(dir, "config.toml"), config.Defaults()); err != nil {
+	cfg := config.Defaults()
+	// Each test instance gets its own dashboard port so two instances on
+	// the same host don't conflict on the default 127.0.0.1:22893.
+	// freePort returns "127.0.0.1:NNNNN" which is exactly what dashboard.Listen wants.
+	cfg.Dashboard.Listen = freePort(t)
+	if err := config.Save(filepath.Join(dir, "config.toml"), cfg); err != nil {
 		t.Fatal(err)
 	}
 
