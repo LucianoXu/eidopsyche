@@ -1,0 +1,21 @@
+{{define "thread"}}
+<div class="thread-header">
+  <strong>{{.Counterpart.Label}}</strong>
+  <span class="tier-badge">{{.Counterpart.Tier}}</span>
+</div>
+<div class="thread-body" id="thread-body" sse-swap="inbox.message,outbox.message" hx-swap="beforeend">
+  {{range .Bubbles}}
+    {{template "bubble" .}}
+  {{else}}
+    <div class="empty">No messages yet — say hi.</div>
+  {{end}}
+</div>
+<form class="compose"
+      hx-post="/thread/{{.Counterpart.Pubkey}}/send"
+      hx-target="#thread-body"
+      hx-swap="beforeend"
+      hx-on::after-request="if(event.detail.successful){this.reset()}">
+  <input type="text" name="text" placeholder="Reply to {{.Counterpart.Label}}…" required autofocus>
+  <button type="submit">Send</button>
+</form>
+{{end}}

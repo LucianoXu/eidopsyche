@@ -1,0 +1,27 @@
+{{define "shell"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1024">
+<title>eidos-gate · {{.OwnLabel}}</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/htmx.min.js"></script>
+<script src="/static/htmx-ext-sse.js"></script>
+</head>
+<body hx-ext="sse" sse-connect="/events">
+<header class="topbar">
+  <strong>eidos-gate</strong>
+  <span class="own-id" title="{{.OwnNpub}}">{{.OwnLabel}} · {{truncate 16 .OwnNpub}}</span>
+</header>
+<main class="layout">
+  <aside class="sidebar" id="sidebar"
+         hx-get="/sidebar/contacts"
+         hx-trigger="sse:contact.added,sse:contact.removed,sse:contact.relabeled">
+    {{template "sidebar-inner" .Sidebar}}
+  </aside>
+  <section class="main" id="main">
+    {{.Main}}
+  </section>
+</main>
+</body>
+</html>{{end}}

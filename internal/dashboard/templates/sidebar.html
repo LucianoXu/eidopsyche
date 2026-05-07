@@ -1,0 +1,24 @@
+{{define "sidebar"}}{{template "sidebar-inner" .}}{{end}}
+
+{{define "sidebar-inner"}}
+<h3>Inbox</h3>
+<a href="/messages" hx-get="/messages" hx-target="#main" hx-push-url="true">All messages</a>
+<a href="/messages?malformed=1" hx-get="/messages?malformed=1" hx-target="#main" hx-push-url="true">Soft-rejected</a>
+
+<h3>Contacts</h3>
+{{range .Contacts}}
+<a href="/thread/{{.Pubkey}}"
+   hx-get="/thread/{{.Pubkey}}"
+   hx-target="#main"
+   hx-push-url="true"
+   class="{{if .Active}}active{{end}}">
+  <span>{{.Label}} <span class="tier-badge">{{.Tier}}</span></span>
+  {{if .LastSeen}}<span class="dim">{{reltime .LastSeen}}</span>{{end}}
+</a>
+{{else}}
+<div class="empty" style="padding:16px">No contacts yet.</div>
+{{end}}
+
+<h3>Compose</h3>
+<button hx-get="/compose" hx-target="#main">+ Compose to npub…</button>
+{{end}}
