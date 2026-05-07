@@ -121,64 +121,70 @@ next steps:
 
 ## Start the daemon and relay
 
-In two terminals (or via systemd, see below):
-
 ```sh
-eidos gate daemon
-eidos gate relay
+eidos gate start    # installs systemd user units, enables and starts both
+eidos gate status   # show installed / enabled / active state per unit
+eidos gate stop     # stop without uninstalling
 ```
+
+`start` writes `eidos-gate-daemon.service` and `eidos-gate-relay.service`
+under `~/.config/systemd/user/`, then `systemctl --user enable --now`s them.
+The units restart on failure and survive your shell exiting. To survive a
+full logout (e.g., on a headless server), enable lingering once for your
+user: `loginctl enable-linger <username>`.
 
 The default relay binds `127.0.0.1:22895`. To accept inbound from a peer on
 another host, change `relay.listen` in `config.toml` to `0.0.0.0:22895` (and
 configure firewall / DNS accordingly). The relay also requires
 `relay.public_url` to be set to the externally reachable WebSocket URL so
-that your card URI is correct.
+that your card URI is correct. After config changes, run `eidos gate start`
+again — it re-applies the unit files and is idempotent — or restart with
+`systemctl --user restart eidos-gate-{daemon,relay}`.
 
-## Sample systemd user units
+### System-wide install
 
-`~/.config/systemd/user/eidos-gate-daemon.service`:
+For shared / production hosts, write units to `/etc/systemd/system/`
+instead so they survive across users and start at boot:
 
-```ini
-[Unit]
-Description=Eidopsyche gate daemon
-After=network-online.target
-
-[Service]
-Type=simple
-ExecStart=%h/.local/bin/eidos gate daemon
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
+```sh
+sudo eidos gate start --system
+sudo eidos gate status --system
+sudo eidos gate stop --system
 ```
 
-`~/.config/systemd/user/eidos-gate-relay.service`:
+System-mode units run as root by default; tighten with a dedicated
+service-level `User=` directive if you need least-privilege.
 
-```ini
-[Unit]
-Description=Eidopsyche gate paired relay
-After=eidos-gate-daemon.service
+### Foreground mode
 
-[Service]
-Type=simple
-ExecStart=%h/.local/bin/eidos gate relay
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
-```
-
-Then `systemctl --user enable --now eidos-gate-daemon eidos-gate-relay`.
+The original `eidos gate daemon` and `eidos gate relay` commands still work
+and run in the foreground — useful for debugging or for environments
+without systemd. They are exactly what `eidos gate start`'s units invoke.
 
 ## Backup
 
-`tar czf eidos-gate-state.tar.gz "${EIDOS_GATE_HOME:-$HOME/.eidos/gate}/"`.
+```sh
+tar czf eidos-gate-state.tar.gz "${EIDOS_GATE_HOME:-$HOME/.eidos/gate}/"
+```
+
 The archive contains everything that defines your identity and history.
-Restore by extracting on the target host and running `eidos gate daemon`
-(and `eidos gate relay` if you also run your own).
+Restore by stopping the services (`eidos gate stop`), extracting on the
+target host, and running `eidos gate start` to bring the daemon and relay
+back up.
 
-## Resetting
+## Wiping everything
 
-To start over, stop the daemon and relay, then
-`rm -rf "${EIDOS_GATE_HOME:-$HOME/.eidos/gate}"`. The next `eidos gate init`
-generates a new identity (npub).
+```sh
+eidos gate purge          # confirms first
+eidos gate purge --yes    # for scripts / CI
+```
+
+`purge` stops the services, removes the systemd unit files, reloads
+systemd, and deletes the gate state directory (key, state.db, config.toml,
+relay/). It is idempotent on partially-installed setups, so it is safe to
+run as a teardown step in test harnesses.
+
+## Resetting to a fresh identity
+
+`eidos gate purge --yes` is the supported reset path; the next
+`eidos gate init --label <name>` generates a new identity (and a new npub).

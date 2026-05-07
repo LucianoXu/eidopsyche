@@ -117,8 +117,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  npub: %s\n", k.Npub)
 	fmt.Printf("  hex:  %s\n", k.PublicHex)
 	fmt.Println("\nnext steps:")
-	fmt.Println("  1) start daemon: mindgate daemon")
-	fmt.Println("  2) start relay:  mindgate relay")
-	fmt.Println("  3) share card:   mindgate card")
+	fmt.Println("  1) start services: eidos gate start")
+	fmt.Println("  2) share card:     eidos gate card")
 	return nil
 }

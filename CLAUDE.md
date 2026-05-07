@@ -29,6 +29,7 @@ eidopsyche/
 │   ├── ipc/                  # forge ↔ gate unix socket protocol (typed contracts)
 │   ├── wake/                 # Wake signal file format (HeartBeat / MindGate / planning)
 │   ├── contacts/             # Contacts list with identity tiers (master / friend / acquaintance / blocklist)
+│   ├── service/              # systemd unit installer / lifecycle for `eidos gate start/stop/status/purge` (Linux)
 │   ├── update/               # Update check, cache, prompt, self-update wrapper
 │   └── config/               # Shared configuration loading
 ├── pkg/                      # Stable public interfaces (empty — promote from internal/ as APIs stabilize)
