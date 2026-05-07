@@ -90,15 +90,58 @@ func TestConfigKeys(t *testing.T) {
 			"log_level",
 			"daemon.socket",
 			"daemon.shutdown_grace_seconds",
+			"relay.enabled",
 			"relay.mode",
 			"relay.listen",
-			"relay.public_url",
 			"relay.data_dir",
 		}
 		for _, key := range expectedKeys {
 			if _, ok := configKeys[key]; !ok {
 				t.Errorf("missing expected config key: %s", key)
 			}
+		}
+	})
+
+	t.Run("relay.public_url removed", func(t *testing.T) {
+		if _, ok := configKeys["relay.public_url"]; ok {
+			t.Fatal("relay.public_url should have been removed")
+		}
+	})
+
+	t.Run("set relay.enabled toggles bool", func(t *testing.T) {
+		cfg := config.Defaults()
+		k := configKeys["relay.enabled"]
+		if err := k.set(&cfg, "true"); err != nil {
+			t.Fatalf("set true: %v", err)
+		}
+		if got := k.get(&cfg); got != "true" {
+			t.Fatalf("get = %q after set true", got)
+		}
+		if err := k.set(&cfg, "false"); err != nil {
+			t.Fatalf("set false: %v", err)
+		}
+		if got := k.get(&cfg); got != "false" {
+			t.Fatalf("get = %q after set false", got)
+		}
+	})
+
+	t.Run("set relay.enabled rejects garbage", func(t *testing.T) {
+		cfg := config.Defaults()
+		k := configKeys["relay.enabled"]
+		if err := k.set(&cfg, "maybe"); err == nil {
+			t.Fatal("expected error for non-bool value")
+		}
+	})
+
+	t.Run("set relay.listen='' rejected with helpful message", func(t *testing.T) {
+		cfg := config.Defaults()
+		k := configKeys["relay.listen"]
+		err := k.set(&cfg, "")
+		if err == nil {
+			t.Fatal("expected error for empty relay.listen, got nil")
+		}
+		if !strings.Contains(err.Error(), "relay.enabled = false") {
+			t.Fatalf("error should redirect to relay.enabled, got: %v", err)
 		}
 	})
 

@@ -72,7 +72,7 @@ func (l *launchd) Install(ctx context.Context) error {
 		return fmt.Errorf("create log dir: %w", err)
 	}
 
-	for _, u := range l.units() {
+	for _, u := range l.installUnits() {
 		path, err := l.plistPath(u.label)
 		if err != nil {
 			return err
@@ -93,7 +93,7 @@ func (l *launchd) Start(ctx context.Context) error {
 		return err
 	}
 	domain := l.domainTarget()
-	for _, u := range l.units() {
+	for _, u := range l.installUnits() {
 		// Best-effort bootout — service may not be loaded yet.
 		_, _ = l.launchctl(ctx, "bootout", l.serviceTarget(u.label))
 
@@ -192,4 +192,22 @@ func (l *launchd) units() []unitDef {
 		{label: DaemonUnitName, args: []string{"gate", "daemon"}},
 		{label: RelayUnitName, args: []string{"gate", "relay"}},
 	}
+}
+
+// installUnits returns the subset of units that Install / Start should
+// manage, filtered by cfg.WithRelay. Stop, Uninstall, and Status keep
+// calling units() so residuals stay reachable for cleanup.
+func (l *launchd) installUnits() []unitDef {
+	all := l.units()
+	if l.cfg.WithRelay {
+		return all
+	}
+	out := make([]unitDef, 0, 1)
+	for _, u := range all {
+		if u.label == RelayUnitName {
+			continue
+		}
+		out = append(out, u)
+	}
+	return out
 }

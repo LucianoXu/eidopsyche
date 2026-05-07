@@ -28,12 +28,14 @@ Useful for tearing down test deployments and starting from a clean slate.
 
 By default purge prompts for confirmation. Pass --yes to skip the prompt
 (intended for scripts and CI).`,
+	// v0.4 detection is skipped for purge by name in rootCmd's
+	// PersistentPreRunE so v0.4 users can clean up before re-init.
 	RunE: func(cmd *cobra.Command, args []string) error {
 		stateDir, err := config.ResolveStateDir(globalStateDir)
 		if err != nil {
 			return err
 		}
-		mgr, _ := buildServiceManager() // may be nil on platforms without service support — fine, we still wipe state
+		mgr, _ := buildServiceManager(false) // may be nil on platforms without service support — fine, we still wipe state
 
 		fmt.Println("This will permanently remove:")
 		fmt.Printf("  - state directory: %s\n", stateDir)

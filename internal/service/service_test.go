@@ -180,3 +180,53 @@ func TestScopeString(t *testing.T) {
 		t.Errorf("ScopeSystem: %q", ScopeSystem.String())
 	}
 }
+
+func TestConfigWithRelayDefault(t *testing.T) {
+	// Daemon-only is the default; opting in to the local relay must be
+	// explicit at the call site.
+	cfg := Config{}
+	if cfg.WithRelay {
+		t.Errorf("zero-value Config.WithRelay = true, want false")
+	}
+}
+
+func TestSystemdInstallDaemonOnly(t *testing.T) {
+	tmp := t.TempDir()
+	mgr := &systemd{cfg: Config{
+		BinaryPath: "/usr/local/bin/eidos",
+		StateDir:   "/tmp/test-state",
+		Scope:      ScopeUser,
+		UnitDir:    tmp,
+		WithRelay:  false,
+	}}
+	// Install attempts `systemctl daemon-reload` at the end of its body;
+	// in the test env systemctl typically isn't on PATH so that step
+	// errors. We deliberately discard the error here because the unit
+	// files are written *before* the daemon-reload call, and those file
+	// artifacts are what this test inspects.
+	_ = mgr.Install(context.Background())
+	if _, err := os.Stat(filepath.Join(tmp, DaemonUnitName+".service")); err != nil {
+		t.Errorf("daemon unit not written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, RelayUnitName+".service")); !os.IsNotExist(err) {
+		t.Errorf("relay unit was written despite WithRelay=false; err=%v", err)
+	}
+}
+
+func TestSystemdInstallBothUnits(t *testing.T) {
+	tmp := t.TempDir()
+	mgr := &systemd{cfg: Config{
+		BinaryPath: "/usr/local/bin/eidos",
+		StateDir:   "/tmp/test-state",
+		Scope:      ScopeUser,
+		UnitDir:    tmp,
+		WithRelay:  true,
+	}}
+	_ = mgr.Install(context.Background())
+	if _, err := os.Stat(filepath.Join(tmp, DaemonUnitName+".service")); err != nil {
+		t.Errorf("daemon unit not written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, RelayUnitName+".service")); err != nil {
+		t.Errorf("relay unit not written despite WithRelay=true: %v", err)
+	}
+}

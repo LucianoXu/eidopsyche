@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -28,7 +29,12 @@ func addSystemFlag(cmd *cobra.Command) {
 // path, the resolved gate state directory, and the --system flag. Returns
 // a typed error when the host platform has no service-manager support so
 // callers can produce a friendly message.
-func buildServiceManager() (service.Manager, error) {
+//
+// withRelay controls whether Install / Start will manage the relay unit.
+// stop / status / purge pass false because their backing methods iterate
+// both unit names regardless; only start needs the live config value
+// (use buildServiceManagerForStart for that).
+func buildServiceManager(withRelay bool) (service.Manager, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("locate eidos binary: %w", err)
@@ -45,6 +51,7 @@ func buildServiceManager() (service.Manager, error) {
 		BinaryPath: exe,
 		StateDir:   stateDir,
 		Scope:      scope,
+		WithRelay:  withRelay,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrUnsupported) {
@@ -56,6 +63,28 @@ Run the daemon and relay manually instead:
 		return nil, err
 	}
 	return mgr, nil
+}
+
+// loadGateConfig resolves the state dir, reads config.toml from it, and
+// returns the parsed config plus the state dir. A missing config.toml is
+// reported as a typed error suggesting `eidos gate init`; a malformed
+// config.toml is surfaced verbatim. Used wherever a command's behavior
+// depends on the persisted config — silent fallback to Defaults() can
+// hide real problems (uninitialized state dir, hand-edited typo).
+func loadGateConfig() (config.Config, string, error) {
+	stateDir, err := config.ResolveStateDir(globalStateDir)
+	if err != nil {
+		return config.Config{}, "", err
+	}
+	path := filepath.Join(stateDir, "config.toml")
+	cfg, err := config.Load(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return config.Config{}, stateDir, fmt.Errorf("state directory not initialized at %s; run `eidos gate init`", stateDir)
+		}
+		return config.Config{}, stateDir, fmt.Errorf("read %s: %w", path, err)
+	}
+	return cfg, stateDir, nil
 }
 
 // printStatus formats Manager.Status() output for human eyes.

@@ -23,11 +23,16 @@ type DaemonConfig struct {
 }
 
 type RelayConfig struct {
-	Mode      string `toml:"mode"`
-	Listen    string `toml:"listen"`
-	PublicURL string `toml:"public_url"`
-	DataDir   string `toml:"data_dir"`
+	Enabled bool   `toml:"enabled"`
+	Mode    string `toml:"mode"`
+	Listen  string `toml:"listen"`
+	DataDir string `toml:"data_dir"`
 }
+
+// RelayEnabled reports whether the embedded relay should run on this host.
+// Single source of truth: every code path that asks "should I spin up the
+// relay" routes through this method.
+func (c Config) RelayEnabled() bool { return c.Relay.Enabled }
 
 type PublishConfig struct {
 	FallbackRelays []string `toml:"fallback_relays"`
@@ -45,10 +50,10 @@ func Defaults() Config {
 			ShutdownGraceSeconds: 5,
 		},
 		Relay: RelayConfig{
-			Mode:      "paired",
-			Listen:    "0.0.0.0:22895",
-			PublicURL: "ws://127.0.0.1:22895",
-			DataDir:   "relay",
+			Enabled: false,
+			Mode:    "paired",
+			Listen:  "0.0.0.0:22895",
+			DataDir: "relay",
 		},
 	}
 }
@@ -59,6 +64,15 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 	return cfg, nil
+}
+
+// LoadWithMeta is Load + the BurntSushi/toml MetaData so callers can
+// distinguish "field absent" from "field present with zero value". Used by
+// v0.4 state-directory detection in cmd/eidos/gate.
+func LoadWithMeta(path string) (Config, toml.MetaData, error) {
+	cfg := Defaults()
+	meta, err := toml.DecodeFile(path, &cfg)
+	return cfg, meta, err
 }
 
 func Save(path string, cfg Config) error {

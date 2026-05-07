@@ -11,7 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/relayd"
 	"github.com/LucianoXu/eidopsyche/internal/store"
 )
@@ -25,11 +24,14 @@ var relayCmd = &cobra.Command{
 	Use:   "relay",
 	Short: "Run the embedded MindGate relay",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dir, err := config.ResolveStateDir(globalStateDir)
+		cfg, dir, err := loadGateConfig()
 		if err != nil {
 			return err
 		}
-		cfg, _ := config.Load(filepath.Join(dir, "config.toml"))
+		if !cfg.RelayEnabled() {
+			return fmt.Errorf(`local relay is disabled (relay.enabled = false in config.toml).
+to enable: eidos gate config set relay.enabled true && eidos gate config set relay.listen <host:port>`)
+		}
 		mode := relayMode
 		if mode == "" {
 			mode = cfg.Relay.Mode
