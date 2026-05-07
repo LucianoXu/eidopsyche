@@ -28,8 +28,11 @@ var initCmd = &cobra.Command{
 }
 
 func init() {
-	initCmd.Flags().StringVar(&initLabel, "label", "", "label for this identity (default user@hostname)")
+	initCmd.Flags().StringVar(&initLabel, "label", "", "label for this identity (required; how others see your card by default — change later with `eidos gate set-label`)")
 	initCmd.Flags().StringVar(&initListen, "listen", "", "relay listen address as host:port (e.g. 127.0.0.1:22896); sets relay.listen, relay.public_url, and the home relay row")
+	if err := initCmd.MarkFlagRequired("label"); err != nil {
+		panic(err) // Cobra returns nil for known flags; surfacing a panic here is appropriate for a setup bug.
+	}
 	rootCmd.AddCommand(initCmd)
 }
 
@@ -80,15 +83,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if err := db.SetMeta(ctx, "mindgate_version", version.Version); err != nil {
 		return err
 	}
-	label := initLabel
-	if label == "" {
-		host, _ := os.Hostname()
-		if host == "" {
-			host = "host"
-		}
-		label = "user@" + host
-	}
-	if err := db.SetMeta(ctx, "label", label); err != nil {
+	if err := db.SetMeta(ctx, "label", initLabel); err != nil {
 		return err
 	}
 

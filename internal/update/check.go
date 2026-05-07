@@ -11,9 +11,21 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// fetchLatestTag returns the tag_name of the latest published release.
-// The HTTP call is bounded by `timeout`; any error causes a clean error
-// return so callers can swallow it.
+// FetchLatestTag returns the tag_name of the latest published release.
+// The HTTP call is bounded by `timeout`; callers must handle errors —
+// commonly by swallowing them when the call is best-effort. Exported so
+// the self-update command can short-circuit on "already on latest".
+func FetchLatestTag(timeout time.Duration) (string, error) {
+	return fetchLatestTag(timeout)
+}
+
+// IsNewerVersion reports whether `latest` is strictly newer than `current`.
+// Both arguments are normalised — a leading 'v' is optional, and unparseable
+// values (including the "dev" sentinel) compare as "no upgrade".
+func IsNewerVersion(current, latest string) bool {
+	return isNewerVersion(current, latest)
+}
+
 func fetchLatestTag(timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()

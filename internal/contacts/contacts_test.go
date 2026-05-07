@@ -91,6 +91,28 @@ func TestGetByLabelUniqueAndAmbiguous(t *testing.T) {
 	}
 }
 
+func TestSetLabel(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	if err := repo.Add(ctx, Contact{Pubkey: "p1", Label: "old"}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := repo.SetLabel(ctx, "p1", "new"); err != nil {
+		t.Fatalf("SetLabel: %v", err)
+	}
+	got, err := repo.Get(ctx, "p1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Label != "new" {
+		t.Errorf("label: got %q, want %q", got.Label, "new")
+	}
+
+	if err := repo.SetLabel(ctx, "missing", "x"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing: got %v, want ErrNotFound", err)
+	}
+}
+
 func TestRemoveCascadesRelays(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
