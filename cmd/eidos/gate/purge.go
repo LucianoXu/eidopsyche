@@ -28,6 +28,9 @@ Useful for tearing down test deployments and starting from a clean slate.
 
 By default purge prompts for confirmation. Pass --yes to skip the prompt
 (intended for scripts and CI).`,
+	// Opt out of the v0.4 detection on the root command — purge is
+	// precisely how a v0.4 user cleans up so they can re-init.
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error { return nil },
 	RunE: func(cmd *cobra.Command, args []string) error {
 		stateDir, err := config.ResolveStateDir(globalStateDir)
 		if err != nil {

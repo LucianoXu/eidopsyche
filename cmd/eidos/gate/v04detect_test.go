@@ -58,6 +58,18 @@ log_level = "info"
 	}
 }
 
+func TestDetectV04_PurgeSkipsDetection(t *testing.T) {
+	// purge must keep working on v0.4 state dirs — that's how users clean
+	// up. The opt-out is a PersistentPreRunE on purgeCmd that returns nil
+	// (overriding the root command's hook).
+	if purgeCmd.PersistentPreRunE == nil {
+		t.Fatal("purgeCmd.PersistentPreRunE is nil — v0.4 users cannot purge")
+	}
+	if err := purgeCmd.PersistentPreRunE(purgeCmd, nil); err != nil {
+		t.Fatalf("purgeCmd opt-out returned error: %v", err)
+	}
+}
+
 func TestDetectV04_V05ConfigEnabledTrue_ReturnsNil(t *testing.T) {
 	dir := writeConfig(t, `
 log_level = "info"
