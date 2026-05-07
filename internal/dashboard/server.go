@@ -100,11 +100,17 @@ func sameOriginGuard(next http.Handler) http.Handler {
 	})
 }
 
-// registerHandlers is implemented incrementally; later tasks fill it in.
-// For Task 2, define a stub that returns 404 for everything so Run can
-// stand up without compile errors.
+// registerHandlers wires up all dashboard routes. Templates are parsed once
+// here at startup; on parse failure the dashboard returns 500 on every
+// request so the operator notices.
 func registerHandlers(mux *http.ServeMux, deps DashboardDeps, logger *slog.Logger) {
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		http.NotFound(w, r)
-	})
+	r, err := newRenderer()
+	if err != nil {
+		logger.Error("dashboard renderer init failed", "err", err)
+		mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+			http.Error(w, "dashboard renderer unavailable", 500)
+		})
+		return
+	}
+	registerHandlersWithRenderer(mux, deps, r, logger)
 }
