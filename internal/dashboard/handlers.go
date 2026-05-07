@@ -424,4 +424,3 @@ func shortenPubkey(pk string) string {
 	}
 	return pk[:8] + "…" + pk[len(pk)-4:]
 }
-
