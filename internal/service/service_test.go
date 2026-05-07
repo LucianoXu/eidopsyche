@@ -180,3 +180,12 @@ func TestScopeString(t *testing.T) {
 		t.Errorf("ScopeSystem: %q", ScopeSystem.String())
 	}
 }
+
+func TestConfigWithRelayDefault(t *testing.T) {
+	// Daemon-only is the default; opting in to the local relay must be
+	// explicit at the call site.
+	cfg := Config{}
+	if cfg.WithRelay {
+		t.Errorf("zero-value Config.WithRelay = true, want false")
+	}
+}

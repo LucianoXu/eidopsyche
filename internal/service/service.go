@@ -50,6 +50,12 @@ type Config struct {
 	// UnitDir overrides the platform-derived unit directory; intended for
 	// tests. Empty means "use the platform default for Scope".
 	UnitDir string
+	// WithRelay controls whether Install / Start manage the relay unit.
+	// false (default): only the daemon unit is managed; any residual relay
+	// unit on disk is left untouched. true: both units are managed. Stop /
+	// Uninstall / Status iterate both names regardless so residuals are
+	// always reachable for cleanup.
+	WithRelay bool
 }
 
 // Status describes one managed unit.
