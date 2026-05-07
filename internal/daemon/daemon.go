@@ -15,12 +15,14 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
+	"github.com/LucianoXu/eidopsyche/internal/envelope"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
 	"github.com/LucianoXu/eidopsyche/internal/invitedb"
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
 	"github.com/LucianoXu/eidopsyche/internal/nostr"
 	"github.com/LucianoXu/eidopsyche/internal/store"
+	"github.com/LucianoXu/eidopsyche/internal/version"
 )
 
 // Daemon holds all runtime state for a running MindGate instance.
@@ -287,14 +289,16 @@ func (d *Daemon) handleIncoming(ctx context.Context, ev *gnostr.Event) {
 		d.Log.Warn("unwrap failed", "event_id", ev.ID, "err", err)
 		return
 	}
-	if rumor.PubKey == d.Key.PublicHex {
-		d.Log.Debug("self-copy echo dropped (sender=self)", "event_id", ev.ID)
-		return
-	}
+
+	// Self-copy echo detection happens upstream via selfWrapIDs (matched on
+	// the outer wrap ID). We deliberately do NOT drop solely on
+	// rumor.PubKey == self.PublicHex here, because envelope-v1 commands are
+	// authorized only when sender == self (spec §5.1) and must reach
+	// dispatchEnvelope.
 
 	switch rumor.Kind {
 	case 14:
-		d.handleChatMessage(ctx, ev, rumor)
+		d.dispatchEnvelope(ctx, ev, rumor)
 	case 25001:
 		d.handleInviteRedemption(ctx, ev, rumor)
 	default:
@@ -302,28 +306,131 @@ func (d *Daemon) handleIncoming(ctx context.Context, ev *gnostr.Event) {
 	}
 }
 
-// handleChatMessage is the existing chat message path: contact filter, inbox
-// append, broadcast.
-func (d *Daemon) handleChatMessage(ctx context.Context, ev *gnostr.Event, rumor *gnostr.Event) {
-	c, err := d.Repo.Get(ctx, rumor.PubKey)
-	if err != nil || c.Tier == contacts.TierBlocked {
-		d.Log.Debug("dropped non-contact / blocked", "from", rumor.PubKey)
+// dispatchEnvelope decodes the kind:14 rumor's content as a v1 envelope and
+// dispatches per spec §9.1. Decode errors and forbidden combinations are
+// soft-rejected: persisted to inbox with Malformed=true and a RejectReason,
+// without triggering chat or command paths.
+func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *gnostr.Event) {
+	env, err := envelope.Decode(rumor.Content)
+	if err != nil {
+		reason := "schema_violation"
+		switch {
+		case errors.Is(err, envelope.ErrNotEnvelope):
+			reason = "not_envelope"
+		case errors.Is(err, envelope.ErrUnsupportedVersion):
+			reason = "unsupported_version"
+		}
+		d.persistSoftReject(ev, rumor, reason)
 		return
 	}
+
+	switch env.Type {
+	case envelope.TypeChat:
+		c, err := d.Repo.Get(ctx, rumor.PubKey)
+		if err != nil || c.Tier == contacts.TierBlocked {
+			d.Log.Debug("dropped non-contact / blocked", "from", rumor.PubKey)
+			return
+		}
+		msg := inbox.Message{
+			EventID:    ev.ID,
+			InnerID:    rumor.ID,
+			From:       rumor.PubKey,
+			Kind:       rumor.Kind,
+			Content:    rumor.Content,
+			RumorAt:    int64(rumor.CreatedAt),
+			ReceivedAt: time.Now().Unix(),
+		}
+		if err := d.Box.AppendInbox(msg); err != nil {
+			d.Log.Error("append inbox", "err", err)
+			return
+		}
+		d.broadcastInbox(msg)
+
+	case envelope.TypeCommand:
+		if rumor.PubKey != d.Key.PublicHex {
+			d.persistSoftReject(ev, rumor, "unauthorized_command")
+			return
+		}
+		reply, ok, runErr := dispatchCommand(ctx, d, env.Command.Name, env.Command.Args)
+		if !ok {
+			d.persistSoftReject(ev, rumor, "unknown_command")
+			return
+		}
+		if runErr != nil {
+			reply = "error: " + runErr.Error()
+		}
+		if err := d.sendChatReply(ctx, rumor.PubKey, reply); err != nil {
+			d.Log.Warn("command reply failed", "err", err)
+		}
+	}
+}
+
+// persistSoftReject appends the rumor to inbox with Malformed=true and the
+// given reason, then broadcasts. The Content field stores rumor.Content
+// as-received so operators can debug interop issues.
+func (d *Daemon) persistSoftReject(ev *gnostr.Event, rumor *gnostr.Event, reason string) {
+	d.Log.Info("soft-reject", "reason", reason, "from", rumor.PubKey, "event_id", ev.ID)
 	msg := inbox.Message{
-		EventID:    ev.ID,
-		InnerID:    rumor.ID,
-		From:       rumor.PubKey,
-		Kind:       rumor.Kind,
-		Content:    rumor.Content,
-		RumorAt:    int64(rumor.CreatedAt),
-		ReceivedAt: time.Now().Unix(),
+		EventID:      ev.ID,
+		InnerID:      rumor.ID,
+		From:         rumor.PubKey,
+		Kind:         rumor.Kind,
+		Content:      rumor.Content,
+		RumorAt:      int64(rumor.CreatedAt),
+		ReceivedAt:   time.Now().Unix(),
+		Malformed:    true,
+		RejectReason: reason,
 	}
 	if err := d.Box.AppendInbox(msg); err != nil {
-		d.Log.Error("append inbox", "err", err)
+		d.Log.Error("append inbox (soft-reject)", "err", err)
 		return
 	}
 	d.broadcastInbox(msg)
+}
+
+// sendChatReply wraps text in a v1 chat envelope and publishes a NIP-17
+// gift wrap to the given pubkey (which, for v1 commands, is always self).
+// In tests, d.testSendChatReply takes precedence to avoid network I/O.
+func (d *Daemon) sendChatReply(ctx context.Context, toPubkey string, text string) error {
+	if d.testSendChatReply != nil {
+		return d.testSendChatReply(ctx, toPubkey, text)
+	}
+	env := envelope.Envelope{
+		V:      envelope.SchemaVersion,
+		Type:   envelope.TypeChat,
+		Text:   text,
+		Client: &envelope.Client{Name: "eidos", Ver: version.Version},
+	}
+	content, err := envelope.Encode(env)
+	if err != nil {
+		return err
+	}
+	wrap, _, err := nostr.Wrap(d.Key.PrivateHex, toPubkey, content)
+	if err != nil {
+		return err
+	}
+	urls := d.ownRelayURLs(ctx)
+	publishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	_ = d.Pool.Publish(publishCtx, urls, wrap)
+	return nil
+}
+
+// ownRelayURLs returns the URLs from own_relays for command-reply publish.
+func (d *Daemon) ownRelayURLs(ctx context.Context) []string {
+	rows, err := d.DB.QueryContext(ctx, `SELECT relay_url FROM own_relays`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var urls []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err == nil {
+			urls = append(urls, u)
+		}
+	}
+	return urls
 }
 
 // handleInviteRedemption processes an incoming kind:25001 invite-redemption rumor.
