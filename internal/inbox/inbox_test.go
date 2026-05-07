@@ -67,3 +67,29 @@ func TestDailyPath(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestMessage_LegacyRowReadsAsZero(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+	// Pre-envelope (legacy) message: Malformed/RejectReason absent.
+	legacy := Message{
+		EventID:    "abc",
+		From:       "deadbeef",
+		Kind:       14,
+		Content:    "hello world",
+		ReceivedAt: 1700000000,
+	}
+	if err := s.AppendInbox(legacy); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListInbox(nil, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len=%d", len(got))
+	}
+	if got[0].Malformed != false || got[0].RejectReason != "" {
+		t.Fatalf("legacy row got non-zero new fields: %+v", got[0])
+	}
+}
