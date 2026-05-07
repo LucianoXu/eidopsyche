@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/LucianoXu/eidopsyche/internal/config"
 )
 
 var startCmd = &cobra.Command{
@@ -28,6 +30,22 @@ units may need 'loginctl enable-linger <user>' to survive a full logout).`,
 			return err
 		}
 		ctx := context.Background()
+
+		// Preflight the relay port unless our own relay already holds it.
+		// This catches stale processes (e.g., the v0 mindgate binary
+		// lingering from a prior deploy-test) before we hand off to systemd
+		// / launchd, where a port conflict surfaces only as a unit going
+		// straight to "failed" with the real reason buried in journalctl.
+		if !relayAlreadyManaged(ctx, mgr) {
+			stateDir, err := config.ResolveStateDir(globalStateDir)
+			if err != nil {
+				return err
+			}
+			if err := preflightRelayPort(stateDir); err != nil {
+				return err
+			}
+		}
+
 		if err := mgr.Start(ctx); err != nil {
 			return err
 		}
