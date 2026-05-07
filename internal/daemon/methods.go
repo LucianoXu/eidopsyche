@@ -10,6 +10,7 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/internal/card"
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
+	"github.com/LucianoXu/eidopsyche/internal/envelope"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
 	"github.com/LucianoXu/eidopsyche/internal/invite"
@@ -266,30 +267,46 @@ func relayRemove(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	return map[string]bool{"ok": true}, nil
 }
 
-// sendMessage NIP-17 gift-wraps a message and publishes it to the recipient's
-// relays plus our own. It also publishes a self-copy for archive purposes.
+// sendMessage NIP-17 gift-wraps an envelope-v1 payload and publishes it to
+// the recipient's relays plus our own. It also publishes a self-copy for
+// archive purposes.
 func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p struct {
-		To      string `json:"to"`
-		Content string `json:"content"`
+		To       string             `json:"to"`
+		Envelope *envelope.Envelope `json:"envelope"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
 	}
+	if p.Envelope == nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: "envelope is required"}
+	}
+	content, err := envelope.Encode(*p.Envelope)
+	if err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+
 	pk, ipcErr := resolveTarget(ctx, d, p.To)
 	if ipcErr != nil {
 		return nil, ipcErr
 	}
 	c, err := d.Repo.Get(ctx, pk)
 	if err != nil {
-		return nil, &ipc.Error{Code: ipc.ErrContactNotFound, Message: p.To}
+		// Self-loopback: sending to own pubkey is allowed even when not in
+		// contacts. The dispatcher's authority rule (sender==self) handles
+		// commands; chat-to-self lands in the operator's own inbox via the
+		// self-copy publish.
+		if pk != d.Key.PublicHex {
+			return nil, &ipc.Error{Code: ipc.ErrContactNotFound, Message: p.To}
+		}
+		c = &contacts.Contact{Pubkey: pk}
 	}
 
-	wrapBob, rumorID, err := nostr.Wrap(d.Key.PrivateHex, pk, p.Content)
+	wrapBob, rumorID, err := nostr.Wrap(d.Key.PrivateHex, pk, content)
 	if err != nil {
 		return nil, internalErr(err)
 	}
-	wrapSelf, _, err := nostr.Wrap(d.Key.PrivateHex, d.Key.PublicHex, p.Content)
+	wrapSelf, _, err := nostr.Wrap(d.Key.PrivateHex, d.Key.PublicHex, content)
 	if err != nil {
 		return nil, internalErr(err)
 	}
@@ -302,7 +319,7 @@ func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 		InnerID:     rumorID,
 		To:          pk,
 		Kind:        14,
-		Content:     p.Content,
+		Content:     content,
 		RumorAt:     now,
 		SentAt:      now,
 		AcceptedBy:  nil,
