@@ -120,6 +120,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.Log.Info("ipc listening", "socket", socket)
 
 	go d.runSubscriber(ctx)
+	go func() {
+		_ = dashboard.Run(ctx, NewDashboardAdapter(d), d.Cfg.Dashboard, d.Log)
+	}()
 
 	return srv.Serve(ctx)
 }
