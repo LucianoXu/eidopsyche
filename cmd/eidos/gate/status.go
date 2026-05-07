@@ -18,7 +18,7 @@ var statusCmd = &cobra.Command{
 
 Pass --system to query system-mode units instead of user-mode.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		mgr, err := buildServiceManager()
+		mgr, err := buildServiceManager(false)
 		if err != nil {
 			return err
 		}

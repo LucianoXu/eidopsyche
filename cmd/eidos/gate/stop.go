@@ -15,7 +15,7 @@ var stopCmd = &cobra.Command{
 'eidos gate start' will bring them back up; 'eidos gate purge' removes the
 units entirely (and the state directory).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		mgr, err := buildServiceManager()
+		mgr, err := buildServiceManager(false)
 		if err != nil {
 			return err
 		}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -28,7 +29,12 @@ func addSystemFlag(cmd *cobra.Command) {
 // path, the resolved gate state directory, and the --system flag. Returns
 // a typed error when the host platform has no service-manager support so
 // callers can produce a friendly message.
-func buildServiceManager() (service.Manager, error) {
+//
+// withRelay controls whether Install / Start will manage the relay unit.
+// stop / status / purge pass false because their backing methods iterate
+// both unit names regardless; only start needs the live config value
+// (use buildServiceManagerForStart for that).
+func buildServiceManager(withRelay bool) (service.Manager, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("locate eidos binary: %w", err)
@@ -45,6 +51,7 @@ func buildServiceManager() (service.Manager, error) {
 		BinaryPath: exe,
 		StateDir:   stateDir,
 		Scope:      scope,
+		WithRelay:  withRelay,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrUnsupported) {
@@ -56,6 +63,18 @@ Run the daemon and relay manually instead:
 		return nil, err
 	}
 	return mgr, nil
+}
+
+// buildServiceManagerForStart loads config and constructs a Manager whose
+// Install / Start respect cfg.RelayEnabled(). All other lifecycle commands
+// (stop, status, purge) call buildServiceManager(false) directly.
+func buildServiceManagerForStart() (service.Manager, error) {
+	stateDir, err := config.ResolveStateDir(globalStateDir)
+	if err != nil {
+		return nil, err
+	}
+	cfg, _ := config.Load(filepath.Join(stateDir, "config.toml"))
+	return buildServiceManager(cfg.RelayEnabled())
 }
 
 // printStatus formats Manager.Status() output for human eyes.

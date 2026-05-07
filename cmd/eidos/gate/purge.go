@@ -33,7 +33,7 @@ By default purge prompts for confirmation. Pass --yes to skip the prompt
 		if err != nil {
 			return err
 		}
-		mgr, _ := buildServiceManager() // may be nil on platforms without service support — fine, we still wipe state
+		mgr, _ := buildServiceManager(false) // may be nil on platforms without service support — fine, we still wipe state
 
 		fmt.Println("This will permanently remove:")
 		fmt.Printf("  - state directory: %s\n", stateDir)
