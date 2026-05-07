@@ -38,6 +38,7 @@ eidopsyche/
 ├── install.sh                # One-line install / self-update script (hosted at raw.githubusercontent.com)
 ├── .goreleaser.yml           # Release tooling config
 ├── .github/workflows/        # ci.yml + release.yml
+├── README.md                 # User-facing entry point — install, quick start, docs index
 ├── SPEC.md                   # Project specification — source of truth for design intent
 ├── EXAMPLE.md                # Minimum deployment walkthrough
 └── CLAUDE.md                 # This file

@@ -38,6 +38,7 @@ archives:
         formats:
           - zip
     files:
+      - src: README.md
       - src: SPEC.md
       - src: EXAMPLE.md
       - src: docs/INSTALL.md
