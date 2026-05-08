@@ -181,18 +181,40 @@ func init() {
 	})
 	register(Key{
 		Path:        "dashboard.listen",
-		Description: "host:port for the dashboard webui. Loopback-only is enforced; non-loopback addresses are refused at startup.",
+		Description: "host:port for the dashboard webui. Loopback-only is enforced; non-loopback addresses are refused.",
 		Get:         func(c *Config) string { return c.Dashboard.Listen },
 		Set: func(c *Config, v string) error {
 			v = strings.TrimSpace(v)
 			if v == "" {
 				return fmt.Errorf("dashboard.listen must be a non-empty host:port; to disable the dashboard, set dashboard.enabled = false instead")
 			}
-			if _, _, err := net.SplitHostPort(v); err != nil {
+			host, _, err := net.SplitHostPort(v)
+			if err != nil {
 				return fmt.Errorf("dashboard.listen must be host:port, got %q: %w", v, err)
+			}
+			if !isLoopbackHost(host) {
+				return fmt.Errorf("dashboard.listen %q is not loopback; the daemon refuses to expose the dashboard on non-loopback addresses (e.g. 0.0.0.0 or a public IP). Use 127.0.0.1 or [::1]", v)
 			}
 			c.Dashboard.Listen = v
 			return nil
 		},
 	})
+}
+
+// isLoopbackHost mirrors internal/dashboard's isLoopback; duplicated here
+// to keep internal/config dependency-free. Bare port (host == "") is
+// treated as non-loopback because it binds all interfaces; "localhost"
+// is allowed alongside literal loopback IPs.
+func isLoopbackHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
 }
