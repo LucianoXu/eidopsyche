@@ -48,6 +48,15 @@ type Daemon struct {
 	selfWrapIDs map[string]struct{}
 	relayHealth *relayHealthStore
 
+	// configMu serialises read-modify-write of config.toml so two
+	// concurrent dashboard ConfigSet calls cannot lose updates by
+	// loading the same snapshot, mutating different keys, and saving
+	// over each other. Acquired by dashboardAdapter.ConfigSet only;
+	// the daemon does not hot-reload its in-memory config from the
+	// file (changes take effect on restart) so other paths don't
+	// need to take it.
+	configMu sync.Mutex
+
 	// testSendChatReply, if non-nil, replaces sendChatReply during tests
 	// to avoid actual NIP-17 publish over the network.
 	testSendChatReply func(ctx context.Context, toPubkey string, text string) error

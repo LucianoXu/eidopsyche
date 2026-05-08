@@ -1,0 +1,43 @@
+{{define "confirm_modal"}}
+<div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title"
+     tabindex="-1"
+     hx-on:keydown="if(event.key==='Escape')this.remove()">
+  <div class="backdrop"
+       hx-on:click="this.parentElement.remove()" aria-hidden="true"></div>
+  <form class="confirm-card"
+        hx-post="{{.Action}}"
+        hx-target="{{.Target}}"
+        hx-swap="{{.Swap}}">
+    <header class="confirm-head">
+      <span class="confirm-mark" aria-hidden="true">印</span>
+      <h2 id="confirm-title">{{.Title}}</h2>
+    </header>
+
+    <p class="confirm-body">{{.Body}}</p>
+
+    {{if .Warning}}
+    <p class="confirm-warning"><span class="reject-chip">warn</span>{{.Warning}}</p>
+    {{end}}
+
+    <label class="confirm-label" for="confirm-input">
+      <span>Type <code>{{.ExpectedPhrase}}</code> below to confirm.</span>
+      <input id="confirm-input"
+             name="confirm"
+             type="text"
+             autocomplete="off"
+             autocapitalize="off"
+             spellcheck="false"
+             autofocus
+             required
+             hx-on:input="this.closest('form').querySelector('button.danger').disabled=(this.value.trim()!==this.dataset.expected)"
+             data-expected="{{.ExpectedPhrase}}">
+    </label>
+
+    <div class="confirm-actions">
+      <button type="button" class="ghost"
+              hx-on:click="this.closest('.confirm-modal').remove()">Cancel</button>
+      <button type="submit" class="danger" disabled>{{.ConfirmLabel}}</button>
+    </div>
+  </form>
+</div>
+{{end}}

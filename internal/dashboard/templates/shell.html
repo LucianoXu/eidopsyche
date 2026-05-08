@@ -9,9 +9,11 @@
 <script src="/static/htmx-ext-sse.js"></script>
 </head>
 <body hx-ext="sse" sse-connect="/events">
-<header class="topbar">
-  <strong>eidos-gate</strong>
-  <span class="own-id" title="{{.OwnNpub}}">{{.OwnLabel}} · {{truncate 16 .OwnNpub}}</span>
+<header class="topbar" id="topbar"
+        hx-get="/topbar"
+        hx-trigger="sse:identity.label-changed from:body"
+        hx-swap="innerHTML">
+  {{template "topbar_inner" .}}
 </header>
 <main class="layout">
   <aside class="sidebar" id="sidebar"
@@ -27,5 +29,6 @@
        hx-get="/relays"
        hx-trigger="load, sse:relay.state from:body"
        hx-swap="innerHTML"></aside>
+<div id="modal"></div>
 </body>
 </html>{{end}}

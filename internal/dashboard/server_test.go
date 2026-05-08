@@ -65,6 +65,10 @@ func TestRun_DisabledIsNoop(t *testing.T) {
 
 // fakeDeps is the package-internal stub satisfying DashboardDeps for handler
 // unit tests. Behaviour is overridable per-test via assignable fields.
+//
+// Value semantics: the struct is passed around by value, so mutation
+// hooks (e.g. captured calls) live behind pointer-to-slice fields the
+// test owns. This keeps every test a single literal initialisation.
 type fakeDeps struct {
 	pubkey    string
 	label     string
@@ -73,7 +77,20 @@ type fakeDeps struct {
 	contactsL []*contacts.Contact
 	sendErr   error
 	sendID    string
+
+	// ── phase 1 ─────────────────────────────────────────────────
+	cardURI        string
+	cardErr        error
+	setLabelErr    error
+	setLabelCalls  *[]string
+	configSnap     config.Config
+	configSnapErr  error
+	configSetErr   error
+	configSetCalls *[]configSetCall
 }
+
+// configSetCall captures one ConfigSet invocation for assertions.
+type configSetCall struct{ Path, Value string }
 
 func (f fakeDeps) OwnPubkey() string                        { return f.pubkey }
 func (f fakeDeps) OwnLabel(context.Context) (string, error) { return f.label, nil }
@@ -93,4 +110,23 @@ func (f fakeDeps) Send(_ context.Context, _ string, _ envelope.Envelope) (string
 func (f fakeDeps) SubscribeEvents() (<-chan Event, func()) {
 	ch := make(chan Event, 4)
 	return ch, func() {}
+}
+
+func (f fakeDeps) SetOwnLabel(_ context.Context, label string) error {
+	if f.setLabelCalls != nil {
+		*f.setLabelCalls = append(*f.setLabelCalls, label)
+	}
+	return f.setLabelErr
+}
+func (f fakeDeps) OwnCardURI(context.Context) (string, error) {
+	return f.cardURI, f.cardErr
+}
+func (f fakeDeps) ConfigSnapshot() (config.Config, error) {
+	return f.configSnap, f.configSnapErr
+}
+func (f fakeDeps) ConfigSet(_ context.Context, path, value string) error {
+	if f.configSetCalls != nil {
+		*f.configSetCalls = append(*f.configSetCalls, configSetCall{Path: path, Value: value})
+	}
+	return f.configSetErr
 }
