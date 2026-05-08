@@ -23,6 +23,7 @@ type Pool struct {
 	mu      sync.Mutex
 	relays  map[string]*gnostr.Relay
 	dialer  func(ctx context.Context, url string) (*gnostr.Relay, error)
+	alive   func(*gnostr.Relay) bool
 	timeout time.Duration
 }
 
@@ -31,6 +32,7 @@ func NewPool() *Pool {
 	return &Pool{
 		relays:  make(map[string]*gnostr.Relay),
 		dialer:  defaultDial,
+		alive:   defaultAlive,
 		timeout: 5 * time.Second,
 	}
 }
@@ -39,16 +41,28 @@ func defaultDial(ctx context.Context, url string) (*gnostr.Relay, error) {
 	return gnostr.RelayConnect(ctx, url)
 }
 
+func defaultAlive(r *gnostr.Relay) bool { return r != nil && r.IsConnected() }
+
 // Connect returns an existing relay connection or dials a new one. Connections
 // are cached by URL; concurrent callers for the same URL may each dial once
 // but the winner's connection is stored.
+//
+// A cached entry whose underlying websocket has gone away (e.g., the peer
+// relay restarted) is evicted and re-dialed — without this, every consumer
+// would silently fail subscribe / publish until they restarted the daemon.
 func (p *Pool) Connect(ctx context.Context, url string) (*gnostr.Relay, error) {
 	p.mu.Lock()
 	if r, ok := p.relays[url]; ok {
+		if p.alive(r) {
+			p.mu.Unlock()
+			return r, nil
+		}
+		delete(p.relays, url)
 		p.mu.Unlock()
-		return r, nil
+		_ = r.Close()
+	} else {
+		p.mu.Unlock()
 	}
-	p.mu.Unlock()
 
 	dialCtx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
