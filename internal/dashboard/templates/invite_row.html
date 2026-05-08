@@ -1,0 +1,37 @@
+{{define "invite_row"}}
+<tr id="invite-{{.IDShort}}" class="invite-row is-{{.Status}}">
+  <td class="invite-id"><code>{{.IDShort}}</code></td>
+  <td class="invite-redeemer">
+    {{if .RedeemerLabel}}<em>{{.RedeemerLabel}}</em>{{else}}<span class="muted">— anyone</span>{{end}}
+  </td>
+  <td class="invite-uses">
+    <span class="uses-fraction">
+      <span class="uses-count">{{.Uses}}</span>
+      <span class="uses-sep" aria-hidden="true">/</span>
+      <span class="uses-cap">{{if eq .MaxUses 0}}∞{{else}}{{.MaxUses}}{{end}}</span>
+    </span>
+  </td>
+  <td class="invite-expiry">
+    {{if .ExpiresAt.IsZero}}
+      <span class="muted">never</span>
+    {{else}}
+      <span title="{{.ExpiresAt.Format "2006-01-02 15:04:05"}}">{{reltime .ExpiresAt}}</span>
+    {{end}}
+  </td>
+  <td class="invite-issued">
+    <span title="{{.CreatedAt.Format "2006-01-02 15:04:05"}}">{{reltime .CreatedAt}}</span>
+  </td>
+  <td class="invite-actions">
+    {{if eq .Status "active"}}
+    <button type="button"
+            class="danger-button-sm"
+            aria-label="Revoke invite {{.IDShort}}"
+            hx-get="/settings/invites/{{.ID}}/confirm-revoke"
+            hx-target="#modal"
+            hx-swap="innerHTML">Revoke</button>
+    {{else}}
+    <span class="muted">—</span>
+    {{end}}
+  </td>
+</tr>
+{{end}}

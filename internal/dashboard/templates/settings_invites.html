@@ -1,0 +1,154 @@
+{{define "settings_invites"}}
+<div class="invites-pane"
+     hx-get="/settings/invites"
+     hx-trigger="sse:invite.created,sse:invite.revoked,sse:invite.redeemed from:body"
+     hx-swap="outerHTML">
+  <h2>Tokens of welcome</h2>
+  <p class="pane-aside">
+    Each invitation is a signed pass — a single-use seal by default — that lets a peer
+    redeem you as a contact and present themselves in turn. Issue one to admit a stranger;
+    redeem one to accept their welcome.
+  </p>
+
+  {{if .Error}}<div class="form-flash is-error" role="alert" style="margin-bottom:18px">{{.Error}}</div>{{end}}
+
+  {{with .CreatedInvite}}
+  <aside class="invite-slip" role="region" aria-label="New invitation">
+    <header class="invite-slip-head">
+      <span class="invite-slip-mark" aria-hidden="true">封</span>
+      <div class="invite-slip-titlebar">
+        <h4>Pass <code>{{.IDShort}}</code> sealed</h4>
+        <p class="invite-slip-meta">
+          {{if .Unlimited}}unlimited uses{{else if .SingleUse}}single use{{else}}{{.MaxUses}} uses{{end}}
+          {{if .ExpiresAt.IsZero}} · no expiry{{else}} · expires {{reltime .ExpiresAt}}{{end}}
+          {{if .Redeemer}} · for <em>{{.Redeemer}}</em>{{end}}
+        </p>
+      </div>
+    </header>
+    <p class="invite-slip-hint">
+      Copy now and hand it to the redeemer over a side channel. The URI is shown
+      this once — reload and it's gone (the row stays in <em>Active</em> below).
+    </p>
+    <div class="invite-uri-row">
+      <code class="invite-uri">{{.URI}}</code>
+      <button type="button" class="copy-btn"
+              data-copy="{{.URI}}"
+              aria-label="Copy invitation URI"
+              hx-on:click="const b=this;navigator.clipboard.writeText(b.dataset.copy).then(()=>{b.classList.add('is-copied');setTimeout(()=>b.classList.remove('is-copied'),1400)},()=>{b.classList.add('is-error');setTimeout(()=>b.classList.remove('is-error'),1800)})">Copy</button>
+    </div>
+  </aside>
+  {{end}}
+
+  {{with .RedeemResult}}
+  <aside class="invite-slip is-redeem" role="region" aria-label="Redeemed">
+    <header class="invite-slip-head">
+      <span class="invite-slip-mark" aria-hidden="true">受</span>
+      <div class="invite-slip-titlebar">
+        <h4>Welcome accepted</h4>
+        <p class="invite-slip-meta">
+          issuer relay <code>{{.IssuerRelay}}</code>
+          {{if .AcceptedBy}} · published on {{len .AcceptedBy}} relay(s){{end}}
+        </p>
+      </div>
+    </header>
+    <dl class="scan-grid">
+      <dt>Issuer</dt><dd class="mono">{{.IssuerNpub}}</dd>
+      {{if .AcceptedBy}}<dt>Accepted</dt>
+      <dd class="mono">{{range $i, $r := .AcceptedBy}}{{if $i}}<br>{{end}}{{$r}}{{end}}</dd>{{end}}
+    </dl>
+  </aside>
+  {{end}}
+
+  <table class="config-table invites-table">
+    <thead>
+      <tr>
+        <th class="th-id">ID</th>
+        <th class="th-redeemer">Redeemer</th>
+        <th class="th-uses">Uses</th>
+        <th class="th-expiry">Expires</th>
+        <th class="th-issued">Issued</th>
+        <th aria-label="Actions"></th>
+      </tr>
+    </thead>
+    <tbody id="invite-rows-active">
+      {{range .Active}}{{template "invite_row" .}}{{else}}
+      <tr class="invites-empty"><td colspan="6" class="empty">
+        No active invitations. Issue one below to admit a new correspondent.
+      </td></tr>
+      {{end}}
+    </tbody>
+  </table>
+
+  {{if or .Expired .Revoked}}
+  <details class="invites-history">
+    <summary>
+      Past invitations
+      <span class="muted">({{len .Expired}} expired, {{len .Revoked}} revoked)</span>
+    </summary>
+    <table class="config-table invites-table is-history">
+      <tbody>
+        {{range .Revoked}}{{template "invite_row" .}}{{end}}
+        {{range .Expired}}{{template "invite_row" .}}{{end}}
+      </tbody>
+    </table>
+  </details>
+  {{end}}
+
+  <section class="invite-issue">
+    <h4>Issue an invitation</h4>
+    <p class="hint">
+      A signed URI a peer can redeem to add you as a contact. Default is single-use,
+      seven-day expiry. <code class="inline-code">expires</code> accepts <code class="inline-code">7d</code> /
+      <code class="inline-code">24h</code> / <code class="inline-code">30m</code> / <code class="inline-code">never</code>.
+      <code class="inline-code">max_uses</code> takes <code class="inline-code">1</code>, an integer, or
+      <code class="inline-code">unlimited</code>.
+    </p>
+    {{if .CreateError}}<div class="form-flash is-error" role="alert">{{.CreateError}}</div>{{end}}
+    <form class="contact-add-form invite-issue-form" autocomplete="off"
+          hx-post="/settings/invites" hx-target="#settings-pane" hx-swap="innerHTML"
+          hx-on::after-request="if(event.detail.successful)this.reset()">
+      <div class="contact-add-grid invite-issue-grid">
+        <label class="contact-add-field">
+          <span class="contact-add-label">Redeemer label</span>
+          <input type="text" name="redeemer_label" maxlength="64" placeholder="Optional">
+        </label>
+        <label class="contact-add-field">
+          <span class="contact-add-label">Expires</span>
+          <input type="text" name="expires" placeholder="7d" spellcheck="false">
+        </label>
+        <label class="contact-add-field">
+          <span class="contact-add-label">Max uses</span>
+          <input type="text" name="max_uses" placeholder="1" spellcheck="false">
+        </label>
+        <div class="contact-add-actions">
+          <button type="submit">Seal</button>
+        </div>
+      </div>
+    </form>
+  </section>
+
+  <section class="invite-redeem">
+    <h4>Redeem an invitation</h4>
+    <p class="hint">
+      Paste a <code class="inline-code">mindgate-invite://…</code> URI someone shared.
+      The issuer is added as a friend-tier contact and a redemption gift wrap is
+      published to their relay.
+    </p>
+    {{if .RedeemError}}<div class="form-flash is-error" role="alert">{{.RedeemError}}</div>{{end}}
+    <form class="contact-add-form invite-redeem-form" autocomplete="off"
+          hx-post="/settings/invites/redeem" hx-target="#settings-pane" hx-swap="innerHTML"
+          hx-on::after-request="if(event.detail.successful)this.reset()">
+      <div class="invite-redeem-grid">
+        <label class="contact-add-field">
+          <span class="contact-add-label">Invitation URI</span>
+          <input type="text" name="token" required spellcheck="false"
+                 placeholder="mindgate-invite://…" autocomplete="off">
+        </label>
+        <div class="contact-add-actions">
+          <button type="submit">Accept</button>
+        </div>
+      </div>
+    </form>
+  </section>
+</div>
+{{end}}

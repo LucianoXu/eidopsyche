@@ -27,6 +27,13 @@
      tabindex="{{if eq .Active "contacts"}}0{{else}}-1{{end}}"
      href="/settings/contacts"
      hx-get="/settings/contacts" hx-target="#settings-pane" hx-push-url="true">Contacts</a>
+  <a id="tab-invites" class="settings-tab {{if eq .Active "invites"}}is-active{{end}}"
+     role="tab"
+     aria-selected="{{if eq .Active "invites"}}true{{else}}false{{end}}"
+     aria-controls="settings-pane"
+     tabindex="{{if eq .Active "invites"}}0{{else}}-1{{end}}"
+     href="/settings/invites"
+     hx-get="/settings/invites" hx-target="#settings-pane" hx-push-url="true">Invites</a>
   <a id="tab-config" class="settings-tab {{if eq .Active "config"}}is-active{{end}}"
      role="tab"
      aria-selected="{{if eq .Active "config"}}true{{else}}false{{end}}"
@@ -39,6 +46,7 @@
          aria-labelledby="tab-{{.Active}}">
   {{if eq .Active "identity"}}{{template "settings_identity" .Identity}}{{end}}
   {{if eq .Active "contacts"}}{{template "settings_contacts" .Contacts}}{{end}}
+  {{if eq .Active "invites"}}{{template "settings_invites" .Invites}}{{end}}
   {{if eq .Active "config"}}{{template "settings_config" .Config}}{{end}}
 </section>
 {{end}}

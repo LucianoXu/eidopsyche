@@ -1,20 +1,21 @@
 // full-bidirectional.mjs
 //
-// Cross-machine regression test for the dashboard. For Phase 1 the
-// surface under test is small: each side's /settings/identity card
-// renders correctly, the sidebars list each other as contacts, and
-// the existing chat round-trip still works (the bit that surfaced the
-// double-bubble bug earlier in the session). Later phases will fold
-// invite create / redeem / etc. into this script (see §8.5 of the
-// design spec).
+// Cross-machine regression test for the dashboard. The surface grows
+// with each phase: today this script asserts identity rendering, mutual
+// contact state on both sidebars and Contacts panes, and a bidirectional
+// chat round-trip — and (Phase 3) drives invite create + redeem over
+// the webui when the two sides aren't already mutual contacts.
 //
 // Pre-conditions (NOT done by this script — run once on the CLI per
 // deploy-test/deploy-test-script.md):
 //   1. eidos installed on both selene + mbp.
 //   2. State purged + re-init'd on both.
 //   3. Daemons running on both.
-//   4. invite create + redeem run on the CLI so the two sides are
-//      mutual contacts.
+//
+// Phase 3 changed step 4 of the §8.5 list: invite create + redeem now
+// run THROUGH the dashboard, not the CLI. The script auto-detects
+// whether the pairing is already done (re-runs are idempotent) and
+// only provisions the invite if needed.
 //
 // Selene normally talks to mbp's loopback dashboard via SSH tunnel:
 //   ssh -i $SSH_KEY -L 22894:127.0.0.1:22893 -fN $MBP_USER@$MBP_HOST
@@ -35,6 +36,8 @@ import {
   waitForInbound,
   listSidebarContacts,
   listContactsRows,
+  createInvite,
+  redeemInviteOnDashboard,
 } from './_lib/dashboard.mjs';
 
 function parseArgs(argv) {
@@ -62,12 +65,12 @@ function logStep(n, msg)   { console.log(`STEP ${n}: ${msg}`); }
 function logOk(n, msg)     { console.log(`STEP ${n} OK: ${msg}`); }
 function logFail(n, msg)   { console.error(`STEP ${n} FAIL: ${msg}`); }
 
-const HINT_NO_CONTACT = [
-  'Each side must already have the other as a contact. Run on the CLI:',
-  '  selene$ eidos gate invite create --redeemer <mbp-label>',
-  '  mbp$    eidos gate redeem <invite-uri>',
-  'Phase 1 deliberately does NOT drive the invite flow over the webui.',
-  'See deploy-test/deploy-test-script.md.',
+const HINT_PROVISION_FAILED = [
+  'Phase 3 drives invite create + redeem through the webui. If this',
+  'failed, check that both daemons are running and reachable, that',
+  'the SSH tunnel for mbp is up, and that selene can reach mbp at',
+  'the redeem time (the redeemer must publish a kind:25001 wrap to',
+  'the issuer\'s home relay).',
 ].join('\n  ');
 
 async function main() {
@@ -105,25 +108,61 @@ async function main() {
     }
     logOk(step, `mbp label=${mbpId.label} hex=${mbpId.hex.slice(0, 16)}…`);
 
-    // ── 3. Each side has the other as exactly one contact. ─────────
+    // ── 3. Provision mutual contact via webui (Phase 3). ───────────
     step = 3;
-    logStep(step, 'verify mutual contact via sidebar listings');
+    logStep(step, 'check mutual-contact state; provision via webui invite/redeem if needed');
     await gotoStable(sp, `${selene}/`);
     await gotoStable(mp, `${mbp}/`);
-    const seleneContacts = await listSidebarContacts(sp);
-    const mbpContacts = await listSidebarContacts(mp);
+    let seleneContacts = await listSidebarContacts(sp);
+    let mbpContacts = await listSidebarContacts(mp);
+    const alreadyPaired =
+      seleneContacts.some((c) => c.pubkey === mbpId.hex) &&
+      mbpContacts.some((c) => c.pubkey === seleneId.hex);
+
+    if (alreadyPaired) {
+      logOk(step, 'already mutual contacts; skipping invite provisioning');
+    } else {
+      console.log('  not mutual contacts yet; driving invite create on selene + redeem on mbp via webui');
+      await gotoSettings(sp, selene, 'invites');
+      const issued = await createInvite(sp, {
+        redeemerLabel: mbpId.label || 'peer',
+        expires: '24h',
+        maxUses: '1',
+      });
+      if (!issued.ok || !issued.uri) {
+        throw new Error(`selene: createInvite failed: ${issued.error || '(no uri)'}\n  ${HINT_PROVISION_FAILED}`);
+      }
+      console.log(`  selene issued invite id=${issued.idShort} uriLen=${issued.uri.length}`);
+      await gotoSettings(mp, mbp, 'invites');
+      const redeemed = await redeemInviteOnDashboard(mp, issued.uri);
+      if (!redeemed.ok) {
+        throw new Error(`mbp: redeem failed: ${redeemed.error}\n  ${HINT_PROVISION_FAILED}`);
+      }
+      console.log(`  mbp redeemed; issuer=${(redeemed.issuerNpub || '').slice(0, 16)}…`);
+      // Allow the redemption to propagate back to selene (kind:25001
+      // → contact.added). The SSE consumer on the sidebar updates on
+      // its own; we just need to give the relay round-trip a window
+      // before re-reading the sidebars.
+      await sp.waitForTimeout(2500);
+      await mp.waitForTimeout(500);
+      await gotoStable(sp, `${selene}/`);
+      await gotoStable(mp, `${mbp}/`);
+      seleneContacts = await listSidebarContacts(sp);
+      mbpContacts = await listSidebarContacts(mp);
+      logOk(step, 'webui-driven invite create + redeem complete; re-checking sidebars');
+    }
 
     const seleneSeesMbp = seleneContacts.filter((c) => c.pubkey === mbpId.hex);
     const mbpSeesSelene = mbpContacts.filter((c) => c.pubkey === seleneId.hex);
 
     if (seleneSeesMbp.length !== 1) {
       throw new Error(
-        `selene sidebar should list mbp (${mbpId.hex.slice(0, 16)}…) exactly once, got ${seleneSeesMbp.length}\n  ${HINT_NO_CONTACT}`,
+        `selene sidebar should list mbp (${mbpId.hex.slice(0, 16)}…) exactly once, got ${seleneSeesMbp.length}\n  ${HINT_PROVISION_FAILED}`,
       );
     }
     if (mbpSeesSelene.length !== 1) {
       throw new Error(
-        `mbp sidebar should list selene (${seleneId.hex.slice(0, 16)}…) exactly once, got ${mbpSeesSelene.length}\n  ${HINT_NO_CONTACT}`,
+        `mbp sidebar should list selene (${seleneId.hex.slice(0, 16)}…) exactly once, got ${mbpSeesSelene.length}\n  ${HINT_PROVISION_FAILED}`,
       );
     }
     if (seleneSeesMbp[0].label !== mbpId.label) {

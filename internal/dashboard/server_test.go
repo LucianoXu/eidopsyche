@@ -11,6 +11,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
+	"github.com/LucianoXu/eidopsyche/internal/invitedb"
 )
 
 func captureLogs(t *testing.T) (*slog.Logger, func() string) {
@@ -98,6 +99,14 @@ type fakeDeps struct {
 	setContactTierErr   error
 	setContactTierCalls *[]contactTierCall
 	scanCardFn          func(ctx context.Context, cardURI string) (ScanPreview, error)
+
+	// ── phase 3 ─────────────────────────────────────────────────
+	listInvitesFn   func(ctx context.Context, status string) ([]*invitedb.Invite, error)
+	createInviteFn  func(ctx context.Context, opts InviteCreateOpts) (*invitedb.Invite, string, error)
+	createInviteErr error
+	revokeInviteFn  func(ctx context.Context, idPrefix string) (string, error)
+	revokeCalls     *[]string
+	redeemInviteFn  func(ctx context.Context, token string) (RedeemResult, error)
 }
 
 // contactTierCall captures one SetContactTier invocation for assertions.
@@ -193,4 +202,46 @@ func (f fakeDeps) ScanCard(ctx context.Context, cardURI string) (ScanPreview, er
 		return f.scanCardFn(ctx, cardURI)
 	}
 	return ScanPreview{}, nil
+}
+
+func (f fakeDeps) ListInvites(ctx context.Context, status string) ([]*invitedb.Invite, error) {
+	if f.listInvitesFn != nil {
+		return f.listInvitesFn(ctx, status)
+	}
+	return nil, nil
+}
+
+func (f fakeDeps) CreateInvite(ctx context.Context, opts InviteCreateOpts) (*invitedb.Invite, string, error) {
+	if f.createInviteFn != nil {
+		return f.createInviteFn(ctx, opts)
+	}
+	if f.createInviteErr != nil {
+		return nil, "", f.createInviteErr
+	}
+	id := "0123456789abcdef0123456789abcdef"
+	return &invitedb.Invite{
+		ID:            id,
+		CreatedAt:     time.Now(),
+		MaxUses:       1,
+		Status:        invitedb.StatusActive,
+		IssuerLabel:   "stub",
+		RedeemerLabel: opts.RedeemerLabel,
+	}, "mindgate-invite://" + id, nil
+}
+
+func (f fakeDeps) RevokeInvite(ctx context.Context, idPrefix string) (string, error) {
+	if f.revokeCalls != nil {
+		*f.revokeCalls = append(*f.revokeCalls, idPrefix)
+	}
+	if f.revokeInviteFn != nil {
+		return f.revokeInviteFn(ctx, idPrefix)
+	}
+	return idPrefix, nil
+}
+
+func (f fakeDeps) RedeemInvite(ctx context.Context, token string) (RedeemResult, error) {
+	if f.redeemInviteFn != nil {
+		return f.redeemInviteFn(ctx, token)
+	}
+	return RedeemResult{}, nil
 }

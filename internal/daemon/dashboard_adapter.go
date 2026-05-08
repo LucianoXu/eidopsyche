@@ -14,6 +14,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
+	"github.com/LucianoXu/eidopsyche/internal/invitedb"
 	"github.com/LucianoXu/eidopsyche/internal/nostr"
 )
 
@@ -340,6 +341,50 @@ func (a dashboardAdapter) SetContactTier(ctx context.Context, pubkey string, tie
 	}
 	a.d.emitDashEvent(dashboard.Event{Kind: "contact.tier-changed"})
 	return nil
+}
+
+// ── phase 3: invites ───────────────────────────────────────────────
+
+func (a dashboardAdapter) ListInvites(ctx context.Context, status string) ([]*invitedb.Invite, error) {
+	return a.d.InviteList(ctx, status)
+}
+
+func (a dashboardAdapter) CreateInvite(ctx context.Context, opts dashboard.InviteCreateOpts) (*invitedb.Invite, string, error) {
+	res, err := a.d.InviteCreate(ctx, InviteCreateOptions{
+		SingleUse:      opts.SingleUse,
+		Unlimited:      opts.Unlimited,
+		MaxUses:        opts.MaxUses,
+		ExpiresSeconds: opts.ExpiresSeconds,
+		IssuerLabel:    opts.IssuerLabel,
+		RedeemerLabel:  opts.RedeemerLabel,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	// Re-read so the row reflects the post-insert canonical state
+	// (status='active', uses=0). This avoids the renderer needing to
+	// reconstruct the timestamps from InviteCreateResult.
+	inv, err := a.d.Invites.Get(ctx, res.ID)
+	if err != nil {
+		return nil, "", fmt.Errorf("read back invite: %w", err)
+	}
+	return inv, res.URI, nil
+}
+
+func (a dashboardAdapter) RevokeInvite(ctx context.Context, idPrefix string) (string, error) {
+	return a.d.InviteRevoke(ctx, idPrefix)
+}
+
+func (a dashboardAdapter) RedeemInvite(ctx context.Context, token string) (dashboard.RedeemResult, error) {
+	res, err := a.d.InviteRedeem(ctx, token)
+	if err != nil {
+		return dashboard.RedeemResult{}, err
+	}
+	return dashboard.RedeemResult{
+		IssuerNpub:  res.IssuerNpub,
+		IssuerRelay: res.IssuerRelay,
+		AcceptedBy:  res.AcceptedBy,
+	}, nil
 }
 
 func (a dashboardAdapter) ScanCard(ctx context.Context, cardURI string) (dashboard.ScanPreview, error) {

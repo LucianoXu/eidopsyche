@@ -16,11 +16,12 @@ number plus a one-line reason; success exits 0. CI greps for
 | Script | Purpose |
 |---|---|
 | `_lib/chromium.mjs` | Chromium launcher; pinned binary path; `--no-sandbox` |
-| `_lib/dashboard.mjs` | Page-object helpers (`gotoSettings`, `setLabel`, `setConfigValue`, `sendInThread`, `waitForInbound`, `listContactsRows`, `addContactByCard`, `scanCardPreview`, `openContactDetail`, `setContactLabelInDetail`, `setContactTierInDetail`, `removeContactWithConfirm`, …) |
+| `_lib/dashboard.mjs` | Page-object helpers (`gotoSettings`, `setLabel`, `setConfigValue`, `sendInThread`, `waitForInbound`, `listContactsRows`, `addContactByCard`, `scanCardPreview`, `openContactDetail`, `setContactLabelInDetail`, `setContactTierInDetail`, `removeContactWithConfirm`, `listInviteRows`, `createInvite`, `redeemInviteOnDashboard`, `revokeInviteWithConfirm`, …) |
 | `_lib/daemon.mjs` | Spawns a transient `eidos gate daemon` in a temp state-dir on ephemeral loopback ports; used to mint a real card URI for Phase 2 admit-correspondent flows |
 | `phase1-identity-config.mjs` | Phase 1 smoke: Settings shell + Identity tab + Config tab round-trips |
 | `phase2-contacts.mjs` | Phase 2 smoke: empty-state → scan-preview → admit → detail pane → rename → tier cycle → typed-confirm remove → empty-state |
-| `full-bidirectional.mjs` | Selene + mbp regression: identity cards on both, mutual contact in sidebar AND Contacts tab, chat round-trip |
+| `phase3-invites.mjs` | Phase 3 smoke: empty-state → issue (single-use 24h) → list → issue (unlimited / never) → typed-confirm revoke → history bucket → malformed-redeem inline error |
+| `full-bidirectional.mjs` | Selene + mbp regression: idempotent webui-driven invite/redeem pairing, mutual contact in sidebar AND Contacts tab, chat round-trip |
 
 ## One-time setup
 
@@ -130,17 +131,19 @@ FAIL: …`) so a CI log is human-skimmable.
 
 ## Pre-conditions for `full-bidirectional.mjs`
 
-Phase 1 deliberately does NOT drive the invite flow over the webui
-(that lands in Phase 3). Before running the bidirectional script, run
-on the CLI per `deploy-test/deploy-test-script.md`:
+As of Phase 3, invite create + redeem run **through the webui** rather
+than the CLI. The script auto-detects whether the two sides are
+already mutual contacts and only provisions when they aren't, so
+re-runs are idempotent. The remaining manual setup (per
+`deploy-test/deploy-test-script.md`) is just the things the dashboard
+can't do from inside a running daemon:
 
 1. Install latest `eidos` on both selene and mbp.
 2. `eidos gate purge && eidos gate init --label …` on both (label
    `YingteSelene` for selene, `YingteXu` for mbp per the runbook).
 3. `eidos gate start` on both.
-4. `eidos gate invite create --redeemer <peer-label>` on one side;
-   capture the invite URI.
-5. `eidos gate redeem <uri>` on the other side.
 
-The script asserts each side has the other as exactly one contact;
-if not, it prints the same recipe and exits non-zero.
+If either side fails to provision the invite via the webui, the
+script prints a hint pointing at common failure modes (daemon down,
+SSH tunnel for mbp not up, issuer relay unreachable from the
+redeemer).
