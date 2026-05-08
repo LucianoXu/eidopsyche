@@ -3,6 +3,14 @@
   <strong>Operator</strong>
   <span class="own-id settings-aside">{{.OwnLabel}}</span>
 </div>
+<!--
+  The hx-on:click handler below synchronously toggles is-active /
+  aria-selected / tabindex on the clicked tab BEFORE htmx fires its
+  /settings/<tab> request, so the visual tab state lands immediately.
+  The pane swap that follows (hx-target="#settings-pane") only
+  replaces the pane content; the nav stays put, with its active
+  class already correct.
+-->
 <nav class="settings-tabs" role="tablist" aria-label="Operator panel"
      hx-on:click="const t=event.target.closest('.settings-tab');if(!t)return;this.querySelectorAll('.settings-tab').forEach(x=>{x.classList.remove('is-active');x.setAttribute('aria-selected','false');x.setAttribute('tabindex','-1')});t.classList.add('is-active');t.setAttribute('aria-selected','true');t.setAttribute('tabindex','0')">
   <a id="tab-identity" class="settings-tab {{if eq .Active "identity"}}is-active{{end}}"
