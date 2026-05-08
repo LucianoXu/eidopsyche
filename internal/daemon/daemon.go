@@ -80,7 +80,7 @@ func Start(stateDir string) (*Daemon, error) {
 		Repo:        contacts.New(db),
 		Invites:     invitedb.New(db),
 		Box:         inbox.New(stateDir),
-		Pool:        nostr.NewPool(),
+		Pool:        nostr.NewPoolWithSigner(keypairSigner{k: k}),
 		Log:         slog.New(slog.NewJSONHandler(os.Stderr, nil)),
 		startedAt:   time.Now(),
 		kick:        make(chan struct{}, 1),

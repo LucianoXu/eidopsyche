@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,14 @@ type PublishResult struct {
 	Reason string
 }
 
+// Signer signs Nostr events with a long-term identity key. Used by Pool to
+// respond to NIP-42 AUTH challenges. The implementation must populate
+// ev.PubKey, ev.ID, and ev.Sig.
+type Signer interface {
+	Sign(ev *gnostr.Event) error
+	PublicHex() string
+}
+
 // Pool wraps a set of relay connections and provides concurrent publish /
 // subscribe helpers.
 type Pool struct {
@@ -25,9 +34,12 @@ type Pool struct {
 	dialer  func(ctx context.Context, url string) (*gnostr.Relay, error)
 	alive   func(*gnostr.Relay) bool
 	timeout time.Duration
+	signer  Signer // optional; when set, Subscribe handles NIP-42 AUTH transparently
 }
 
-// NewPool returns an empty Pool with sane defaults.
+// NewPool returns an empty Pool with sane defaults and no signer (AUTH
+// challenges will surface as auth-required CLOSED reasons that the caller
+// must handle).
 func NewPool() *Pool {
 	return &Pool{
 		relays:  make(map[string]*gnostr.Relay),
@@ -35,6 +47,16 @@ func NewPool() *Pool {
 		alive:   defaultAlive,
 		timeout: 5 * time.Second,
 	}
+}
+
+// NewPoolWithSigner returns a Pool that responds to NIP-42 AUTH challenges
+// transparently using the given signer. Subscribe will detect
+// "auth-required" CLOSED reasons, AUTH on the same connection, and
+// re-subscribe once.
+func NewPoolWithSigner(signer Signer) *Pool {
+	p := NewPool()
+	p.signer = signer
+	return p
 }
 
 func defaultDial(ctx context.Context, url string) (*gnostr.Relay, error) {
@@ -123,6 +145,11 @@ func (p *Pool) Publish(ctx context.Context, urls []string, ev *gnostr.Event) []P
 // slow consumers may drop events if the buffer fills. Returns an error if no
 // relay could be connected. The channel is closed when ctx is canceled or
 // all per-URL pump goroutines exit.
+//
+// When the Pool has a Signer (NewPoolWithSigner) and a relay closes a
+// subscription with an "auth-required" reason, the pump performs NIP-42
+// AUTH on that connection and re-subscribes once. Failures or repeated
+// AUTH-required closes terminate the per-URL pump.
 func (p *Pool) Subscribe(ctx context.Context, urls []string, filter gnostr.Filter) (<-chan *gnostr.Event, error) {
 	out := make(chan *gnostr.Event, 256)
 	var wg sync.WaitGroup
@@ -138,24 +165,7 @@ func (p *Pool) Subscribe(ctx context.Context, urls []string, filter gnostr.Filte
 		}
 		anyOK = true
 		wg.Add(1)
-		go func(u string) {
-			defer wg.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case ev, ok := <-sub.Events:
-					if !ok {
-						return
-					}
-					select {
-					case out <- ev:
-					case <-ctx.Done():
-						return
-					}
-				}
-			}
-		}(u)
+		go p.pumpSubscription(ctx, &wg, u, r, sub, filter, out)
 	}
 	if !anyOK {
 		close(out)
@@ -163,4 +173,79 @@ func (p *Pool) Subscribe(ctx context.Context, urls []string, filter gnostr.Filte
 	}
 	go func() { wg.Wait(); close(out) }()
 	return out, nil
+}
+
+// pumpSubscription forwards events from sub to out, handling NIP-42 AUTH
+// challenges transparently when p.signer is set. On "auth-required" close,
+// it performs r.Auth(...) and re-subscribes once; subsequent close (for
+// any reason) terminates the goroutine.
+func (p *Pool) pumpSubscription(
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	url string,
+	r *gnostr.Relay,
+	sub *gnostr.Subscription,
+	filter gnostr.Filter,
+	out chan<- *gnostr.Event,
+) {
+	defer wg.Done()
+	authed := false
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-sub.Events:
+			if !ok {
+				return
+			}
+			select {
+			case out <- ev:
+			case <-ctx.Done():
+				return
+			}
+		case reason, ok := <-sub.ClosedReason:
+			if !ok {
+				return
+			}
+			if !authed && p.signer != nil && strings.HasPrefix(reason, "auth-required") {
+				authCtx, cancel := context.WithTimeout(ctx, p.timeout)
+				err := r.Auth(authCtx, p.signFuncFor(r))
+				cancel()
+				if err != nil {
+					return
+				}
+				authed = true
+				newSub, err := r.Subscribe(ctx, gnostr.Filters{filter})
+				if err != nil {
+					return
+				}
+				sub = newSub
+				continue
+			}
+			return
+		}
+	}
+}
+
+// signFuncFor returns a sign callback bound to a specific relay connection.
+// The callback validates that the AUTH event's ["relay", ...] tag matches
+// the connection URL — defends against a hypothetical malicious go-nostr
+// build that might construct the event with the wrong URL — then signs
+// with the Pool's signer.
+func (p *Pool) signFuncFor(r *gnostr.Relay) func(ev *gnostr.Event) error {
+	return func(ev *gnostr.Event) error {
+		if p.signer == nil {
+			return errors.New("AUTH challenge received but Pool has no signer")
+		}
+		for _, t := range ev.Tags {
+			if len(t) >= 2 && t[0] == "relay" {
+				if t[1] != r.URL {
+					return fmt.Errorf("AUTH event relay tag %q does not match connection URL %q", t[1], r.URL)
+				}
+				break
+			}
+		}
+		ev.PubKey = p.signer.PublicHex()
+		return p.signer.Sign(ev)
+	}
 }

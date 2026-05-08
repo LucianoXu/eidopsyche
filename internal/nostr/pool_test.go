@@ -103,3 +103,76 @@ func TestConnect_DialerErrorPropagates(t *testing.T) {
 		t.Error("failed dial must not populate the cache")
 	}
 }
+
+// fakeSigner is a deterministic test signer that records calls without
+// performing real Schnorr signing. AUTH-event-shape tests don't need real
+// signatures; integration tests cover the on-the-wire path.
+type fakeSigner struct {
+	pub    string
+	signed []*gnostr.Event
+}
+
+func (s *fakeSigner) Sign(ev *gnostr.Event) error {
+	ev.PubKey = s.pub
+	ev.ID = "fake-" + ev.PubKey
+	ev.Sig = "fake-sig"
+	s.signed = append(s.signed, ev)
+	return nil
+}
+func (s *fakeSigner) PublicHex() string { return s.pub }
+
+func TestPool_SignFunc_RefusesURLMismatch(t *testing.T) {
+	signer := &fakeSigner{pub: "abcd"}
+	p := NewPoolWithSigner(signer)
+	r := &gnostr.Relay{URL: "wss://us.example"}
+	signFn := p.signFuncFor(r)
+
+	ev := &gnostr.Event{
+		Kind: 22242,
+		Tags: gnostr.Tags{
+			gnostr.Tag{"relay", "wss://attacker.example"},
+			gnostr.Tag{"challenge", "x"},
+		},
+	}
+	err := signFn(ev)
+	if err == nil {
+		t.Fatal("expected URL-mismatch refusal")
+	}
+	if len(signer.signed) != 0 {
+		t.Errorf("signer was called despite URL mismatch")
+	}
+}
+
+func TestPool_SignFunc_AcceptsMatchingURL(t *testing.T) {
+	signer := &fakeSigner{pub: "abcd"}
+	p := NewPoolWithSigner(signer)
+	r := &gnostr.Relay{URL: "wss://us.example"}
+	signFn := p.signFuncFor(r)
+
+	ev := &gnostr.Event{
+		Kind: 22242,
+		Tags: gnostr.Tags{
+			gnostr.Tag{"relay", "wss://us.example"},
+			gnostr.Tag{"challenge", "x"},
+		},
+	}
+	if err := signFn(ev); err != nil {
+		t.Fatalf("sign failed: %v", err)
+	}
+	if len(signer.signed) != 1 {
+		t.Errorf("signer called %d times, want 1", len(signer.signed))
+	}
+	if ev.PubKey != "abcd" {
+		t.Errorf("PubKey = %q, want abcd", ev.PubKey)
+	}
+}
+
+func TestPool_SignFunc_NoSignerErrors(t *testing.T) {
+	p := NewPool() // no signer
+	r := &gnostr.Relay{URL: "wss://us"}
+	signFn := p.signFuncFor(r)
+	err := signFn(&gnostr.Event{Tags: gnostr.Tags{gnostr.Tag{"relay", "wss://us"}, gnostr.Tag{"challenge", "x"}}})
+	if err == nil {
+		t.Fatal("expected error when Pool has no signer")
+	}
+}
