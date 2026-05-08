@@ -154,6 +154,27 @@ func (r *Repo) Remove(ctx context.Context, pubkey string) error {
 
 // SetLabel updates the label of an existing contact identified by pubkey.
 // Returns ErrNotFound if no row matches.
+// AddRelay appends one relay URL to the contact's relay-hint list.
+// Idempotent on the (pubkey, relay_url) primary key — duplicate calls
+// are silently ignored. Priority is set to one past the current max
+// so this row sorts last (existing higher-priority hints stay first).
+// Returns ErrNotFound if the contact does not exist.
+func (r *Repo) AddRelay(ctx context.Context, pubkey, relayURL string) error {
+	if _, err := r.Get(ctx, pubkey); err != nil {
+		return err
+	}
+	var maxPri int
+	row := r.db.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(priority), -1) FROM contact_relays WHERE pubkey=?`, pubkey)
+	if err := row.Scan(&maxPri); err != nil {
+		return err
+	}
+	_, err := r.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO contact_relays(pubkey,relay_url,priority) VALUES(?,?,?)`,
+		pubkey, relayURL, maxPri+1)
+	return err
+}
+
 // SetTier updates the tier of an existing contact.
 //
 // The tier value is validated against the four named constants

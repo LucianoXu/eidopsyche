@@ -225,6 +225,12 @@ func (a dashboardAdapter) GetContact(ctx context.Context, pubkey string) (*conta
 	return a.d.Repo.Get(ctx, pubkey)
 }
 
+// AddContact admits a contact described by a mindgate:// card. If the
+// contact's pubkey is already known, the call upserts: label is
+// updated to whatever the operator typed (or the card's embedded
+// label, in that order), and the card's relay hint is appended to
+// contact_relays if not already present. The tier is preserved on
+// upsert so a refresh doesn't accidentally widen trust.
 func (a dashboardAdapter) AddContact(ctx context.Context, cardURI, labelOverride string) (*contacts.Contact, error) {
 	c, err := card.Parse(strings.TrimSpace(cardURI))
 	if err != nil {
@@ -241,6 +247,24 @@ func (a dashboardAdapter) AddContact(ctx context.Context, cardURI, labelOverride
 	if label == "" {
 		return nil, fmt.Errorf("card has no label and none was provided")
 	}
+
+	// Refresh path: contact already exists — update label, ensure the
+	// card's relay hint is present, leave tier alone.
+	if existing, err := a.d.Repo.Get(ctx, pubHex); err == nil && existing != nil {
+		if err := a.d.Repo.SetLabel(ctx, pubHex, label); err != nil {
+			return nil, fmt.Errorf("refresh label: %w", err)
+		}
+		if c.Relay != "" && !contains(existing.Relays, c.Relay) {
+			if err := a.d.Repo.AddRelay(ctx, pubHex, c.Relay); err != nil {
+				return nil, fmt.Errorf("refresh relay: %w", err)
+			}
+		}
+		a.d.emitDashEvent(dashboard.Event{Kind: "contact.relabeled"})
+		saved, _ := a.d.Repo.Get(ctx, pubHex)
+		return saved, nil
+	}
+
+	// New contact path.
 	contact := contacts.Contact{
 		Pubkey: pubHex,
 		Label:  label,
@@ -253,6 +277,17 @@ func (a dashboardAdapter) AddContact(ctx context.Context, cardURI, labelOverride
 	a.d.emitDashEvent(dashboard.Event{Kind: "contact.added"})
 	saved, _ := a.d.Repo.Get(ctx, pubHex)
 	return saved, nil
+}
+
+// contains reports whether s contains x. Used for the relay-hint
+// dedup in AddContact's refresh path.
+func contains(s []string, x string) bool {
+	for _, v := range s {
+		if v == x {
+			return true
+		}
+	}
+	return false
 }
 
 func (a dashboardAdapter) RemoveContact(ctx context.Context, pubkey string) error {
