@@ -27,6 +27,7 @@ func registerHandlersWithRenderer(mux *http.ServeMux, deps DashboardDeps, r *ren
 	mux.HandleFunc("/compose", composeHandler(deps, r, logger))
 	mux.HandleFunc("/compose/send", composeSendHandler(deps, r, logger))
 	mux.HandleFunc("/relays", relaysHandler(deps, r, logger))
+	mux.HandleFunc("/topbar", topbarHandler(deps, r, logger))
 	mux.HandleFunc("/settings", settingsShellHandler(deps, r, logger))
 	mux.HandleFunc("/settings/identity", settingsIdentityHandler(deps, r, logger))
 	mux.HandleFunc("/settings/identity/label", settingsLabelPostHandler(deps, r, logger))
@@ -543,9 +544,12 @@ func sortRelayRows(rows []relayRow) {
 
 const labelMaxLen = 64
 
-// settingsShellHandler is the only Settings route that renders a *full
-// page* (including topbar + sidebar). The tab fragments below render
-// only their pane so htmx can swap into #settings-pane.
+// settingsShellHandler renders /settings. With HX-Request set (e.g. the
+// sidebar Operator → Settings link clicked from an already-loaded page),
+// it returns just the "settings" fragment so htmx can swap it into
+// #main without nesting a whole document. On a cold address-bar load,
+// it returns the full layout (topbar + sidebar + settings pane) so the
+// page stands on its own.
 func settingsShellHandler(deps DashboardDeps, r *renderer, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path != "/settings" {
@@ -557,29 +561,22 @@ func settingsShellHandler(deps DashboardDeps, r *renderer, logger *slog.Logger) 
 			return
 		}
 		ctx := req.Context()
-		label, _ := deps.OwnLabel(ctx)
-		side := buildSidebar(ctx, deps, "", true)
-
 		shell := buildSettingsShell(ctx, deps, "identity")
-		mainHTML, err := r.Render("settings", shell)
-		if err != nil {
-			logger.Error("render settings", "err", err)
-			http.Error(w, "render failed", 500)
+
+		if req.Header.Get("HX-Request") != "" {
+			out, err := r.Render("settings", shell)
+			if err != nil {
+				logger.Error("render settings", "err", err)
+				http.Error(w, "render failed", 500)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(out))
 			return
 		}
-		out, err := r.Render("shell", shellData{
-			OwnLabel: label,
-			OwnNpub:  deps.OwnPubkey(),
-			Sidebar:  side,
-			Main:     template.HTML(mainHTML), //nolint:gosec // trusted internal template output
-		})
-		if err != nil {
-			logger.Error("render shell", "err", err)
-			http.Error(w, "render failed", 500)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(out))
+
+		// Cold load: render the full document.
+		renderSettingsFullPage(w, deps, r, logger, ctx, "identity")
 	}
 }
 
@@ -823,6 +820,36 @@ func pubkeyToNpub(hex string) string {
 		return hex
 	}
 	return npub
+}
+
+// topbarHandler returns the topbar's inner content (label + npub) so
+// the SSE-triggered hx-get on the topbar can refresh it without
+// reloading the whole shell. Wired in templates/shell.html.
+func topbarHandler(deps DashboardDeps, r *renderer, logger *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		ctx := req.Context()
+		label, _ := deps.OwnLabel(ctx)
+		out, err := r.Render("topbar_inner", topbarInnerData{
+			OwnLabel: label,
+			OwnNpub:  deps.OwnPubkey(),
+		})
+		if err != nil {
+			logger.Error("render topbar_inner", "err", err)
+			http.Error(w, "render failed", 500)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(out))
+	}
+}
+
+type topbarInnerData struct {
+	OwnLabel string
+	OwnNpub  string
 }
 
 // requireConfirm enforces the typed-confirm contract used by destructive

@@ -1,5 +1,8 @@
 {{define "settings_identity"}}
-<div class="identity-pane">
+<div class="identity-pane"
+     hx-get="/settings/identity"
+     hx-trigger="sse:identity.label-changed from:body"
+     hx-swap="outerHTML">
   <h2>Colophon</h2>
   <p class="pane-aside">
     Your identity as other peers see it. The label travels in the card you publish; the

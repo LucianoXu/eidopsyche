@@ -1,5 +1,8 @@
 {{define "settings_config"}}
-<div class="config-pane">
+<div class="config-pane"
+     hx-get="/settings/config"
+     hx-trigger="sse:config.changed from:body"
+     hx-swap="outerHTML">
   <h2>Config</h2>
   <p class="pane-aside">
     Scalar settings written to <code class="inline-code">config.toml</code>. Changes are persisted
