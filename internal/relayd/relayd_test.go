@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -194,3 +195,214 @@ func TestRelayd_TLS_OnlyKeySet_Errors(t *testing.T) {
 		t.Fatal("expected error when only KeyFile is set")
 	}
 }
+
+func TestRelayd_Auth_RejectsUnauthenticatedKind1059(t *testing.T) {
+	addr := freePort(t)
+	srv, err := New(Config{
+		Mode:   ModePublic,
+		Listen: addr,
+		Auth:   AuthConfig{Required: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.ListenAndServe()
+	defer srv.Shutdown(context.Background())
+	time.Sleep(150 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	relay, err := gnostr.RelayConnect(ctx, "ws://"+addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer relay.Close()
+
+	// Generate a target pubkey to filter on.
+	sk := gnostr.GeneratePrivateKey()
+	target, _ := gnostr.GetPublicKey(sk)
+
+	sub, err := relay.Subscribe(ctx, gnostr.Filters{{
+		Kinds: []int{1059},
+		Tags:  gnostr.TagMap{"p": []string{target}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case reason := <-sub.ClosedReason:
+		if want := "auth-required"; !contains(reason, want) {
+			t.Fatalf("unauthenticated kind:1059 REQ closed with %q; want substring %q", reason, want)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("expected ClosedReason within 3s; subscription remained open")
+	}
+}
+
+func TestRelayd_Auth_AcceptsAuthenticatedMatchingP(t *testing.T) {
+	addr := freePort(t)
+	srv, err := New(Config{
+		Mode:   ModePublic,
+		Listen: addr,
+		Auth:   AuthConfig{Required: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.ListenAndServe()
+	defer srv.Shutdown(context.Background())
+	time.Sleep(150 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	relay, err := gnostr.RelayConnect(ctx, "ws://"+addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer relay.Close()
+
+	// Start a subscription first so the relay sends an AUTH challenge,
+	// populating relay.challenge for the subsequent Auth() call.
+	sk := gnostr.GeneratePrivateKey()
+	pk, _ := gnostr.GetPublicKey(sk)
+	sub, err := relay.Subscribe(ctx, gnostr.Filters{{
+		Kinds: []int{1059},
+		Tags:  gnostr.TagMap{"p": []string{pk}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait briefly for the relay to send AUTH challenge + first CLOSED;
+	// drain the close so it doesn't pollute later state.
+	select {
+	case <-sub.ClosedReason:
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not receive initial CLOSED before AUTH")
+	}
+
+	// Now AUTH as pk.
+	if err := relay.Auth(ctx, func(ev *gnostr.Event) error {
+		return ev.Sign(sk)
+	}); err != nil {
+		t.Fatalf("AUTH failed: %v", err)
+	}
+
+	// Re-subscribe — this time the AUTH'd connection should accept the REQ.
+	sub2, err := relay.Subscribe(ctx, gnostr.Filters{{
+		Kinds: []int{1059},
+		Tags:  gnostr.TagMap{"p": []string{pk}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-sub2.EndOfStoredEvents:
+		// EOSE = relay accepted the REQ and signaled it has no stored events for us. Pass.
+	case reason := <-sub2.ClosedReason:
+		t.Fatalf("authenticated REQ closed unexpectedly: %s", reason)
+	case <-time.After(3 * time.Second):
+		t.Fatal("authenticated REQ never reached EOSE within 3s")
+	}
+}
+
+func TestRelayd_Auth_RejectsAuthenticatedMismatchedP(t *testing.T) {
+	addr := freePort(t)
+	srv, err := New(Config{
+		Mode:   ModePublic,
+		Listen: addr,
+		Auth:   AuthConfig{Required: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.ListenAndServe()
+	defer srv.Shutdown(context.Background())
+	time.Sleep(150 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	relay, err := gnostr.RelayConnect(ctx, "ws://"+addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer relay.Close()
+
+	skMe := gnostr.GeneratePrivateKey()
+	pkMe, _ := gnostr.GetPublicKey(skMe)
+	skOther := gnostr.GeneratePrivateKey()
+	pkOther, _ := gnostr.GetPublicKey(skOther)
+
+	// Trigger AUTH challenge.
+	sub, _ := relay.Subscribe(ctx, gnostr.Filters{{
+		Kinds: []int{1059},
+		Tags:  gnostr.TagMap{"p": []string{pkMe}},
+	}})
+	<-sub.ClosedReason
+
+	if err := relay.Auth(ctx, func(ev *gnostr.Event) error {
+		return ev.Sign(skMe)
+	}); err != nil {
+		t.Fatalf("AUTH failed: %v", err)
+	}
+
+	// REQ for someone else's events: must be rejected as auth-mismatch.
+	sub2, err := relay.Subscribe(ctx, gnostr.Filters{{
+		Kinds: []int{1059},
+		Tags:  gnostr.TagMap{"p": []string{pkOther}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case reason := <-sub2.ClosedReason:
+		if !contains(reason, "auth-mismatch") {
+			t.Fatalf("got %q; want substring auth-mismatch", reason)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("expected auth-mismatch CLOSED within 3s")
+	}
+}
+
+func TestRelayd_Auth_NotRequired_AcceptsUnauth(t *testing.T) {
+	addr := freePort(t)
+	srv, err := New(Config{
+		Mode:   ModePublic,
+		Listen: addr,
+		Auth:   AuthConfig{Required: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.ListenAndServe()
+	defer srv.Shutdown(context.Background())
+	time.Sleep(150 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	relay, err := gnostr.RelayConnect(ctx, "ws://"+addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer relay.Close()
+
+	sk := gnostr.GeneratePrivateKey()
+	pk, _ := gnostr.GetPublicKey(sk)
+	sub, err := relay.Subscribe(ctx, gnostr.Filters{{
+		Kinds: []int{1059},
+		Tags:  gnostr.TagMap{"p": []string{pk}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-sub.EndOfStoredEvents:
+	case reason := <-sub.ClosedReason:
+		t.Fatalf("unauth REQ unexpectedly closed: %s", reason)
+	case <-time.After(2 * time.Second):
+		t.Fatal("unauth REQ never reached EOSE")
+	}
+}
+
+func contains(s, sub string) bool { return strings.Contains(s, sub) }

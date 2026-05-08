@@ -22,6 +22,16 @@ type Config struct {
 	OwnerHex  string
 	Whitelist *WhitelistSource
 	TLS       TLSConfig
+	Auth      AuthConfig
+}
+
+// AuthConfig governs NIP-42 AUTH enforcement. Required defaults to false
+// at the struct level (the spec-correct default of true is set by
+// config.Defaults() at the call site, so unit tests of relayd that don't
+// go through the config layer pick whichever posture they explicitly want).
+type AuthConfig struct {
+	Required   bool
+	ServiceURL string // optional; overrides khatru's auto-derived URL
 }
 
 // TLSConfig governs whether the relay terminates TLS itself. Both fields
@@ -71,9 +81,50 @@ func New(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("unknown mode %q", cfg.Mode)
 	}
 
+	if cfg.Auth.ServiceURL != "" {
+		r.ServiceURL = cfg.Auth.ServiceURL
+	}
+
+	if cfg.Auth.Required {
+		r.RejectFilter = append(r.RejectFilter, requireAuthForKind1059Reads)
+	}
+
 	srv := &Server{cfg: cfg, r: r}
 	srv.http = &http.Server{Addr: cfg.Listen, Handler: r}
 	return srv, nil
+}
+
+// requireAuthForKind1059Reads enforces NIP-17 §Recommendations: a REQ
+// for kind:1059 events is only served to a NIP-42-authenticated client
+// whose authed pubkey matches every #p tag value in the filter. The
+// first unauthenticated REQ also pushes a fresh AUTH challenge so the
+// client knows what to do.
+func requireAuthForKind1059Reads(ctx context.Context, filter gnostr.Filter) (bool, string) {
+	wantsKind1059 := false
+	for _, k := range filter.Kinds {
+		if k == 1059 {
+			wantsKind1059 = true
+			break
+		}
+	}
+	if !wantsKind1059 {
+		return false, ""
+	}
+	authed := khatru.GetAuthed(ctx)
+	if authed == "" {
+		khatru.RequestAuth(ctx)
+		return true, "auth-required: NIP-42 AUTH required for kind:1059 reads"
+	}
+	pTags, ok := filter.Tags["p"]
+	if !ok || len(pTags) == 0 {
+		return true, "auth-required: kind:1059 REQ must include #p filter"
+	}
+	for _, p := range pTags {
+		if p != authed {
+			return true, "auth-mismatch: requested #p does not match AUTH pubkey"
+		}
+	}
+	return false, ""
 }
 
 // ListenAndServe blocks until the listener exits. When both TLS.CertFile
