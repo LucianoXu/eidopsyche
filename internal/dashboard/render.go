@@ -277,9 +277,15 @@ type redeemFlash struct {
 }
 
 // confirmModalData is the payload for the shared "confirm_modal" template.
-// Used in later phases (remove-contact, revoke-invite, gate stop/purge,
-// self-update). Defined here so handler tests can exercise the renderer
-// before the destructive endpoints land.
+// Used in remove-contact, revoke-invite, gate stop/purge/self-update.
+//
+// AckField, when non-empty, renders an additional checkbox in the modal
+// — its form name is AckField and the danger button stays disabled
+// until BOTH the typed phrase matches AND the checkbox is checked.
+// Server-side, the corresponding handler must verify req.Form.Get(
+// AckField) == "1". Used by Phase 5's purge action ("I have backed up
+// state.db" acknowledgement) so the operator can't fire the
+// state-wiping action with just the typed-confirm.
 type confirmModalData struct {
 	Action         string
 	Target         string
@@ -289,6 +295,8 @@ type confirmModalData struct {
 	Warning        string
 	ExpectedPhrase string
 	ConfirmLabel   string
+	AckField       string // optional checkbox form-field name (purge: "ack-backup")
+	AckText        string // human-readable label for the checkbox
 }
 
 // ── phase 4: own relays ────────────────────────────────────────────

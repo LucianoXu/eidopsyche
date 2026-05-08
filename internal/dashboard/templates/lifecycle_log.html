@@ -57,12 +57,16 @@
     pre.addEventListener("htmx:afterSwap", function () {
       pre.scrollTop = pre.scrollHeight;
     });
+    // {once:true} so a second lifecycle action in the same session
+    // doesn't accumulate listeners on body. The handler scopes its
+    // banner update to *this* job's banner; later jobs render their
+    // own log fragment which carries its own listener.
     document.body.addEventListener("htmx:sseError", function () {
       banner.classList.add("is-disconnected");
       banner.textContent = daemonKilling
         ? "Daemon stopped. Restart from a terminal: eidos gate start, then reload this page."
         : "SSE connection dropped — output may be incomplete. Reload to recover.";
-    });
+    }, { once: true });
   })();
 </script>
 {{end}}

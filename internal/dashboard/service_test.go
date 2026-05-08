@@ -263,6 +263,38 @@ func TestGetService_ConfirmModalRenders(t *testing.T) {
 	}
 }
 
+// TestGetService_PurgeModalRendersAckCheckbox guards against regressing
+// the Copilot-flagged bug where the purge modal didn't render the
+// ack-backup checkbox the server-side handler requires. Without the
+// checkbox the form has no way to submit the required field and
+// /settings/service/purge always 400s.
+func TestGetService_PurgeModalRendersAckCheckbox(t *testing.T) {
+	srv := newTestServer(t, newPhase5Deps())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/settings/service/confirm/purge", nil)
+	srv.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`name="ack-backup"`,
+		`type="checkbox"`,
+		`I have backed up state.db`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("purge modal missing %q\nbody: %s", want, body[:min(2000, len(body))])
+		}
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func TestPostService_BusyReturns409OnConfirmedAction(t *testing.T) {
 	deps := newPhase5Deps()
 	deps.lifecycleRunFn = func(args []string) (string, error) {

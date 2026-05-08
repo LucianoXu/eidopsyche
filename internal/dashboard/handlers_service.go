@@ -217,6 +217,7 @@ func renderLifecycleLog(w http.ResponseWriter, r *renderer, logger *slog.Logger,
 func renderServiceConfirmModal(w http.ResponseWriter, r *renderer, logger *slog.Logger, deps DashboardDeps, action string) {
 	var (
 		title, body, warning, label, confirmLabel string
+		ackField, ackText                         string
 		actURL                                    = "/settings/service/" + action
 	)
 	status := deps.Status()
@@ -233,6 +234,11 @@ func renderServiceConfirmModal(w http.ResponseWriter, r *renderer, logger *slog.
 		warning = "Type your label and tick the backup acknowledgement to confirm. Your peers will need to re-add you from a fresh card after init."
 		label = ownLabelOf(deps, logger)
 		confirmLabel = "Purge state"
+		// Mirrors the server-side check in handleServiceLifecycle:
+		// without these the form has no checkbox and the POST always
+		// 400s with "missing acknowledgement".
+		ackField = "ack-backup"
+		ackText = "I have backed up state.db (or accept losing it)"
 	case "self-update":
 		title = "Self-update binary"
 		body = fmt.Sprintf("Re-runs the install script to fetch the latest release. The running daemon keeps the OLD binary mapped in memory until restart. Type the running version (%s) to confirm.", status.Version)
@@ -256,6 +262,8 @@ func renderServiceConfirmModal(w http.ResponseWriter, r *renderer, logger *slog.
 		Warning:        warning,
 		ExpectedPhrase: label,
 		ConfirmLabel:   confirmLabel,
+		AckField:       ackField,
+		AckText:        ackText,
 	})
 	if rerr != nil {
 		logger.Error("render confirm_modal (service)", "err", rerr)

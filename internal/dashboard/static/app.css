@@ -934,6 +934,17 @@ table.config-table .row-error {
   border-color: var(--seal);
 }
 
+.confirm-ack {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 0 18px;
+  font-style: italic; font-size: 14px; color: var(--fg);
+}
+.confirm-ack input[type=checkbox] {
+  margin: 0; flex-shrink: 0;
+  accent-color: var(--seal);
+  cursor: pointer;
+}
+
 .confirm-actions {
   display: flex;
   gap: 12px;
