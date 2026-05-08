@@ -962,7 +962,12 @@ func settingsContactsScanHandler(deps DashboardDeps, r *renderer, logger *slog.L
 			return
 		}
 		cardURI := strings.TrimSpace(req.Form.Get("card"))
-		view := contactScanData{CardURI: cardURI}
+		// Carry the operator's optional label override through the
+		// preview → confirm round trip; the confirm form re-POSTs both
+		// the card URI and this label, so a typed override survives
+		// (instead of silently reverting to the card's embedded label).
+		labelOverride := strings.TrimSpace(req.Form.Get("label"))
+		view := contactScanData{CardURI: cardURI, LabelOverride: labelOverride}
 		if cardURI == "" {
 			view.Error = "Card URI is required."
 		} else if preview, err := deps.ScanCard(req.Context(), cardURI); err != nil {

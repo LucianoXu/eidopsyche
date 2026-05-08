@@ -313,6 +313,12 @@ func (a dashboardAdapter) RemoveContact(ctx context.Context, pubkey string) erro
 		return err
 	}
 	a.d.emitDashEvent(dashboard.Event{Kind: "contact.removed"})
+	// Symmetrical with AddContact: the removed contact's relay hints
+	// drop out of the union, so kick the subscriber to recompute and
+	// release any connection that's no longer in the set. Otherwise
+	// the daemon stays bound to the old set (and the relay-health
+	// panel keeps reporting the now-orphaned URL) until restart.
+	a.d.Refresh()
 	return nil
 }
 

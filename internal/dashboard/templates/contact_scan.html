@@ -33,7 +33,9 @@
         hx-target="#settings-pane"
         hx-swap="innerHTML">
     <input type="hidden" name="card" value="{{.CardURI}}">
-    <input type="hidden" name="label" value="{{.Label}}">
+    <!-- Use the operator's typed override if they entered one;
+         otherwise fall back to the card's embedded label. -->
+    <input type="hidden" name="label" value="{{if .LabelOverride}}{{.LabelOverride}}{{else}}{{.Label}}{{end}}">
     <button type="submit">{{if .AlreadyContact}}Refresh contact{{else}}Confirm add{{end}}</button>
     <button type="button" class="ghost-button"
             hx-on:click="this.closest('#contact-add-result').innerHTML=''">Discard</button>

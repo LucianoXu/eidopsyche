@@ -176,6 +176,7 @@ type contactDetailData struct {
 
 type contactScanData struct {
 	CardURI        string
+	LabelOverride  string // operator's typed label override; preserved through preview → confirm
 	Pubkey         string
 	Npub           string
 	Label          string
