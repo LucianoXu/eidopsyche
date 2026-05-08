@@ -50,8 +50,8 @@ func newPhase3Deps() fakeDeps {
 		},
 	}
 	return fakeDeps{
-		pubkey:     validHex32,
-		label:      "alice",
+		pubkey: validHex32,
+		label:  "alice",
 		listInvitesFn: func(ctx context.Context, status string) ([]*invitedb.Invite, error) {
 			if status == "" {
 				return invs, nil

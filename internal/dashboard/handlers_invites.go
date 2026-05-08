@@ -179,14 +179,13 @@ func handleInviteCreate(w http.ResponseWriter, req *http.Request, r *renderer, l
 	// Refresh from a fresh list so the new row shows in Active.
 	view = buildSettingsInvites(ctx, deps)
 	view.CreatedInvite = &createdInvite{
-		IDShort:    inviteIDShort(inv.ID),
-		URI:        uri,
-		ExpiresAt:  inv.ExpiresAt,
-		MaxUses:    inv.MaxUses,
-		SingleUse:  opts.SingleUse,
-		Unlimited:  opts.Unlimited,
-		Redeemer:   redeemerLabel,
-		IssuerHint: inv.IssuerLabel,
+		IDShort:   inviteIDShort(inv.ID),
+		URI:       uri,
+		ExpiresAt: inv.ExpiresAt,
+		MaxUses:   inv.MaxUses,
+		SingleUse: opts.SingleUse,
+		Unlimited: opts.Unlimited,
+		Redeemer:  redeemerLabel,
 	}
 	renderInvitesPane(w, r, logger, ctx, deps, view)
 }
@@ -303,7 +302,7 @@ func renderInviteRevokeModal(w http.ResponseWriter, r *renderer, logger *slog.Lo
 		}
 	}
 	if match == nil {
-		http.NotFound(w, &http.Request{})
+		http.Error(w, "404 invite not found", http.StatusNotFound)
 		return
 	}
 	short := inviteIDShort(match.ID)

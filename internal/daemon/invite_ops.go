@@ -206,18 +206,21 @@ func (d *Daemon) InviteRedeem(ctx context.Context, token string) (*InviteRedeemR
 	if err != nil {
 		return nil, fmt.Errorf("wrap redemption: %w", err)
 	}
-	selfWrap, _, _ := nostr.WrapKind(d.Key.PrivateHex, d.Key.PublicHex, string(rb), 25001)
-	d.recordSelfWrap(selfWrap.ID)
+	// Best-effort self-wrap so the daemon's own subscriber suppresses
+	// the echo. WrapKind can fail (key derivation, NIP-44 conv key) and
+	// returns a nil event in that case; we only record the seen-id and
+	// publish when the wrap actually succeeded — the prior
+	// implementation panicked on the nil-deref path.
+	selfWrap, _, werr := nostr.WrapKind(d.Key.PrivateHex, d.Key.PublicHex, string(rb), 25001)
+	if werr == nil && selfWrap != nil {
+		d.recordSelfWrap(selfWrap.ID)
+	}
 
 	targets := map[string]struct{}{payload.IssuerRelay: {}}
-	rows, _ := d.DB.QueryContext(ctx, `SELECT relay_url FROM own_relays`)
-	if rows != nil {
-		for rows.Next() {
-			var u string
-			_ = rows.Scan(&u)
+	if urls, ourErr := d.ownRelayURLs(ctx); ourErr == nil {
+		for _, u := range urls {
 			targets[u] = struct{}{}
 		}
-		rows.Close()
 	}
 	for _, u := range d.Cfg.Publish.FallbackRelays {
 		targets[u] = struct{}{}
@@ -230,7 +233,9 @@ func (d *Daemon) InviteRedeem(ctx context.Context, token string) (*InviteRedeemR
 	pubCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	res := d.Pool.Publish(pubCtx, urls, wrap)
-	_ = d.Pool.Publish(pubCtx, urls, selfWrap)
+	if selfWrap != nil {
+		_ = d.Pool.Publish(pubCtx, urls, selfWrap)
+	}
 
 	accepted := []string{}
 	for _, r := range res {

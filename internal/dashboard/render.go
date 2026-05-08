@@ -258,14 +258,13 @@ type inviteRow struct {
 // foregrounded, with a copy-button. Subsequent reloads re-render
 // the row in the Active section without the URI (it's not stored).
 type createdInvite struct {
-	IDShort    string
-	URI        string
-	ExpiresAt  time.Time // zero ⇒ never
-	MaxUses    int
-	SingleUse  bool
-	Unlimited  bool
-	Redeemer   string
-	IssuerHint string
+	IDShort   string
+	URI       string
+	ExpiresAt time.Time // zero ⇒ never
+	MaxUses   int
+	SingleUse bool
+	Unlimited bool
+	Redeemer  string
 }
 
 // redeemFlash is the success-flash shown after a redeem completes.
