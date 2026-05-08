@@ -195,6 +195,15 @@ func (a dashboardAdapter) ConfigSet(ctx context.Context, path, value string) err
 	if !ok {
 		return fmt.Errorf("unknown config key: %s", path)
 	}
+	// Serialise read-modify-write so two concurrent rows-set calls
+	// (e.g. operator clicking Set on two rows in quick succession, or
+	// two open tabs writing different keys) cannot overwrite each
+	// other's update. Validation runs inside the lock too so the
+	// rejection of an invalid value reflects the on-disk state at
+	// the moment of the attempt.
+	a.d.configMu.Lock()
+	defer a.d.configMu.Unlock()
+
 	cfg, err := config.Load(a.configPath())
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
