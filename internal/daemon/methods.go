@@ -223,12 +223,16 @@ func relayList(ctx context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (
 	if err != nil {
 		return nil, internalErr(err)
 	}
-	out := make([]map[string]any, 0, len(rows))
+	// Return strings only, matching the pre-Phase-4 IPC contract that
+	// the existing CLI (cmd/eidos/gate/relays.go) unmarshals into
+	// []map[string]string. AddedAt is exposed via the typed helper for
+	// dashboard rendering; CLI consumers don't need it. Adding a new
+	// field here would break callers built against the older shape.
+	out := make([]map[string]string, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, map[string]any{
-			"url":      r.URL,
-			"role":     r.Role,
-			"added_at": r.AddedAt,
+		out = append(out, map[string]string{
+			"url":  r.URL,
+			"role": r.Role,
 		})
 	}
 	return out, nil

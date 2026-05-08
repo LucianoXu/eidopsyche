@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -144,7 +145,12 @@ func TestPostRelay_AddDefaultsToFallback(t *testing.T) {
 func TestPostRelay_AddSurfacesValidationError(t *testing.T) {
 	deps := newPhase4Deps()
 	deps.addOwnRelayFn = func(ctx context.Context, rawURL, role string) error {
-		return errors.New("relay: url must be a non-empty ws:// or wss:// URL")
+		// The adapter wraps the daemon-internal sentinel into the
+		// dashboard-public ErrRelayInvalidURL; tests that fake the
+		// adapter must do the same so the handler routes through the
+		// inline-error branch rather than the operational 502.
+		return fmt.Errorf("%w: relay: url must be a non-empty ws:// or wss:// URL",
+			ErrRelayInvalidURL)
 	}
 	srv := newTestServer(t, deps)
 	form := url.Values{"url": {"http://wrong-scheme.example/"}, "role": {"fallback"}}
@@ -157,6 +163,30 @@ func TestPostRelay_AddSurfacesValidationError(t *testing.T) {
 	if !strings.Contains(body, `class="form-flash is-error"`) ||
 		!strings.Contains(body, `Add failed`) {
 		t.Errorf("validation error must surface inline; got: %s", body)
+	}
+}
+
+// TestPostRelay_AddOperationalErrorReturns502 ensures the handler
+// distinguishes typed validation errors (rendered inline) from raw
+// operational errors (logged + 502). Without this distinction, a DB
+// outage would masquerade as "Add failed: ..." in the operator's UI.
+func TestPostRelay_AddOperationalErrorReturns502(t *testing.T) {
+	deps := newPhase4Deps()
+	deps.addOwnRelayFn = func(ctx context.Context, rawURL, role string) error {
+		return errors.New("disk full") // not wrapping any ErrRelay* sentinel
+	}
+	srv := newTestServer(t, deps)
+	form := url.Values{"url": {"wss://valid.example/"}, "role": {"fallback"}}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/settings/relays", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://"+req.Host)
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadGateway {
+		t.Errorf("operational error should 502, got %d body %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "disk full") {
+		t.Errorf("502 body should include the underlying error; got: %s", rec.Body.String())
 	}
 }
 

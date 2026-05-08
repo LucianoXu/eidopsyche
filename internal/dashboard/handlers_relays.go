@@ -96,11 +96,20 @@ func handleRelayAdd(w http.ResponseWriter, req *http.Request, r *renderer, logge
 	}
 
 	if err := deps.AddOwnRelay(ctx, rawURL, role); err != nil {
-		// All AddOwnRelay errors are validation; surface them inline
-		// rather than 4xx-ing — the operator should see what went wrong
-		// without the page collapsing.
-		view := buildSettingsRelays(ctx, deps, "Add failed: "+err.Error())
-		renderRelaysPane(w, r, logger, view)
+		// Validation errors come back as typed sentinels and surface
+		// inline so the operator can correct the URL/role without the
+		// page collapsing. Anything else is operational (DB I/O,
+		// context cancellation, …) — log it and surface as 502 so
+		// outages don't masquerade as user-correctable input mistakes.
+		if errors.Is(err, ErrRelayInvalidURL) ||
+			errors.Is(err, ErrRelayInvalidRole) ||
+			errors.Is(err, ErrRelayDuplicate) {
+			view := buildSettingsRelays(ctx, deps, "Add failed: "+err.Error())
+			renderRelaysPane(w, r, logger, view)
+			return
+		}
+		logger.Warn("dashboard relay-add failed", "err", err)
+		http.Error(w, "add failed: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 	renderRelaysPane(w, r, logger, buildSettingsRelays(ctx, deps, ""))

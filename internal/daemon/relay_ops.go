@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/url"
@@ -108,7 +109,10 @@ func (d *Daemon) RemoveOwnRelay(ctx context.Context, rawURL string) error {
 	var role string
 	if err := tx.QueryRowContext(ctx,
 		`SELECT role FROM own_relays WHERE relay_url=?`, rawURL).Scan(&role); err != nil {
-		return errOwnRelayNotFound
+		if errors.Is(err, sql.ErrNoRows) {
+			return errOwnRelayNotFound
+		}
+		return fmt.Errorf("read role: %w", err)
 	}
 	if role == "home" {
 		var homeCount int
