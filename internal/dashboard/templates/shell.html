@@ -18,7 +18,7 @@
 <main class="layout">
   <aside class="sidebar" id="sidebar"
          hx-get="/sidebar/contacts"
-         hx-trigger="sse:contact.added,sse:contact.removed,sse:contact.relabeled">
+         hx-trigger="sse:contact.added,sse:contact.removed,sse:contact.relabeled,sse:contact.tier-changed">
     {{template "sidebar-inner" .Sidebar}}
   </aside>
   <section class="main" id="main">

@@ -1173,8 +1173,10 @@ func handleContactRemove(w http.ResponseWriter, req *http.Request, r *renderer, 
 		http.Error(w, "remove failed: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	// Return the refreshed contacts list pane so the modal closes
-	// (its hx-target is #settings-pane) and the row is gone.
+	// Return the refreshed contacts list pane (swapped into the
+	// modal's hx-target=#settings-pane) AND an OOB swap that empties
+	// the #modal slot — without the OOB clear, the modal markup
+	// stays in the DOM hovering over the freshly-rendered list.
 	out, rerr := r.Render("settings_contacts", buildSettingsContacts(ctx, deps, ""))
 	if rerr != nil {
 		logger.Error("render settings_contacts", "err", rerr)
@@ -1183,6 +1185,7 @@ func handleContactRemove(w http.ResponseWriter, req *http.Request, r *renderer, 
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(out))
+	_, _ = w.Write([]byte(`<div id="modal" hx-swap-oob="innerHTML"></div>`))
 }
 
 // ── settings/contacts view-builders ────────────────────────────────

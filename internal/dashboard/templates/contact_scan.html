@@ -30,9 +30,8 @@
 
   <form class="contact-scan-confirm"
         hx-post="/settings/contacts"
-        hx-target="#contact-rows"
-        hx-swap="beforeend"
-        hx-on::after-request="if(event.detail.successful){document.getElementById('contact-add-result').innerHTML='';const f=document.getElementById('contact-add-form');if(f)f.reset()}">
+        hx-target="#settings-pane"
+        hx-swap="innerHTML">
     <input type="hidden" name="card" value="{{.CardURI}}">
     <input type="hidden" name="label" value="{{.Label}}">
     <button type="submit">{{if .AlreadyContact}}Refresh contact{{else}}Confirm add{{end}}</button>
