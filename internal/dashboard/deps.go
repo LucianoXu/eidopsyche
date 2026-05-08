@@ -6,6 +6,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
@@ -32,6 +33,33 @@ type DashboardDeps interface {
 	// SubscribeEvents returns a channel of Event values for the SSE hub
 	// to fan out. cancel must be called to release the slot.
 	SubscribeEvents() (ch <-chan Event, cancel func())
+
+	// ── phase 1: identity + config ────────────────────────────────────
+	//
+	// SetOwnLabel writes the new label to the daemon's meta store. An
+	// empty (post-trim) label is rejected to keep every identity's card
+	// non-empty. On success, the daemon emits identity.label-changed so
+	// other open dashboards refresh.
+	SetOwnLabel(ctx context.Context, label string) error
+
+	// OwnCardURI returns the mindgate://npub@ws…/?label=… string the
+	// operator hands to peers. Implementation reads the identity meta
+	// row and the home relay row, identical to the IPC card.export
+	// handler.
+	OwnCardURI(ctx context.Context) (string, error)
+
+	// ConfigSnapshot returns the parsed contents of config.toml at the
+	// time of the call. Combined with config.KeyList() the dashboard
+	// renders a row per scalar key.
+	ConfigSnapshot() (config.Config, error)
+
+	// ConfigSet validates value against the config.Key registry, writes
+	// it to config.toml, and emits config.changed. Returns a wrapped
+	// validation error suitable for inline rendering when the value is
+	// rejected. A successful Set does NOT take effect on the running
+	// daemon — restart is still required to pick up changes; the
+	// dashboard surfaces this in its Restart-required note.
+	ConfigSet(ctx context.Context, path, value string) error
 }
 
 // Event is the SSE-bound broadcast type. Kind discriminates the union;

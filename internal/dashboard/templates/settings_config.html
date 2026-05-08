@@ -1,0 +1,51 @@
+{{define "settings_config"}}
+<div class="config-pane">
+  <h2>Config</h2>
+  <p class="pane-aside">
+    Scalar settings written to <code class="inline-code">config.toml</code>. Changes are persisted
+    immediately; restart the daemon and relay to apply (Service tab, coming soon).
+  </p>
+
+  {{if .Error}}<div class="form-flash is-error" role="alert" style="margin-bottom:18px">{{.Error}}</div>{{end}}
+
+  <table class="config-table">
+    <thead>
+      <tr>
+        <th>Key</th>
+        <th>Description</th>
+        <th>Value</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Rows}}
+      {{template "settings_config_row" .}}
+      {{end}}
+    </tbody>
+  </table>
+
+  <p class="restart-note"><strong>Restart required</strong>The daemon and relay continue running with the previous config until you stop and start them again.</p>
+</div>
+{{end}}
+
+{{define "settings_config_row"}}
+<tr id="cfg-{{.Slug}}" class="config-row {{if .Error}}is-error{{end}}">
+  <td class="key">{{.Path}}</td>
+  <td class="desc"><em>{{.Description}}</em></td>
+  <td class="value">
+    {{if .Editable}}
+    <form class="inline-form"
+          hx-post="/settings/config"
+          hx-target="#cfg-{{.Slug}}"
+          hx-swap="outerHTML">
+      <input type="hidden" name="path" value="{{.Path}}">
+      <input type="text" name="value" value="{{.Value}}"
+             autocomplete="off" spellcheck="false">
+      <button type="submit">Set</button>
+    </form>
+    {{else}}
+    <span class="readonly-value">{{.Value}}</span>
+    {{end}}
+    {{if .Error}}<div class="row-error" role="alert">{{.Error}}</div>{{end}}
+  </td>
+</tr>
+{{end}}

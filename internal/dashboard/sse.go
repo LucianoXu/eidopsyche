@@ -93,6 +93,12 @@ func renderEvent(r *renderer, ev Event, logger *slog.Logger) (string, string) {
 		return "outbox.message:" + ev.Sent.To, out
 	case "contact.added", "contact.removed", "contact.relabeled":
 		return ev.Kind, "(refresh)"
+	case "identity.label-changed", "config.changed":
+		// Phase 1 signal-only events: the consumer (topbar, Identity
+		// pane, Config pane) re-fetches its own URL on the trigger;
+		// the SSE payload is just the literal "(refresh)" string used
+		// across the rest of the signal-only family.
+		return ev.Kind, "(refresh)"
 	case "relay.state":
 		// The relay panel renders the full table on every transition —
 		// the panel is small and per-event diffing is more code than it

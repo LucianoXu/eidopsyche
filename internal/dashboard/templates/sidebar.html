@@ -21,4 +21,13 @@
 
 <h3>Compose</h3>
 <button hx-get="/compose" hx-target="#main">+ Compose to npub…</button>
+
+<h3>Operator</h3>
+<a href="/settings"
+   hx-get="/settings"
+   hx-target="#main"
+   hx-push-url="true"
+   class="{{if .ActiveSettings}}active{{end}}">
+  <span>Settings</span>
+</a>
 {{end}}

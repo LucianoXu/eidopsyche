@@ -1,0 +1,21 @@
+{{define "settings"}}
+<div class="thread-header settings-header">
+  <strong>Operator</strong>
+  <span class="own-id settings-aside">{{.OwnLabel}} · {{.Active}}</span>
+</div>
+<nav class="settings-tabs" role="tablist" aria-label="Operator panel"
+     hx-on:click="const t=event.target.closest('.settings-tab');if(!t)return;this.querySelectorAll('.settings-tab').forEach(x=>{x.classList.remove('is-active');x.setAttribute('aria-selected','false')});t.classList.add('is-active');t.setAttribute('aria-selected','true')">
+  <a class="settings-tab {{if eq .Active "identity"}}is-active{{end}}"
+     role="tab" aria-selected="{{if eq .Active "identity"}}true{{else}}false{{end}}"
+     href="/settings/identity"
+     hx-get="/settings/identity" hx-target="#settings-pane" hx-push-url="true">Identity</a>
+  <a class="settings-tab {{if eq .Active "config"}}is-active{{end}}"
+     role="tab" aria-selected="{{if eq .Active "config"}}true{{else}}false{{end}}"
+     href="/settings/config"
+     hx-get="/settings/config" hx-target="#settings-pane" hx-push-url="true">Config</a>
+</nav>
+<section class="settings-pane" id="settings-pane" role="tabpanel">
+  {{if eq .Active "identity"}}{{template "settings_identity" .Identity}}{{end}}
+  {{if eq .Active "config"}}{{template "settings_config" .Config}}{{end}}
+</section>
+{{end}}

@@ -1,0 +1,47 @@
+{{define "settings_identity"}}
+<div class="identity-pane">
+  <h2>Colophon</h2>
+  <p class="pane-aside">
+    Your identity as other peers see it. The label travels in the card you publish; the
+    keypair is private to this host and never leaves the state directory.
+  </p>
+
+  <dl class="identity-card">
+    <dt>Label</dt>
+    <dd class="serif">{{.Label}}</dd>
+
+    <dt>Npub</dt>
+    <dd class="mono">{{.Npub}}</dd>
+
+    <dt>Hex</dt>
+    <dd class="mono">{{.Hex}}</dd>
+
+    <dt>Card</dt>
+    <dd class="mono with-action">
+      <code class="card-uri">{{.CardURI}}</code>
+      <button type="button" class="copy-btn"
+              data-copy="{{.CardURI}}"
+              aria-label="Copy card URI"
+              hx-on:click="navigator.clipboard.writeText(this.dataset.copy);this.classList.add('is-copied');setTimeout(()=>this.classList.remove('is-copied'),1400)">Copy</button>
+    </dd>
+  </dl>
+
+  <form class="settings-form" id="set-label-form"
+        hx-post="/settings/identity/label"
+        hx-target="#settings-pane"
+        hx-swap="innerHTML">
+    <h4>Rename this entity</h4>
+    <p class="hint">
+      Existing contacts won't auto-update; share a fresh card to broadcast the change.
+      Up to 64 characters; surrounding whitespace is trimmed.
+    </p>
+    {{if .Error}}<div class="form-flash is-error" role="alert">{{.Error}}</div>{{end}}
+    {{if .Saved}}<div class="form-flash">Saved</div>{{end}}
+    <div class="field-row">
+      <input type="text" name="label" value="{{.Label}}" required maxlength="64"
+             autocomplete="off" spellcheck="false">
+      <button type="submit">Apply</button>
+    </div>
+  </form>
+</div>
+{{end}}

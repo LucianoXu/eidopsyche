@@ -3,8 +3,12 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/card"
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/dashboard"
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
@@ -144,4 +148,63 @@ func (a dashboardAdapter) Send(ctx context.Context, toPubkey string, env envelop
 
 func (a dashboardAdapter) SubscribeEvents() (<-chan dashboard.Event, func()) {
 	return a.d.subscribeDashboard()
+}
+
+// ── phase 1: identity + config ─────────────────────────────────────
+
+func (a dashboardAdapter) SetOwnLabel(ctx context.Context, label string) error {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return fmt.Errorf("label must not be empty")
+	}
+	if err := a.d.DB.SetMeta(ctx, "label", label); err != nil {
+		return err
+	}
+	a.d.emitDashEvent(dashboard.Event{Kind: "identity.label-changed"})
+	return nil
+}
+
+func (a dashboardAdapter) OwnCardURI(ctx context.Context) (string, error) {
+	label, _ := a.d.DB.GetMeta(ctx, "label")
+	var homeRelay string
+	if err := a.d.DB.QueryRowContext(ctx,
+		`SELECT relay_url FROM own_relays WHERE role='home' LIMIT 1`).Scan(&homeRelay); err != nil {
+		return "", fmt.Errorf("no home relay configured: %w", err)
+	}
+	c := card.Card{Npub: a.d.Key.Npub, Relay: homeRelay, Label: label}
+	uri, err := c.URI()
+	if err != nil {
+		return "", err
+	}
+	return uri, nil
+}
+
+// configPath is the canonical location of config.toml inside the gate
+// state directory. Both ConfigSnapshot and ConfigSet route through this
+// helper so they always read and write the same file.
+func (a dashboardAdapter) configPath() string {
+	return filepath.Join(a.d.StateDir, "config.toml")
+}
+
+func (a dashboardAdapter) ConfigSnapshot() (config.Config, error) {
+	return config.Load(a.configPath())
+}
+
+func (a dashboardAdapter) ConfigSet(ctx context.Context, path, value string) error {
+	key, ok := config.KeyByPath(path)
+	if !ok {
+		return fmt.Errorf("unknown config key: %s", path)
+	}
+	cfg, err := config.Load(a.configPath())
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if err := key.Set(&cfg, value); err != nil {
+		return err
+	}
+	if err := config.Save(a.configPath(), cfg); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+	a.d.emitDashEvent(dashboard.Event{Kind: "config.changed"})
+	return nil
 }

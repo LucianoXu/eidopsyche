@@ -78,6 +78,10 @@ type shellData struct {
 
 type sidebarData struct {
 	Contacts []sidebarContact
+	// ActiveSettings flips on the Settings sidebar entry's `active`
+	// styling when the operator is on any /settings* route. Each main
+	// route handler that renders the shell sets it explicitly.
+	ActiveSettings bool
 }
 
 type sidebarContact struct {
@@ -124,6 +128,57 @@ type messageRow struct {
 type composeData struct {
 	Pubkey string
 	Error  string
+}
+
+// ── phase 1: settings ───────────────────────────────────────────────
+//
+// settingsShellData is the payload for the "settings" template. Active
+// names which sub-tab is current ("identity" or "config"); the matching
+// pointer field is populated and the others are nil.
+
+type settingsShellData struct {
+	OwnLabel string
+	Active   string
+	Identity *settingsIdentityData
+	Config   *settingsConfigData
+}
+
+type settingsIdentityData struct {
+	Label   string
+	Npub    string
+	Hex     string
+	CardURI string
+	Saved   bool
+	Error   string
+}
+
+type settingsConfigData struct {
+	Rows  []settingsConfigRow
+	Error string
+}
+
+type settingsConfigRow struct {
+	Path        string
+	Slug        string
+	Description string
+	Value       string
+	Editable    bool
+	Error       string
+}
+
+// confirmModalData is the payload for the shared "confirm_modal" template.
+// Used in later phases (remove-contact, revoke-invite, gate stop/purge,
+// self-update). Defined here so handler tests can exercise the renderer
+// before the destructive endpoints land.
+type confirmModalData struct {
+	Action         string
+	Target         string
+	Swap           string
+	Title          string
+	Body           string
+	Warning        string
+	ExpectedPhrase string
+	ConfirmLabel   string
 }
 
 // sortContactsForSidebar orders contacts by most-recent activity, then by

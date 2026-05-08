@@ -10,6 +10,7 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/internal/card"
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
+	"github.com/LucianoXu/eidopsyche/internal/dashboard"
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
@@ -82,6 +83,7 @@ func setOwnLabel(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	if err := d.DB.SetMeta(ctx, "label", label); err != nil {
 		return nil, internalErr(err)
 	}
+	d.emitDashEvent(dashboard.Event{Kind: "identity.label-changed"})
 	return map[string]string{"label": label}, nil
 }
 

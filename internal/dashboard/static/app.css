@@ -417,3 +417,562 @@ a:focus-visible, button:focus-visible, input:focus-visible {
   outline: 2px solid var(--seal);
   outline-offset: 2px;
 }
+
+/* ---------------------------------------------------------------- *
+ * Phase 1 — Settings (Operator panel)
+ * Editorial colophon treatment: definition lists, slim tabs, the
+ * vermillion seal as the only chromatic accent. Keep typographic
+ * vocabulary in step with the chat surface above.
+ * ---------------------------------------------------------------- */
+
+.settings-header { gap: 18px; }
+.settings-aside  { margin-left: auto; font-style: italic; }
+.settings-aside::before { content: none; }
+
+/* tabs: thin underline that slides into vermillion */
+
+nav.settings-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 32px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+  z-index: 4;
+}
+
+a.settings-tab {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  padding: 14px 18px 12px;
+  color: var(--fg-mute);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;          /* the active underline replaces the page rule */
+  cursor: pointer;
+  transition: color 160ms ease, border-color 160ms ease;
+}
+
+a.settings-tab:hover    { color: var(--fg-dim); }
+a.settings-tab.is-active {
+  color: var(--fg);
+  border-bottom-color: var(--seal);
+}
+a.settings-tab.is-danger { color: var(--seal); }
+
+/* pane shell */
+
+section.settings-pane {
+  flex: 1;
+  overflow-y: auto;
+  padding: 36px 48px 64px;
+  animation: paper-fade 280ms ease-out both;
+}
+
+.settings-pane h2 {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 28px;
+  letter-spacing: 0.005em;
+  margin: 0 0 4px;
+}
+
+.settings-pane .pane-aside {
+  font-style: italic;
+  color: var(--fg-dim);
+  font-size: 14px;
+  margin: 0 0 32px;
+  max-width: var(--measure);
+}
+
+.settings-pane code.inline-code {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-style: normal;
+  color: var(--fg);
+  background: var(--bg-2);
+  padding: 0 5px;
+  border: 1px solid var(--rule);
+}
+
+/* identity colophon */
+
+dl.identity-card {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  column-gap: 36px;
+  row-gap: 14px;
+  align-items: baseline;
+  margin: 0 0 40px;
+  padding-bottom: 32px;
+  border-bottom: 1px solid var(--rule);
+}
+
+dl.identity-card dt {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--fg-mute);
+  text-align: right;
+  align-self: center;
+}
+
+dl.identity-card dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-feature-settings: "tnum" 1, "zero" 1;
+  word-break: break-all;
+  color: var(--fg);
+}
+
+dl.identity-card dd.serif {
+  font-family: var(--serif);
+  font-size: 17px;
+  font-style: italic;
+  font-weight: 500;
+  word-break: normal;
+}
+
+dl.identity-card dd.with-action {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.card-uri {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.copy-btn {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--rule-2);
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.copy-btn:hover { color: var(--seal); border-color: var(--seal); }
+
+.copy-btn.is-copied {
+  color: var(--seal);
+  border-color: var(--seal);
+  background: var(--seal-mute);
+}
+
+.copy-btn.is-copied::after { content: " ✓"; letter-spacing: 0; }
+
+/* settings forms (set-label, etc) */
+
+.settings-form { max-width: var(--measure); }
+
+.settings-form h4 {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 18px;
+  letter-spacing: 0.01em;
+  margin: 0 0 6px;
+}
+
+.settings-form .hint {
+  margin: 0 0 18px;
+  font-style: italic;
+  color: var(--fg-dim);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.settings-form .field-row {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.settings-form input[type=text] {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid var(--rule-2);
+  background: var(--bg-2);
+  color: var(--fg);
+  font: inherit;
+  font-size: 15px;
+}
+
+.settings-form input[type=text]:focus {
+  outline: none;
+  border-color: var(--seal);
+}
+
+.settings-form button[type=submit] {
+  padding: 10px 22px;
+  background: var(--seal);
+  color: #fdf6e9;
+  border: 1px solid var(--seal);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: filter 120ms ease;
+}
+
+.settings-form button[type=submit]:hover { filter: brightness(1.08); }
+
+.form-flash {
+  display: inline-block;
+  margin-bottom: 14px;
+  padding: 4px 12px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--seal);
+  border: 1px solid var(--seal);
+  background: var(--seal-mute);
+  animation: flash-in 240ms ease-out both;
+}
+
+.form-flash.is-error {
+  color: var(--warn);
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+
+@keyframes flash-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* config editorial table */
+
+table.config-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--serif);
+}
+
+table.config-table th {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--fg-mute);
+  text-align: left;
+  padding: 0 18px 12px 0;
+  border-bottom: 1px solid var(--rule-2);
+}
+
+table.config-table td {
+  padding: 14px 18px 14px 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: baseline;
+  font-size: 14.5px;
+}
+
+table.config-table td.key {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-feature-settings: "tnum" 1;
+  color: var(--fg);
+  white-space: nowrap;
+  width: 220px;
+}
+
+table.config-table td.desc {
+  color: var(--fg-dim);
+  font-style: italic;
+  max-width: 28ch;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+table.config-table td.value { width: 38%; }
+
+table.config-table .inline-form {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+table.config-table .inline-form input[type=text] {
+  flex: 1;
+  min-width: 12ch;
+  padding: 6px 10px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  background: var(--bg-2);
+  border: 1px solid var(--rule-2);
+  color: var(--fg);
+}
+
+table.config-table .inline-form input[type=text]:focus {
+  outline: none;
+  border-color: var(--seal);
+}
+
+table.config-table .inline-form button {
+  padding: 6px 14px;
+  background: transparent;
+  color: var(--fg-dim);
+  border: 1px solid var(--rule-2);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+table.config-table .inline-form button:hover {
+  color: var(--seal);
+  border-color: var(--seal);
+}
+
+table.config-table .readonly-value {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--fg-dim);
+}
+
+table.config-table .config-row.is-error td.value { color: var(--warn); }
+
+table.config-table .row-error {
+  margin-top: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--warn);
+}
+
+.restart-note {
+  margin-top: 32px;
+  padding: 14px 18px;
+  border-left: 2px solid var(--seal);
+  background: var(--seal-mute);
+  font-style: italic;
+  font-size: 14px;
+  color: var(--fg);
+  max-width: var(--measure);
+  line-height: 1.55;
+}
+
+.restart-note strong {
+  display: inline-block;
+  margin-right: 12px;
+  font-family: var(--mono);
+  font-style: normal;
+  font-size: 9.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--seal);
+}
+
+/* ---------------------------------------------------------------- *
+ * Confirm modal — "seal-stamp" treatment.
+ * Vermillion top rule (the seal-paste edge), an "印" character in a
+ * vermillion square next to the title. Warm-paper backdrop instead
+ * of the generic 40% black.
+ * ---------------------------------------------------------------- */
+
+.confirm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: paper-fade 200ms ease-out both;
+}
+
+.confirm-modal .backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(26, 22, 17, 0.72);
+}
+
+@media (prefers-color-scheme: light) {
+  .confirm-modal .backdrop { background: rgba(245, 239, 227, 0.78); }
+}
+
+.confirm-modal .confirm-card {
+  position: relative;
+  z-index: 1;
+  background: var(--bg);
+  border-top: 3px solid var(--seal);
+  border-right: 1px solid var(--rule-2);
+  border-bottom: 1px solid var(--rule-2);
+  border-left: 1px solid var(--rule-2);
+  width: 480px;
+  max-width: calc(100vw - 48px);
+  padding: 28px 32px 24px;
+  font-family: var(--serif);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+  animation: card-rise 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@media (prefers-color-scheme: light) {
+  .confirm-modal .confirm-card { box-shadow: 0 24px 48px rgba(26, 22, 17, 0.18); }
+}
+
+@keyframes card-rise {
+  from { opacity: 0; transform: translateY(8px) scale(0.99); }
+  to   { opacity: 1; transform: translateY(0)  scale(1); }
+}
+
+.confirm-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.confirm-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--seal);
+  color: #fdf6e9;
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  flex-shrink: 0;
+}
+
+.confirm-card h2 {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 22px;
+  margin: 0;
+  letter-spacing: 0.005em;
+  color: var(--fg);
+}
+
+.confirm-body {
+  margin: 0 0 16px;
+  font-size: 15px;
+  color: var(--fg);
+  line-height: 1.6;
+}
+
+.confirm-warning {
+  margin: 0 0 18px;
+  font-size: 14px;
+  font-style: italic;
+  color: var(--warn);
+  padding: 10px 14px;
+  background: var(--warn-soft);
+  border-left: 2px solid var(--warn);
+}
+
+.confirm-warning .reject-chip { vertical-align: 1px; margin-right: 8px; }
+
+.confirm-label {
+  display: block;
+  margin: 16px 0 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--fg-mute);
+}
+
+.confirm-label code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--seal);
+  padding: 1px 6px;
+  background: var(--seal-mute);
+  border: 1px solid var(--seal);
+}
+
+.confirm-card input[name=confirm] {
+  display: block;
+  width: 100%;
+  margin: 8px 0 24px;
+  padding: 10px 14px;
+  font-family: var(--mono);
+  font-size: 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--rule-2);
+  color: var(--fg);
+  letter-spacing: 0.02em;
+}
+
+.confirm-card input[name=confirm]:focus {
+  outline: none;
+  border-color: var(--seal);
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.confirm-actions button {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  padding: 10px 22px;
+  cursor: pointer;
+  transition: filter 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.confirm-actions button.ghost {
+  background: transparent;
+  border: 1px solid var(--rule-2);
+  color: var(--fg-dim);
+}
+
+.confirm-actions button.ghost:hover { color: var(--fg); }
+
+.confirm-actions button.danger {
+  background: var(--seal);
+  border: 1px solid var(--seal);
+  color: #fdf6e9;
+}
+
+.confirm-actions button.danger:disabled {
+  background: var(--bg-2);
+  border-color: var(--rule-2);
+  color: var(--fg-mute);
+  cursor: not-allowed;
+}
+
+.confirm-actions button.danger:not(:disabled):hover { filter: brightness(1.08); }
+
+/* ---------------------------------------------------------------- */
+

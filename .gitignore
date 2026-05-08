@@ -16,7 +16,14 @@ coverage.out
 /.testdata-tmp/
 
 # Deploy Test
-/deploy-test/
+# Local operator state (mindgate state dirs created by the alice/bob shell
+# script) stays untracked, but the runbook + scripts that drive the test
+# are tracked so phase PRs can ship their playwright deploy-tests.
+/deploy-test/*
+!/deploy-test/deploy-test-script.md
+!/deploy-test/test_script_Alice_Bob.sh
+!/deploy-test/playwright/
+!/deploy-test/playwright/**
 
 # SQLite WAL/SHM stragglers
 *.db-wal
