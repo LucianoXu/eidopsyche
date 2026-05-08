@@ -1,0 +1,69 @@
+{{define "settings_relays"}}
+<div class="relays-pane"
+     hx-get="/settings/relays"
+     hx-trigger="sse:relay.added,sse:relay.removed,sse:relay.state from:body"
+     hx-swap="outerHTML">
+  <h2>Standing posts</h2>
+  <p class="pane-aside">
+    Outposts you keep open for incoming traffic. A <strong>home</strong> relay is the
+    one URL stamped on the card you hand to peers — your front door. <strong>Fallback</strong>
+    relays are auxiliary publish targets the daemon also tries when sending. The daemon
+    needs at least one home post; the right rail's panel watches connection state.
+  </p>
+
+  {{if .Error}}<div class="form-flash is-error" role="alert" style="margin-bottom:18px">{{.Error}}</div>{{end}}
+
+  <table class="config-table relays-table">
+    <thead>
+      <tr>
+        <th class="th-role">Role</th>
+        <th class="th-url">URL</th>
+        <th class="th-state">State</th>
+        <th class="th-seen">Last event</th>
+        <th class="th-added">Added</th>
+        <th aria-label="Actions"></th>
+      </tr>
+    </thead>
+    <tbody id="relay-rows">
+      {{range .Rows}}{{template "relay_row" .}}{{else}}
+      <tr class="relays-empty"><td colspan="6" class="empty">
+        No own relays on file. Add one below — without a home relay, the daemon can't
+        publish on your behalf.
+      </td></tr>
+      {{end}}
+    </tbody>
+  </table>
+
+  <section class="relay-add">
+    <h4>Plant a new post</h4>
+    <p class="hint">
+      A relay URL must be <code class="inline-code">ws://</code> or
+      <code class="inline-code">wss://</code>. Fallback URLs broaden the publish set
+      without changing the address on your card; promote one to home only when you're
+      ready to share a fresh card.
+    </p>
+    {{if .AddError}}<div class="form-flash is-error" role="alert">{{.AddError}}</div>{{end}}
+    <form class="contact-add-form relay-add-form" autocomplete="off"
+          hx-post="/settings/relays" hx-target="#settings-pane" hx-swap="innerHTML"
+          hx-on::after-request="if(event.detail.successful)this.reset()">
+      <div class="contact-add-grid relay-add-grid">
+        <label class="contact-add-field">
+          <span class="contact-add-label">Relay URL</span>
+          <input type="text" name="url" required spellcheck="false"
+                 placeholder="wss://relay.example/" autocomplete="off">
+        </label>
+        <label class="contact-add-field">
+          <span class="contact-add-label">Role</span>
+          <select name="role" class="role-select">
+            <option value="fallback" selected>fallback</option>
+            <option value="home">home</option>
+          </select>
+        </label>
+        <div class="contact-add-actions">
+          <button type="submit">Plant</button>
+        </div>
+      </div>
+    </form>
+  </section>
+</div>
+{{end}}

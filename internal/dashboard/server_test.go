@@ -107,7 +107,18 @@ type fakeDeps struct {
 	revokeInviteFn  func(ctx context.Context, idPrefix string) (string, error)
 	revokeCalls     *[]string
 	redeemInviteFn  func(ctx context.Context, token string) (RedeemResult, error)
+
+	// ── phase 4 ─────────────────────────────────────────────────
+	ownRelays         []OwnRelay
+	relayHealthRows   []RelayState
+	addOwnRelayFn     func(ctx context.Context, rawURL, role string) error
+	removeOwnRelayFn  func(ctx context.Context, rawURL string) error
+	addOwnRelayCalls  *[]addOwnRelayCall
+	removeOwnRelayLog *[]string
 }
+
+// addOwnRelayCall captures one AddOwnRelay invocation for assertions.
+type addOwnRelayCall struct{ URL, Role string }
 
 // contactTierCall captures one SetContactTier invocation for assertions.
 type contactTierCall struct {
@@ -129,7 +140,7 @@ func (f fakeDeps) ListOutbox(*time.Time, string, int) ([]inbox.Sent, error) {
 func (f fakeDeps) ListContacts(context.Context) ([]*contacts.Contact, error) {
 	return f.contactsL, nil
 }
-func (f fakeDeps) ListRelayHealth() []RelayState { return nil }
+func (f fakeDeps) ListRelayHealth() []RelayState { return f.relayHealthRows }
 func (f fakeDeps) Send(_ context.Context, _ string, _ envelope.Envelope) (string, error) {
 	return f.sendID, f.sendErr
 }
@@ -244,4 +255,28 @@ func (f fakeDeps) RedeemInvite(ctx context.Context, token string) (RedeemResult,
 		return f.redeemInviteFn(ctx, token)
 	}
 	return RedeemResult{}, nil
+}
+
+func (f fakeDeps) ListOwnRelays(context.Context) ([]OwnRelay, error) {
+	return f.ownRelays, nil
+}
+
+func (f fakeDeps) AddOwnRelay(ctx context.Context, rawURL, role string) error {
+	if f.addOwnRelayCalls != nil {
+		*f.addOwnRelayCalls = append(*f.addOwnRelayCalls, addOwnRelayCall{URL: rawURL, Role: role})
+	}
+	if f.addOwnRelayFn != nil {
+		return f.addOwnRelayFn(ctx, rawURL, role)
+	}
+	return nil
+}
+
+func (f fakeDeps) RemoveOwnRelay(ctx context.Context, rawURL string) error {
+	if f.removeOwnRelayLog != nil {
+		*f.removeOwnRelayLog = append(*f.removeOwnRelayLog, rawURL)
+	}
+	if f.removeOwnRelayFn != nil {
+		return f.removeOwnRelayFn(ctx, rawURL)
+	}
+	return nil
 }

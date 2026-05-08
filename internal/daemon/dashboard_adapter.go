@@ -408,3 +408,29 @@ func (a dashboardAdapter) ScanCard(ctx context.Context, cardURI string) (dashboa
 		AlreadyContact: already,
 	}, nil
 }
+
+// ── phase 4: own relays ────────────────────────────────────────────
+
+func (a dashboardAdapter) ListOwnRelays(ctx context.Context) ([]dashboard.OwnRelay, error) {
+	rows, err := a.d.ListOwnRelays(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dashboard.OwnRelay, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, dashboard.OwnRelay{
+			URL:     r.URL,
+			Role:    r.Role,
+			AddedAt: r.AddedAt,
+		})
+	}
+	return out, nil
+}
+
+func (a dashboardAdapter) AddOwnRelay(ctx context.Context, rawURL, role string) error {
+	return a.d.AddOwnRelay(ctx, rawURL, role)
+}
+
+func (a dashboardAdapter) RemoveOwnRelay(ctx context.Context, rawURL string) error {
+	return a.d.RemoveOwnRelay(ctx, rawURL)
+}

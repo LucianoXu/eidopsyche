@@ -114,6 +114,32 @@ type DashboardDeps interface {
 	// contact, and publishes a kind:25001 redemption gift wrap.
 	// Emits invite.redeemed AND contact.added.
 	RedeemInvite(ctx context.Context, token string) (RedeemResult, error)
+
+	// ── phase 4: own relays ──────────────────────────────────────────
+	//
+	// ListOwnRelays returns the rows of own_relays ordered by role
+	// (home > fallback) then URL. Combined with ListRelayHealth() the
+	// dashboard renders a per-row health pill.
+	ListOwnRelays(ctx context.Context) ([]OwnRelay, error)
+
+	// AddOwnRelay inserts a relay URL with the given role
+	// ("home" or "fallback"). Returns a wrapped validation error
+	// suitable for inline rendering when the URL or role is rejected
+	// or the URL already exists. Emits relay.added on success.
+	AddOwnRelay(ctx context.Context, rawURL, role string) error
+
+	// RemoveOwnRelay deletes a relay row by exact URL. The dashboard
+	// gates this with a typed-confirm modal when the role is "home";
+	// the adapter does not re-validate the phrase. Refuses when
+	// removing the row would leave zero home relays. Emits relay.removed.
+	RemoveOwnRelay(ctx context.Context, rawURL string) error
+}
+
+// OwnRelay is the dashboard-local view of an own_relays row.
+type OwnRelay struct {
+	URL     string
+	Role    string
+	AddedAt int64 // Unix timestamp; 0 if unknown
 }
 
 // InviteCreateOpts is the dashboard-local form of the create-invite

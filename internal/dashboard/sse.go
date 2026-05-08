@@ -113,6 +113,12 @@ func renderEvent(r *renderer, ev Event, logger *slog.Logger) (string, string) {
 		// templates/shell.html re-fetches /relays via hx-get on
 		// sse:relay.state and swaps the rendered partial as innerHTML.
 		return ev.Kind, "(refresh)"
+	case "relay.added", "relay.removed":
+		// Phase 4 signal-only events: the /settings/relays pane
+		// subscribes via hx-trigger and re-fetches itself when an
+		// own_relays row changes. The right-rail relays panel keeps
+		// using relay.state for connection-level transitions.
+		return ev.Kind, "(refresh)"
 	default:
 		return "", ""
 	}
