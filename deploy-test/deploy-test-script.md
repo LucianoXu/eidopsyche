@@ -42,6 +42,7 @@ Use the label `YingteSelene` for `selene`, and `YingteXu` for `mbp`.
    - Phase 1 (Identity + Settings shell + Config): `phase1-identity-config.mjs`.
    - Phase 2 (Contacts editor): `phase2-contacts.mjs` — needs `eidos` on PATH (or `EIDOS_BIN` env var) so it can spawn a transient peer-daemon for a real card URI to scan.
    - Phase 3 (Invites): `phase3-invites.mjs` — local-only smoke; the cross-machine redeem path is exercised by `full-bidirectional.mjs`.
+   - Phase 4 (Relays): `phase4-relays.mjs` — local-only smoke; exercises the IsLastHome guard, fallback add/remove, and the home-relay typed-confirm modal. Idempotent: restores the seeded home before exit.
    - Each script exits 0 on success with a numbered step log; non-zero on the first failure with the failing step name.
 
 The Playwright runner doubles as the project's regression net: every

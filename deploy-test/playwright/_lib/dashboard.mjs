@@ -707,6 +707,127 @@ export async function revokeInviteWithConfirm(page, idShort) {
 }
 
 /**
+ * List own-relay rows currently rendered on /settings/relays.
+ * Returns Array<{role, url, state, lastEvent, added, slug, isLastHome}>.
+ * The slug is the dashboard's sha256(url)[:16] used in confirm-remove
+ * URLs; we read it back from the row id `relay-<slug>` so tests don't
+ * need to import the helper.
+ */
+export async function listOwnRelayRows(page) {
+  return await page.evaluate(() => {
+    return Array.from(document.querySelectorAll('tr.relay-row')).map((tr) => {
+      const slug = (tr.id || '').replace(/^relay-/, '');
+      const role = (tr.querySelector('td.relay-role .role-pill')?.textContent || '').trim();
+      const url = (tr.querySelector('td.relay-url code')?.textContent || '').trim();
+      const statePill = tr.querySelector('td.relay-state .state-pill');
+      const state = statePill
+        ? (Array.from(statePill.classList).find((c) => c.startsWith('is-'))?.replace(/^is-/, '') || '')
+        : '';
+      const lastEvent = (tr.querySelector('td.relay-seen')?.textContent || '').trim();
+      const added = (tr.querySelector('td.relay-added')?.textContent || '').trim();
+      const removeBtn = tr.querySelector('td.relay-actions button');
+      const isLastHome = !!(removeBtn && removeBtn.disabled);
+      return { role, url, state, lastEvent, added, slug, isLastHome };
+    });
+  });
+}
+
+/**
+ * Submit the "Plant a new post" form. Returns {ok, error}. On success
+ * the pane re-renders with the new row visible.
+ */
+export async function addOwnRelay(page, rawURL, role = 'fallback') {
+  await page.fill('form.relay-add-form input[name="url"]', rawURL);
+  await page.selectOption('form.relay-add-form select[name="role"]', role);
+  await Promise.all([
+    page.waitForResponse((r) =>
+      /\/settings\/relays$/i.test(r.url()) && r.request().method() === 'POST',
+      { timeout: 10000 },
+    ),
+    page.click('form.relay-add-form button[type="submit"]'),
+  ]);
+  await page.waitForFunction((u) => {
+    const rows = Array.from(document.querySelectorAll('tr.relay-row td.relay-url code'));
+    return rows.some((c) => (c.textContent || '').trim() === u) ||
+           !!document.querySelector('.relay-add .form-flash.is-error');
+  }, rawURL, { timeout: 5000 });
+  return await page.evaluate((u) => {
+    const err = document.querySelector('.relay-add .form-flash.is-error');
+    if (err) return { ok: false, error: (err.textContent || '').trim() };
+    const rows = Array.from(document.querySelectorAll('tr.relay-row td.relay-url code'));
+    const found = rows.find((c) => (c.textContent || '').trim() === u);
+    return { ok: !!found };
+  }, rawURL);
+}
+
+/**
+ * Click the Remove button on the row matching the given URL, then
+ * either accept the hx-confirm dialog (fallback) or type the confirm
+ * phrase in the modal (home). Returns {ok}.
+ */
+export async function removeOwnRelay(page, rawURL) {
+  // For fallback rows the button carries hx-confirm, which calls
+  // window.confirm() — auto-accept by stripping the attribute before
+  // clicking, so we don't depend on the dialog handler firing in time.
+  // For home rows, no hx-confirm is present; the typed-confirm modal
+  // is opened by hx-get to /confirm-remove and we drive that explicitly.
+  const initialRole = await page.evaluate((u) => {
+    const rows = Array.from(document.querySelectorAll('tr.relay-row'));
+    const row = rows.find((tr) =>
+      (tr.querySelector('td.relay-url code')?.textContent || '').trim() === u);
+    if (!row) return null;
+    return (row.querySelector('td.relay-role .role-pill')?.textContent || '').trim();
+  }, rawURL);
+  if (initialRole === null) return { ok: false, reason: 'row not found' };
+
+  const clicked = await page.evaluate((u) => {
+    const rows = Array.from(document.querySelectorAll('tr.relay-row'));
+    const row = rows.find((tr) =>
+      (tr.querySelector('td.relay-url code')?.textContent || '').trim() === u);
+    if (!row) return false;
+    const btn = row.querySelector('td.relay-actions button:not([disabled])');
+    if (!btn) return false;
+    // Strip hx-confirm so htmx fires the request without the prompt.
+    btn.removeAttribute('hx-confirm');
+    if (window.htmx && typeof window.htmx.process === 'function') {
+      window.htmx.process(btn);
+    }
+    btn.click();
+    return true;
+  }, rawURL);
+  if (!clicked) return { ok: false, reason: 'no enabled button' };
+
+  if (initialRole === 'home') {
+    // Wait for the typed-confirm modal to render into #modal.
+    await page.waitForSelector('.confirm-modal .confirm-card', { timeout: 5000 });
+    await page.fill('.confirm-modal input[name="confirm"]', rawURL);
+    await page.waitForFunction(() => {
+      const b = document.querySelector('.confirm-modal button.danger');
+      return b && !b.disabled;
+    }, null, { timeout: 3000 });
+    await Promise.all([
+      page.waitForResponse((r) =>
+        /\/settings\/relays\/[0-9a-f]+\/remove$/i.test(r.url()) &&
+        r.request().method() === 'POST',
+        { timeout: 10000 },
+      ),
+      page.click('.confirm-modal button.danger'),
+    ]);
+  }
+  // Wait for the row to disappear from the DOM.
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    const stillThere = await page.evaluate((u) => {
+      const rows = Array.from(document.querySelectorAll('tr.relay-row td.relay-url code'));
+      return rows.some((c) => (c.textContent || '').trim() === u);
+    }, rawURL);
+    if (!stillThere) return { ok: true };
+    await page.waitForTimeout(150);
+  }
+  return { ok: false, reason: 'row still present after remove' };
+}
+
+/**
  * Read sidebar contact rows. Returns Array<{label, tier, href, pubkey}>.
  * Used by full-bidirectional.mjs to confirm both sides know each other.
  */

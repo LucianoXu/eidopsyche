@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -407,4 +408,51 @@ func (a dashboardAdapter) ScanCard(ctx context.Context, cardURI string) (dashboa
 		Relay:          c.Relay,
 		AlreadyContact: already,
 	}, nil
+}
+
+// ── phase 4: own relays ────────────────────────────────────────────
+
+func (a dashboardAdapter) ListOwnRelays(ctx context.Context) ([]dashboard.OwnRelay, error) {
+	rows, err := a.d.ListOwnRelays(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dashboard.OwnRelay, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, dashboard.OwnRelay{
+			URL:     r.URL,
+			Role:    r.Role,
+			AddedAt: r.AddedAt,
+		})
+	}
+	return out, nil
+}
+
+// AddOwnRelay forwards to the daemon helper and translates the daemon's
+// internal sentinels into dashboard-facing ones so the handler doesn't
+// have to grep error strings to map onto HTTP status codes.
+func (a dashboardAdapter) AddOwnRelay(ctx context.Context, rawURL, role string) error {
+	err := a.d.AddOwnRelay(ctx, rawURL, role)
+	switch {
+	case errors.Is(err, errOwnRelayInvalidURL):
+		return fmt.Errorf("%w: %v", dashboard.ErrRelayInvalidURL, err)
+	case errors.Is(err, errOwnRelayInvalidRole):
+		return fmt.Errorf("%w: %v", dashboard.ErrRelayInvalidRole, err)
+	case errors.Is(err, errOwnRelayDuplicate):
+		return fmt.Errorf("%w: %v", dashboard.ErrRelayDuplicate, err)
+	}
+	return err
+}
+
+func (a dashboardAdapter) RemoveOwnRelay(ctx context.Context, rawURL string) error {
+	err := a.d.RemoveOwnRelay(ctx, rawURL)
+	switch {
+	case errors.Is(err, errOwnRelayInvalidURL):
+		return fmt.Errorf("%w: %v", dashboard.ErrRelayInvalidURL, err)
+	case errors.Is(err, errOwnRelayNotFound):
+		return fmt.Errorf("%w: %v", dashboard.ErrRelayNotFound, err)
+	case errors.Is(err, errOwnRelayHomeRequired):
+		return fmt.Errorf("%w: %v", dashboard.ErrRelayHomeRequired, err)
+	}
+	return err
 }

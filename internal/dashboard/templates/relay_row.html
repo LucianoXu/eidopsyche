@@ -1,0 +1,41 @@
+{{define "relay_row"}}
+<tr id="relay-{{.Slug}}" class="relay-row is-{{.Role}}">
+  <td class="relay-role">
+    <span class="role-pill is-{{.Role}}">{{.Role}}</span>
+  </td>
+  <td class="relay-url"><code>{{.URL}}</code></td>
+  <td class="relay-state">
+    <span class="state-pill is-{{.State}}" title="{{if .LastError}}{{.LastError}}{{else}}{{.State}}{{end}}">
+      <span class="state-dot" aria-hidden="true"></span>{{.State}}
+    </span>
+  </td>
+  <td class="relay-seen">
+    {{if .LastEventKnown}}{{.LastEventAgo}} ago{{else}}<span class="muted">—</span>{{end}}
+  </td>
+  <td class="relay-added">
+    {{if .AddedAt.IsZero}}<span class="muted">—</span>
+    {{else}}<span title="{{.AddedAt.Format "2006-01-02 15:04:05"}}">{{reltime .AddedAt}}</span>{{end}}
+  </td>
+  <td class="relay-actions">
+    {{if .IsLastHome}}
+    <button type="button" class="danger-button-sm" disabled
+            title="this is the only home relay; the daemon needs at least one home target">Remove</button>
+    {{else if eq .Role "home"}}
+    <button type="button"
+            class="danger-button-sm"
+            aria-label="Remove home relay {{.URL}}"
+            hx-get="/settings/relays/{{.Slug}}/confirm-remove"
+            hx-target="#modal"
+            hx-swap="innerHTML">Remove</button>
+    {{else}}
+    <button type="button"
+            class="danger-button-sm"
+            aria-label="Remove fallback relay {{.URL}}"
+            hx-post="/settings/relays/{{.Slug}}/remove"
+            hx-target="#settings-pane"
+            hx-swap="innerHTML"
+            hx-confirm="Remove fallback relay {{.URL}}?">Remove</button>
+    {{end}}
+  </td>
+</tr>
+{{end}}

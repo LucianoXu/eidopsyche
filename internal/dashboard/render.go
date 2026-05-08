@@ -143,6 +143,7 @@ type settingsShellData struct {
 	Contacts *settingsContactsData
 	Config   *settingsConfigData
 	Invites  *settingsInvitesData
+	Relays   *settingsRelaysData
 }
 
 // ── phase 2: contacts ──────────────────────────────────────────────
@@ -287,6 +288,38 @@ type confirmModalData struct {
 	Warning        string
 	ExpectedPhrase string
 	ConfirmLabel   string
+}
+
+// ── phase 4: own relays ────────────────────────────────────────────
+
+// settingsRelaysData is the payload for the "settings_relays" template.
+// Rows merge own_relays state with the daemon's per-URL connection
+// state — the operator sees role + URL + status + last-error in one
+// table. AddError appears above the add form on validation failure;
+// HomeCount is exposed so the template can grey-out the Remove button
+// on the only home relay (defense-in-depth alongside the daemon's own
+// errOwnRelayHomeRequired refusal).
+type settingsRelaysData struct {
+	Rows      []ownRelayRow
+	HomeCount int
+	AddError  string
+	Error     string
+}
+
+// ownRelayRow is the per-row payload for the "relay_row" template.
+// Slug is a stable hex-of-URL fragment used in DOM ids; URLs contain
+// characters (// : .) that aren't valid in CSS selectors or hx-target
+// queries.
+type ownRelayRow struct {
+	URL            string
+	Slug           string
+	Role           string
+	AddedAt        time.Time
+	State          string // "connected", "connecting", "error", "auth-failed", "pending", "unknown"
+	LastError      string
+	LastEventAgo   string // "5s" / "12m" / "1d"
+	LastEventKnown bool   // true iff health snapshot has a non-zero LastEventAt
+	IsLastHome     bool   // true when role==home AND HomeCount==1
 }
 
 // sortContactsForSidebar orders contacts by most-recent activity, then by

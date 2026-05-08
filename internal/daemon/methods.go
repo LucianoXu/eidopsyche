@@ -219,18 +219,21 @@ func contactSetLabel(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.Ra
 
 // relayList returns own relays ordered by role then URL.
 func relayList(ctx context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
-	rows, err := d.DB.QueryContext(ctx, `SELECT relay_url, role FROM own_relays ORDER BY role, relay_url`)
+	rows, err := d.ListOwnRelays(ctx)
 	if err != nil {
 		return nil, internalErr(err)
 	}
-	defer rows.Close()
-	var out []map[string]string
-	for rows.Next() {
-		var u, r string
-		if err := rows.Scan(&u, &r); err != nil {
-			return nil, internalErr(err)
-		}
-		out = append(out, map[string]string{"url": u, "role": r})
+	// Return strings only, matching the pre-Phase-4 IPC contract that
+	// the existing CLI (cmd/eidos/gate/relays.go) unmarshals into
+	// []map[string]string. AddedAt is exposed via the typed helper for
+	// dashboard rendering; CLI consumers don't need it. Adding a new
+	// field here would break callers built against the older shape.
+	out := make([]map[string]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, map[string]string{
+			"url":  r.URL,
+			"role": r.Role,
+		})
 	}
 	return out, nil
 }
@@ -244,15 +247,15 @@ func relayAdd(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessag
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
 	}
-	if p.Role != "home" && p.Role != "fallback" {
-		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: "role must be home or fallback"}
-	}
-	if _, err := d.DB.ExecContext(ctx,
-		`INSERT OR IGNORE INTO own_relays(relay_url,role,added_at) VALUES(?,?,?)`,
-		p.URL, p.Role, time.Now().Unix()); err != nil {
+	if err := d.AddOwnRelay(ctx, p.URL, p.Role); err != nil {
+		switch {
+		case errors.Is(err, errOwnRelayInvalidURL),
+			errors.Is(err, errOwnRelayInvalidRole),
+			errors.Is(err, errOwnRelayDuplicate):
+			return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+		}
 		return nil, internalErr(err)
 	}
-	d.Refresh()
 	return map[string]bool{"ok": true}, nil
 }
 
@@ -262,10 +265,16 @@ func relayRemove(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
 	}
-	if _, err := d.DB.ExecContext(ctx, `DELETE FROM own_relays WHERE relay_url=?`, p.URL); err != nil {
+	if err := d.RemoveOwnRelay(ctx, p.URL); err != nil {
+		switch {
+		case errors.Is(err, errOwnRelayNotFound):
+			return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+		case errors.Is(err, errOwnRelayInvalidURL),
+			errors.Is(err, errOwnRelayHomeRequired):
+			return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+		}
 		return nil, internalErr(err)
 	}
-	d.Refresh()
 	return map[string]bool{"ok": true}, nil
 }
 
