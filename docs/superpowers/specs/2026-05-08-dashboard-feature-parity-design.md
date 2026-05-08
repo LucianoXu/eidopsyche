@@ -86,7 +86,11 @@ POST  /settings/contacts/scan      preview card URI w/o storing
 POST  /settings/contacts           add contact (form: card uri, label?)
 POST  /settings/contacts/<pk>/label    rename
 POST  /settings/contacts/<pk>/tier     change tier
-DELETE /settings/contacts/<pk>     remove  ← typed-confirm
+POST  /settings/contacts/<pk>/remove   remove  ← typed-confirm
+                                        (POST not DELETE: the shared
+                                         confirm modal submits via hx-post;
+                                         keeps every destructive path on
+                                         one HTTP method.)
 
 
 phase 3 — Invites
@@ -101,7 +105,9 @@ phase 4 — Relays
 ─────────────────────────────────────────────────────────────────────
 GET   /settings/relays             pane: own relays + health (merges /relays data)
 POST  /settings/relays             add (form: url, role)
-DELETE /settings/relays/<idx>      remove  ← typed-confirm if role=home
+POST  /settings/relays/<idx>/remove    remove  ← typed-confirm if role=home
+                                        (POST not DELETE — see contacts
+                                         remove rationale above.)
 
 
 phase 5 — Service control
@@ -153,12 +159,18 @@ type DashboardDeps interface {
 
     // ─── phase 5: lifecycle ──────────────────────────────────────────
     Status() ServiceStatus
-    LifecycleRun(ctx context.Context, args []string) (jobID string, err error)
-    // No separate Reconnect() method: per the "shell out to eidos gate <subcmd>"
-    // decision in the table at the top, the Reconnect button calls
-    // LifecycleRun(["gate","reconnect"]) like every other lifecycle action.
-    // The child eidos process then re-enters the parent over IPC, which is
-    // wasteful but consistent — the CLI stays the single source of truth.
+    LifecycleRun(args []string) (jobID string, err error)
+    // No ctx parameter on purpose: lifecycle jobs must outlive the HTTP
+    // request that started them (the request context is canceled the moment
+    // the handler returns the job id). The daemon owns a long-lived lifecycle
+    // context internally and feeds that to exec.CommandContext. See §6.
+    //
+    // No separate Reconnect() method: per the "shell out to eidos gate
+    // <subcmd>" decision in the table at the top, the Reconnect button
+    // calls LifecycleRun(["gate","reconnect"]) like every other lifecycle
+    // action. The child eidos process then re-enters the parent over IPC,
+    // which is wasteful but consistent — the CLI stays the single source
+    // of truth.
 }
 
 // Dashboard-local response shapes (no daemon coupling).
@@ -287,8 +299,12 @@ type lifecycleJob struct {
     rc      int
 }
 
-// at most one in flight; second concurrent click returns 409.
-func (d *Daemon) LifecycleRun(ctx context.Context, args []string) (jobID string, err error) {
+// LifecycleRun spawns a child *outside* the daemon's service cgroup (Linux)
+// or as a plain detached subprocess (macOS), then returns immediately with
+// the job id. The lifecycle context is daemon-owned, NOT the request context
+// — the request context is canceled the moment the handler returns. At most
+// one job in flight; a concurrent click returns ErrLifecycleBusy (HTTP 409).
+func (d *Daemon) LifecycleRun(args []string) (jobID string, err error) {
     d.lifeMu.Lock()
     if d.activeLife != nil { d.lifeMu.Unlock(); return "", ErrLifecycleBusy }
     j := &lifecycleJob{ id: shortHex(8), args: args, started: time.Now() }
@@ -296,7 +312,10 @@ func (d *Daemon) LifecycleRun(ctx context.Context, args []string) (jobID string,
     d.lifeMu.Unlock()
 
     self, _ := os.Executable()
-    j.cmd = exec.CommandContext(ctx, self, args...)
+    cmd, err := lifecycleSpawn(d.lifeCtx, self, args)   // platform-aware, see §6.3
+    if err != nil { /* clear activeLife, return wrapped err */ }
+    j.cmd = cmd
+
     stdout, _ := j.cmd.StdoutPipe()
     j.cmd.Stderr = j.cmd.Stdout
 
@@ -306,6 +325,8 @@ func (d *Daemon) LifecycleRun(ctx context.Context, args []string) (jobID string,
     return j.id, nil
 }
 ```
+
+`d.lifeCtx` is initialised in `New()` with `context.Background()` and only cancelled on daemon shutdown. The `spawner` func is injected so tests substitute a fake (see §8). Importantly, `cmd.Wait()` runs in the pump goroutine; it never blocks the HTTP handler.
 
 `pumpLifecycle` does line-buffered reads off the pipe and emits `dashboard.Event{Kind: "lifecycle.line:<jobID>", HTML: <li>line</li>}` for each line. When `cmd.Wait()` returns, it emits `lifecycle.done:<jobID>` carrying a status pill (`rc=0` green / `rc=N` red) plus a `service.status` signal so the rest of the page resyncs.
 
@@ -331,7 +352,48 @@ The four buttons (Service tab):
 
 `eidos self-update` re-execs `install.sh`, which writes a new binary at `~/.local/bin/eidos`. The running daemon process keeps the **old** binary mapped in memory until restart. So `lifecycle.done` for self-update emits a follow-up banner: *"Binary updated to vX.Y.Z. Restart the daemon to pick up the new code: `eidos gate stop && eidos gate start`."* No automatic re-exec — keeping it explicit is safer than hot-swapping a process that owns sockets, the SQLite WAL, and the SSE clients.
 
-### §6.3 — Deliberately out of scope
+### §6.3 — Platform-aware spawn (escape the daemon's cgroup)
+
+A child spawned by the daemon inherits the daemon's systemd `user@.service` cgroup on Linux. `eidos gate purge` first calls `systemctl --user stop eidos-gate-daemon.service`, which terminates everything in that cgroup — **including the purge child itself**, before it gets to the rm-rf step. Net effect: the dashboard "Purge" button would stop the daemon but never wipe the state directory. Same risk applies to `gate stop` (less severe — the stop has already been issued by the time the child dies). On macOS launchd does not group children with the parent, so a plain `exec.Cmd` is fine.
+
+`lifecycleSpawn` therefore branches by GOOS:
+
+```go
+// internal/daemon/lifecycle_spawn.go
+func lifecycleSpawn(ctx context.Context, self string, args []string) (*exec.Cmd, error) {
+    switch runtime.GOOS {
+    case "linux":
+        // Re-parent to systemd via systemd-run --user --scope, which creates a
+        // transient unit OUTSIDE the daemon's cgroup. --collect cleans up the
+        // unit when the command exits. The child survives `systemctl stop` of
+        // the daemon, so purge can finish wiping state-dir.
+        if _, err := exec.LookPath("systemd-run"); err == nil {
+            full := append([]string{
+                "--user", "--scope", "--collect",
+                "--unit", "eidos-lifecycle-" + shortHex(4),
+                "--",
+                self,
+            }, args...)
+            return exec.CommandContext(ctx, "systemd-run", full...), nil
+        }
+        // Fallback: setsid + Setpgid so the child is in its own session/pgrp.
+        // Not as airtight as a separate cgroup, but better than inheriting.
+        cmd := exec.CommandContext(ctx, self, args...)
+        cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+        return cmd, nil
+    default: // darwin, etc.
+        return exec.CommandContext(ctx, self, args...), nil
+    }
+}
+```
+
+Tests for this code path:
+- `TestLifecycleSpawn_LinuxUsesSystemdRun` (build-tag `linux`, asserts `systemd-run` is the argv[0] when present).
+- `TestLifecycleSpawn_LinuxFallback_NoSystemdRun` (PATH-stripped, asserts `Setsid` is set).
+- `TestLifecycleSpawn_DarwinPlain` (darwin, asserts no wrapper).
+- The integration test for purge (`EIDOS_TEST_DESTRUCTIVE=1` gated) verifies the **state dir is actually gone** after the job — that's the regression test for the cgroup issue.
+
+### §6.4 — Deliberately out of scope
 
 - **`gate start`** — useless from inside a running daemon; omit the button.
 - **Relay enable/disable** — deferred to Config tab + manual restart (toggle `relay.enabled`, then Stop, then `eidos gate start` from terminal). A future iteration can make this seamless once we have a clean reload-relay-only daemon entrypoint.
@@ -393,7 +455,7 @@ Phrase per action:
 The handler for a non-daemon-killing destructive action returns a fragment that closes the modal **and** updates the affected element via OOB swaps in one round trip:
 
 ```html
-<!-- response body for DELETE /settings/contacts/<pk> -->
+<!-- response body for POST /settings/contacts/<pk>/remove -->
 <div id="modal" hx-swap-oob="innerHTML"></div>     <!-- close modal -->
 <tr  id="row-{{.Pubkey}}" hx-swap-oob="delete"></tr>  <!-- drop row -->
 ```
@@ -427,7 +489,7 @@ Per-phase tests (illustrative):
 | 2 | `TestContactsList`, `TestAddContact_{ValidURI,InvalidURI,Duplicate}`, `TestRemoveContact_{NoConfirm,WrongPhrase,Success}`, `TestSetTier`, `TestScanCard_DryRun` |
 | 3 | `TestInvitesList`, `TestCreateInvite_{ValidExpiry,BadExpiry}`, `TestRevokeInvite_RequiresConfirm`, `TestRedeem_{ValidURI,EmitsContactAdded}` |
 | 4 | `TestRelaysList_MergesHealth`, `TestAddRelay`, `TestRemoveRelay_{HomeRequiresConfirm,NonHomeNoConfirm}` |
-| 5 | `TestLifecycleRun_{StreamsLines,NonZeroExit,Concurrent409}`, `TestServiceReconnect`, `TestServiceStop_{NoConfirm,WithConfirm}`, `TestServicePurge_DoubleConfirm`, `TestServiceSelfUpdate` |
+| 5 | `TestLifecycleRun_{StreamsLines,NonZeroExit,Concurrent409,SurvivesRequestCtxCancel}`, `TestLifecycleSpawn_{LinuxUsesSystemdRun,LinuxFallback_NoSystemdRun,DarwinPlain}`, `TestServiceReconnect`, `TestServiceStop_{NoConfirm,WithConfirm}`, `TestServicePurge_DoubleConfirm`, `TestServiceSelfUpdate` |
 
 **Existing integration tests** (`test/integration/`) get one new file per phase covering the happy path against a real daemon: `dashboard_settings_phase{1,2,3,4,5}_test.go`. Build-tag `integration` so they don't slow down `go test ./...`.
 
