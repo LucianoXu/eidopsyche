@@ -174,6 +174,54 @@ starting the relay unit; any residual unit on disk from a previous opt-in
 is left alone (manage it via `systemctl` / `launchctl` directly, or
 clean up with `eidos gate purge`).
 
+#### Native TLS (BYO certs)
+
+The relay can terminate TLS itself when you give it a cert + key — no
+reverse proxy needed for the simple "one MindGate relay, no other web
+services on this host" deployment. Set both paths in `config.toml`:
+
+```toml
+[relay.tls]
+  cert_file = "/etc/letsencrypt/live/your.host/fullchain.pem"
+  key_file  = "/etc/letsencrypt/live/your.host/privkey.pem"
+```
+
+The relay calls `http.ListenAndServeTLS(cert_file, key_file)` when both
+are set. Setting only one is a startup error (the asymmetry would
+otherwise surface as a silent TLS handshake failure with no indication
+that config was the cause).
+
+Cert lifecycle is BYO — typical certbot workflow on a host where the
+relay binds 80/443 directly:
+
+```sh
+sudo certbot certonly --standalone -d your.host \
+  --pre-hook  'eidos gate stop' \
+  --post-hook 'eidos gate start'
+```
+
+For a multi-service host where nginx / Caddy already owns 80/443,
+prefer the reverse-proxy posture above and leave `[relay.tls]` empty.
+
+After config changes, restart so the relay picks up the new cert
+files:
+
+```sh
+eidos gate stop && eidos gate start
+```
+
+NIP-42 AUTH on the relay is enabled by default per NIP-17
+§Recommendations (`relay.auth.required = true`); flip to `false` only
+if you're knowingly running an open relay for experiments. The
+`service_url` override under `[relay.auth]` is for the reverse-proxy
+case where the proxy-facing URL differs from the bind address:
+
+```toml
+[relay.auth]
+  required    = true
+  service_url = "wss://your.host"
+```
+
 ### Migrating from v0.4
 
 v0.5 changes how the gate is initialized. Existing v0.4 state directories

@@ -1,0 +1,21 @@
+{{define "relays"}}
+<table class="relays">
+  <thead><tr><th>role</th><th>url</th><th>state</th><th>last event</th></tr></thead>
+  <tbody id="relays-tbody">
+    {{ range .Rows }}
+    <tr class="state-{{.State}}">
+      <td>{{.Role}}</td>
+      <td class="url" title="{{.URL}}">{{truncate 32 .URL}}</td>
+      <td>
+        <span class="dot dot-{{.State}}"></span>{{.State}}
+        {{- if .LastError }}<span class="err" title="{{.LastError}}">⚠</span>{{ end -}}
+      </td>
+      <td>{{.LastEventAgo}}</td>
+    </tr>
+    {{ end }}
+    {{ if not .Rows }}
+    <tr><td colspan="4" class="muted">no relays subscribed yet</td></tr>
+    {{ end }}
+  </tbody>
+</table>
+{{end}}

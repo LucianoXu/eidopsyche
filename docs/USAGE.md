@@ -18,10 +18,12 @@ $ eidos gate init --label alice --home wss://relay.damus.io
 The relay operator sees gift-wrap metadata (who, when, how often).
 Content stays end-to-end encrypted via NIP-17.
 
-> **v0.5 caveat:** most public relays follow NIP-17's recommendation to
-> require NIP-42 AUTH for `kind:1059` reads, and v0.5 has no NIP-42
-> client. If your inbox stays empty against a public relay, this is the
-> cause; v0.6 ships the AUTH layer.
+The daemon authenticates to the relay via NIP-42 automatically using
+your gate's identity key on every connection — no setup needed. When
+the relay enforces NIP-17's recommended AUTH-for-`kind:1059`-reads
+gate (the universal posture of public relays), the daemon's REQ
+succeeds only after AUTH; failed-AUTH states show up in
+`eidos gate status` and the dashboard's Relays panel.
 
 ### B) Self-hosted relay on a separate host (recommended)
 

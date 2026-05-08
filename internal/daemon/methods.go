@@ -31,6 +31,7 @@ func init() {
 	register("relay.list", relayList)
 	register("relay.add", relayAdd)
 	register("relay.remove", relayRemove)
+	register("relays.health", relaysHealth)
 	register("send", sendMessage)
 	register("inbox.list", inboxList)
 	register("inbox.tail", inboxTail)
@@ -265,6 +266,15 @@ func relayRemove(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	}
 	d.Refresh()
 	return map[string]bool{"ok": true}, nil
+}
+
+// relaysHealth returns the daemon's per-URL connection state. Consumers:
+// `eidos gate status`, `eidos gate whoami`, the dashboard.
+func relaysHealth(_ context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
+	if d.relayHealth == nil {
+		return []RelayHealth{}, nil
+	}
+	return d.relayHealth.snapshot(), nil
 }
 
 // sendMessage NIP-17 gift-wraps an envelope-v1 payload and publishes it to

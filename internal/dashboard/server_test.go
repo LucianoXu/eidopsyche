@@ -86,6 +86,7 @@ func (f fakeDeps) ListOutbox(*time.Time, string, int) ([]inbox.Sent, error) {
 func (f fakeDeps) ListContacts(context.Context) ([]*contacts.Contact, error) {
 	return f.contactsL, nil
 }
+func (f fakeDeps) ListRelayHealth() []RelayState { return nil }
 func (f fakeDeps) Send(_ context.Context, _ string, _ envelope.Envelope) (string, error) {
 	return f.sendID, f.sendErr
 }

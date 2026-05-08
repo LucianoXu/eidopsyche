@@ -21,6 +21,7 @@ type DashboardDeps interface {
 	ListInbox(since *time.Time, from string, limit int) ([]inbox.Message, error)
 	ListOutbox(since *time.Time, to string, limit int) ([]inbox.Sent, error)
 	ListContacts(ctx context.Context) ([]*contacts.Contact, error)
+	ListRelayHealth() []RelayState
 
 	// Send wraps text in a v1 chat envelope and publishes via the same
 	// path as the existing IPC `send` method. Returns the wrap event_id
@@ -40,4 +41,16 @@ type Event struct {
 	Message *inbox.Message
 	Sent    *inbox.Sent
 	Contact *contacts.Contact
+	Relay   *RelayState
+}
+
+// RelayState mirrors daemon.RelayHealth for dashboard consumption. Kept
+// in the dashboard package to avoid importing daemon (would create a
+// cycle: dashboard → daemon → dashboard).
+type RelayState struct {
+	URL         string `json:"url"`
+	Role        string `json:"role"`
+	State       string `json:"state"`
+	LastError   string `json:"last_error,omitempty"`
+	LastEventAt int64  `json:"last_event_at,omitempty"`
 }

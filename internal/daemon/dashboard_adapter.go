@@ -45,6 +45,24 @@ func (a dashboardAdapter) ListContacts(ctx context.Context) ([]*contacts.Contact
 	return a.d.Repo.List(ctx)
 }
 
+func (a dashboardAdapter) ListRelayHealth() []dashboard.RelayState {
+	if a.d.relayHealth == nil {
+		return nil
+	}
+	snap := a.d.relayHealth.snapshot()
+	out := make([]dashboard.RelayState, 0, len(snap))
+	for _, h := range snap {
+		out = append(out, dashboard.RelayState{
+			URL:         h.URL,
+			Role:        h.Role,
+			State:       h.State,
+			LastError:   h.LastError,
+			LastEventAt: h.LastEventAt,
+		})
+	}
+	return out
+}
+
 func (a dashboardAdapter) Send(ctx context.Context, toPubkey string, env envelope.Envelope) (string, error) {
 	content, err := envelope.Encode(env)
 	if err != nil {

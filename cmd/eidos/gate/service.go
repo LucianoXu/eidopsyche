@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -87,7 +88,11 @@ func loadGateConfig() (config.Config, string, error) {
 	return cfg, stateDir, nil
 }
 
-// printStatus formats Manager.Status() output for human eyes.
+// printStatus formats Manager.Status() output for human eyes, plus a
+// Relays section pulled from the daemon's relays.health IPC. The IPC
+// section is best-effort: when the daemon socket isn't reachable
+// (paused, between stop / start, or freshly purged) we silently skip it
+// — status's primary contract is the unit table.
 func printStatus(ctx context.Context, w io.Writer, m service.Manager) error {
 	statuses, err := m.Status(ctx)
 	if err != nil {
@@ -109,5 +114,64 @@ func printStatus(ctx context.Context, w io.Writer, m service.Manager) error {
 		}
 		fmt.Fprintf(w, "  %-22s %s%s\n", s.Name, state, pid)
 	}
+	printRelaysSection(w)
 	return nil
+}
+
+// relayHealthRow is the IPC wire shape of one relays.health entry. Mirrors
+// daemon.RelayHealth but kept local so the gate CLI doesn't import daemon.
+type relayHealthRow struct {
+	URL         string `json:"url"`
+	Role        string `json:"role"`
+	State       string `json:"state"`
+	LastError   string `json:"last_error,omitempty"`
+	LastEventAt int64  `json:"last_event_at,omitempty"`
+}
+
+// printRelaysSection appends a "Relays:" block to w with one row per
+// known URL. Silently no-ops when the daemon isn't reachable.
+func printRelaysSection(w io.Writer) {
+	c, err := newClient()
+	if err != nil {
+		return
+	}
+	defer c.Close()
+	var rows []relayHealthRow
+	if err := mustOK(c.Call("relays.health", nil, &rows)); err != nil {
+		return
+	}
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Relays:")
+	for _, r := range rows {
+		extra := ""
+		if r.LastError != "" {
+			extra = "  (" + r.LastError + ")"
+		} else if r.LastEventAt > 0 {
+			extra = fmt.Sprintf("  (last event %s ago)", humanSinceUnix(r.LastEventAt))
+		}
+		fmt.Fprintf(w, "  %-9s %-32s %s%s\n", r.Role, r.URL, r.State, extra)
+	}
+}
+
+// humanSinceUnix is a small "Ns/Nm/Nh/Nd"-style formatter for the
+// relay-health "last event ago" annotation. Imports time only for the
+// math; avoids %v on a Duration which prints noisy nanoseconds.
+func humanSinceUnix(unix int64) string {
+	d := time.Now().Unix() - unix
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < 60:
+		return fmt.Sprintf("%ds", d)
+	case d < 3600:
+		return fmt.Sprintf("%dm", d/60)
+	case d < 86400:
+		return fmt.Sprintf("%dh", d/3600)
+	default:
+		return fmt.Sprintf("%dd", d/86400)
+	}
 }

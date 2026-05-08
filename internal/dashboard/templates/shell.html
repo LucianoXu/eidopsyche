@@ -23,5 +23,9 @@
     {{.Main}}
   </section>
 </main>
+<aside class="relays-panel" id="relays-panel"
+       hx-get="/relays"
+       hx-trigger="load, sse:relay.state from:body"
+       hx-swap="innerHTML"></aside>
 </body>
 </html>{{end}}
