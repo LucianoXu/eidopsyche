@@ -170,6 +170,37 @@ func TestSettingsLabelPost_TooLong(t *testing.T) {
 	}
 }
 
+// TestSettingsLabelPost_RejectedDoesNotPoisonColophon asserts that a
+// failed-validation label renders only inside the form input and does
+// NOT replace the persisted label shown in the colophon. Regression
+// for codex review: previously the same Label field rendered both
+// surfaces, so a rejected entry briefly posed as the current identity.
+func TestSettingsLabelPost_RejectedDoesNotPoisonColophon(t *testing.T) {
+	srv := newTestServer(t, newPhase1Deps()) // current label = "alice"
+	rec := httptest.NewRecorder()
+	rejected := strings.Repeat("z", labelMaxLen+5)
+	form := strings.NewReader("label=" + rejected)
+	req := httptest.NewRequest("POST", "/settings/identity/label", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	phase1Origin(req)
+	srv.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, "form-flash is-error") {
+		t.Errorf("expected error chip, got: %s", body)
+	}
+	// The rejected input must appear ONLY inside an input element's
+	// value attribute, not as the colophon's serif italic label.
+	if !strings.Contains(body, `value="`+rejected+`"`) {
+		t.Error("rejected input should preserve in the form input value")
+	}
+	if !strings.Contains(body, `<dd class="serif">alice</dd>`) {
+		t.Errorf("colophon must still show the persisted label \"alice\"; body: %s", body)
+	}
+	if strings.Contains(body, `<dd class="serif">`+rejected+`</dd>`) {
+		t.Error("rejected input must NOT appear in the colophon")
+	}
+}
+
 func TestSettingsConfig_FragmentForHTMX(t *testing.T) {
 	srv := newTestServer(t, newPhase1Deps())
 	rec := httptest.NewRecorder()

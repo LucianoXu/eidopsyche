@@ -623,6 +623,11 @@ func settingsLabelPostHandler(deps DashboardDeps, r *renderer, logger *slog.Logg
 		label := strings.TrimSpace(raw)
 		ctx := req.Context()
 
+		// Start from the current persisted snapshot — Label and CardURI
+		// reflect what's actually saved; FormLabel will be set below
+		// to either the just-saved value or the rejected raw input so
+		// the input shows the right thing without ever poisoning the
+		// colophon with unsaved data.
 		out := buildSettingsIdentity(ctx, deps)
 		switch {
 		case label == "":
@@ -634,17 +639,17 @@ func settingsLabelPostHandler(deps DashboardDeps, r *renderer, logger *slog.Logg
 				logger.Warn("dashboard set-label failed", "err", err)
 				out.Error = "Save failed: " + err.Error()
 			} else {
+				// Persisted: pull a fresh snapshot so Label, CardURI,
+				// and FormLabel all reflect the new state atomically.
+				out = buildSettingsIdentity(ctx, deps)
 				out.Saved = true
-				out.Label = label
-				if uri, cerr := deps.OwnCardURI(ctx); cerr == nil {
-					out.CardURI = uri
-				}
 			}
 		}
-		// On error, surface the bad input back to the form so the
-		// operator can fix it without retyping.
 		if out.Error != "" {
-			out.Label = raw
+			// Preserve the operator's raw input in the form input only.
+			// out.Label still holds the persisted label so the colophon
+			// keeps showing the truth.
+			out.FormLabel = raw
 		}
 		rendered, rerr := r.Render("settings_identity", out)
 		if rerr != nil {
@@ -771,10 +776,11 @@ func buildSettingsIdentity(ctx context.Context, deps DashboardDeps) settingsIden
 	npub := pubkeyToNpub(deps.OwnPubkey())
 	cardURI, _ := deps.OwnCardURI(ctx)
 	return settingsIdentityData{
-		Label:   label,
-		Npub:    npub,
-		Hex:     deps.OwnPubkey(),
-		CardURI: cardURI,
+		Label:     label,
+		FormLabel: label, // input prefills with the current value
+		Npub:      npub,
+		Hex:       deps.OwnPubkey(),
+		CardURI:   cardURI,
 	}
 }
 

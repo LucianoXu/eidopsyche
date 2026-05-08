@@ -41,7 +41,7 @@
     {{if .Error}}<div class="form-flash is-error" role="alert">{{.Error}}</div>{{end}}
     {{if .Saved}}<div class="form-flash">Saved</div>{{end}}
     <div class="field-row">
-      <input type="text" name="label" value="{{.Label}}" required maxlength="64"
+      <input type="text" name="label" value="{{.FormLabel}}" required maxlength="64"
              autocomplete="off" spellcheck="false">
       <button type="submit">Apply</button>
     </div>

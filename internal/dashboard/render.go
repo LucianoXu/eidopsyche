@@ -144,12 +144,20 @@ type settingsShellData struct {
 }
 
 type settingsIdentityData struct {
-	Label   string
-	Npub    string
-	Hex     string
-	CardURI string
-	Saved   bool
-	Error   string
+	// Label is the currently-persisted label (read from the meta store).
+	// Renders in the colophon as the authoritative "Label" value.
+	Label string
+	// FormLabel is the value to prefill the rename input with. On
+	// success this matches Label; on validation failure it preserves
+	// the operator's rejected input so they can edit and retry without
+	// retyping. Kept separate from Label so a rejected entry never
+	// poses as the current identity.
+	FormLabel string
+	Npub      string
+	Hex       string
+	CardURI   string
+	Saved     bool
+	Error     string
 }
 
 type settingsConfigData struct {
