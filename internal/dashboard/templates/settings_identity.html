@@ -25,7 +25,7 @@
       <button type="button" class="copy-btn"
               data-copy="{{.CardURI}}"
               aria-label="Copy card URI"
-              hx-on:click="navigator.clipboard.writeText(this.dataset.copy);this.classList.add('is-copied');setTimeout(()=>this.classList.remove('is-copied'),1400)">Copy</button>
+              hx-on:click="const b=this;navigator.clipboard.writeText(b.dataset.copy).then(()=>{b.classList.add('is-copied');setTimeout(()=>b.classList.remove('is-copied'),1400)},()=>{b.classList.add('is-error');setTimeout(()=>b.classList.remove('is-error'),1800)})">Copy</button>
     </dd>
   </dl>
 

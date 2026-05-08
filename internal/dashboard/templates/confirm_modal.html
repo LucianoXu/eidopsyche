@@ -1,7 +1,7 @@
 {{define "confirm_modal"}}
 <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title"
      tabindex="-1"
-     hx-on::keydown="if(event.key==='Escape')this.remove()">
+     hx-on:keydown="if(event.key==='Escape')this.remove()">
   <div class="backdrop"
        hx-on:click="this.parentElement.remove()" aria-hidden="true"></div>
   <form class="confirm-card"
@@ -29,7 +29,7 @@
              spellcheck="false"
              autofocus
              required
-             hx-on::input="this.closest('form').querySelector('button.danger').disabled=(this.value!==this.dataset.expected)"
+             hx-on:input="this.closest('form').querySelector('button.danger').disabled=(this.value.trim()!==this.dataset.expected)"
              data-expected="{{.ExpectedPhrase}}">
     </label>
 

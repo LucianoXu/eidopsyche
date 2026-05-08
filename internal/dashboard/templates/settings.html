@@ -4,17 +4,24 @@
   <span class="own-id settings-aside">{{.OwnLabel}} · {{.Active}}</span>
 </div>
 <nav class="settings-tabs" role="tablist" aria-label="Operator panel"
-     hx-on:click="const t=event.target.closest('.settings-tab');if(!t)return;this.querySelectorAll('.settings-tab').forEach(x=>{x.classList.remove('is-active');x.setAttribute('aria-selected','false')});t.classList.add('is-active');t.setAttribute('aria-selected','true')">
-  <a class="settings-tab {{if eq .Active "identity"}}is-active{{end}}"
-     role="tab" aria-selected="{{if eq .Active "identity"}}true{{else}}false{{end}}"
+     hx-on:click="const t=event.target.closest('.settings-tab');if(!t)return;this.querySelectorAll('.settings-tab').forEach(x=>{x.classList.remove('is-active');x.setAttribute('aria-selected','false');x.setAttribute('tabindex','-1')});t.classList.add('is-active');t.setAttribute('aria-selected','true');t.setAttribute('tabindex','0')">
+  <a id="tab-identity" class="settings-tab {{if eq .Active "identity"}}is-active{{end}}"
+     role="tab"
+     aria-selected="{{if eq .Active "identity"}}true{{else}}false{{end}}"
+     aria-controls="settings-pane"
+     tabindex="{{if eq .Active "identity"}}0{{else}}-1{{end}}"
      href="/settings/identity"
      hx-get="/settings/identity" hx-target="#settings-pane" hx-push-url="true">Identity</a>
-  <a class="settings-tab {{if eq .Active "config"}}is-active{{end}}"
-     role="tab" aria-selected="{{if eq .Active "config"}}true{{else}}false{{end}}"
+  <a id="tab-config" class="settings-tab {{if eq .Active "config"}}is-active{{end}}"
+     role="tab"
+     aria-selected="{{if eq .Active "config"}}true{{else}}false{{end}}"
+     aria-controls="settings-pane"
+     tabindex="{{if eq .Active "config"}}0{{else}}-1{{end}}"
      href="/settings/config"
      hx-get="/settings/config" hx-target="#settings-pane" hx-push-url="true">Config</a>
 </nav>
-<section class="settings-pane" id="settings-pane" role="tabpanel">
+<section class="settings-pane" id="settings-pane" role="tabpanel"
+         aria-labelledby="tab-{{.Active}}">
   {{if eq .Active "identity"}}{{template "settings_identity" .Identity}}{{end}}
   {{if eq .Active "config"}}{{template "settings_config" .Config}}{{end}}
 </section>

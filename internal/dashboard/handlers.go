@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -80,10 +81,13 @@ func sidebarHandler(deps DashboardDeps, r *renderer, logger *slog.Logger) http.H
 	return func(w http.ResponseWriter, req *http.Request) {
 		ctx := req.Context()
 		// Settings-active state survives across SSE-triggered sidebar
-		// refreshes via the Referer header — htmx fires this hx-get from
-		// inside whichever main page the operator is on, so the request's
-		// Referer points back at it.
-		activeSettings := strings.Contains(req.Header.Get("Referer"), "/settings")
+		// refreshes via htmx's HX-Current-URL header — htmx fires this
+		// hx-get from inside whichever main page the operator is on
+		// and the header carries that page's URL. Falls back to a
+		// Referer-prefix check (parsed, not substring) for non-htmx
+		// reloads.
+		activeSettings := isSettingsURL(req.Header.Get("HX-Current-URL")) ||
+			isSettingsURL(req.Header.Get("Referer"))
 		side := buildSidebar(ctx, deps, "", activeSettings)
 		out, err := r.Render("sidebar", side)
 		if err != nil {
@@ -807,6 +811,23 @@ func configRowFromKey(path string, snap config.Config, rowErr string) settingsCo
 }
 
 func slugifyPath(path string) string { return strings.ReplaceAll(path, ".", "-") }
+
+// isSettingsURL parses raw as a URL and reports whether the path is
+// /settings or any /settings/ sub-path. Used to flag the sidebar
+// Settings entry as active across SSE-triggered refreshes. Resilient
+// to absolute or path-only inputs and rejects unrelated paths whose
+// query string just happens to contain "/settings".
+func isSettingsURL(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	p := u.Path
+	return p == "/settings" || strings.HasPrefix(p, "/settings/")
+}
 
 // pubkeyToNpub converts a hex pubkey to its npub bech32 form. Falls back
 // to returning the hex if encoding fails (should never happen for a

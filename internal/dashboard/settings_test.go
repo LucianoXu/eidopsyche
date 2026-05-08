@@ -9,8 +9,9 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/config"
 )
 
-// 32 hex chars; valid bech32-encodable as "npub1yc8wktqde7…" — exact npub
-// is computed by the handler, the test just asserts non-empty + prefix.
+// 64 hex chars (32 raw bytes) — a valid Nostr pubkey shape so the
+// identity handler's hex→npub encoding succeeds. The exact npub is
+// computed by the handler; tests just assert non-empty + npub1 prefix.
 const validHex32 = "98e1d96b036f9eda0bf2e95b39e7e7d09f0a5dafd4b76879c2c14e2bd1d51d8c"
 
 func phase1Origin(req *http.Request) {
@@ -127,8 +128,8 @@ func TestSettingsLabelPost_Valid(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "form-flash") {
 		t.Error("expected form-flash on success")
 	}
-	if strings.Contains(rec.Body.String(), "is-error") {
-		t.Error("success response should not carry is-error class")
+	if strings.Contains(rec.Body.String(), "form-flash is-error") {
+		t.Error("success response should not carry form-flash is-error chip")
 	}
 }
 
@@ -144,8 +145,8 @@ func TestSettingsLabelPost_Empty(t *testing.T) {
 		t.Fatalf("status %d, expected 200 with inline error", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "is-error") {
-		t.Errorf("expected is-error flash, got: %s", body)
+	if !strings.Contains(body, "form-flash is-error") {
+		t.Errorf("expected form-flash is-error chip, got: %s", body)
 	}
 	if !strings.Contains(body, "empty") {
 		t.Errorf("expected 'empty' message, got: %s", body)

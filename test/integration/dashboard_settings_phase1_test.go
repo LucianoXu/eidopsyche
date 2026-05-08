@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -63,7 +62,10 @@ func TestDashboardSettings_Phase1_IdentityFlow(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("POST label: status %d body %s", resp.StatusCode, body)
 	}
-	if !strings.Contains(body, "form-flash") || strings.Contains(body, "is-error") {
+	// `is-error` substring also appears inside the copy-button's
+	// hx-on:click error-handler; tightly scope to the form-flash chip's
+	// own class combination.
+	if !strings.Contains(body, "form-flash") || strings.Contains(body, "form-flash is-error") {
 		t.Errorf("POST label success expected; got: %s", body)
 	}
 
@@ -86,8 +88,8 @@ func TestDashboardSettings_Phase1_IdentityFlow(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("empty label: expected 200 with inline error, got %d", resp.StatusCode)
 	}
-	if !strings.Contains(body, "is-error") {
-		t.Errorf("empty label: expected is-error chip; body: %s", body)
+	if !strings.Contains(body, "form-flash is-error") {
+		t.Errorf("empty label: expected form-flash is-error chip; body: %s", body)
 	}
 }
 
@@ -176,6 +178,7 @@ func TestDashboardSettings_Phase1_ConfigFlow(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Origin", base)
 	resp = mustDo(t, req)
+	_ = mustReadAll(t, resp) // close body to avoid fd leak
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("unknown key: expected 400, got %d", resp.StatusCode)
 	}
@@ -241,7 +244,3 @@ func mustReadAll(t *testing.T, resp *http.Response) string {
 	}
 	return string(b)
 }
-
-// silence "imported and not used" for os/path when the helpers above
-// are removed in a refactor — defensive.
-var _ = os.Getenv

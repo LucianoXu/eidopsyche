@@ -20,14 +20,15 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 
 function findPlaywrightModule() {
-  // Preferred location (the one that landed on selene during this session).
-  const preferred = join(
-    homedir(),
-    '.npm/_npx/9833c18b2d85bc59/node_modules/playwright/index.mjs',
-  );
-  if (existsSync(preferred)) return preferred;
+  // Operator override — if you've cloned playwright somewhere specific.
+  if (process.env.EIDOS_PLAYWRIGHT_MODULE) {
+    return process.env.EIDOS_PLAYWRIGHT_MODULE;
+  }
 
-  // Fallback: scan ~/.npm/_npx/*/node_modules/playwright/index.mjs.
+  // Scan ~/.npm/_npx/*/node_modules/playwright/index.mjs. `npx playwright
+  // install chromium` puts the package under a hash-named cache dir; we
+  // don't pin a specific hash because that varies per host and per
+  // playwright-version.
   const root = join(homedir(), '.npm/_npx');
   if (existsSync(root)) {
     for (const entry of readdirSync(root)) {
@@ -41,7 +42,7 @@ function findPlaywrightModule() {
   }
 
   // Last-ditch fallback: bare specifier — works if the script is run from
-  // a directory where `playwright` is npm-resolvable (rare here, but cheap).
+  // a directory where `playwright` is npm-resolvable.
   return 'playwright';
 }
 
