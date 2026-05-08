@@ -1009,6 +1009,16 @@ func settingsContactsByPubkeyHandler(deps DashboardDeps, r *renderer, logger *sl
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
+			// Direct address-bar navigation lacks HX-Request; render
+			// the whole shell so the operator doesn't get a fragment
+			// hanging in space. The shell's contacts pane shows the
+			// list with the row in question opened, but htmx will
+			// not auto-open the detail view; that's acceptable for
+			// a refresh — the operator clicks the row again.
+			if req.Header.Get("HX-Request") == "" {
+				renderSettingsFullPage(w, deps, r, logger, ctx, "contacts")
+				return
+			}
 			renderContactDetail(w, r, logger, ctx, deps, pubkey)
 			return
 		}
