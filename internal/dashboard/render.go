@@ -142,6 +142,7 @@ type settingsShellData struct {
 	Identity *settingsIdentityData
 	Contacts *settingsContactsData
 	Config   *settingsConfigData
+	Invites  *settingsInvitesData
 }
 
 // ── phase 2: contacts ──────────────────────────────────────────────
@@ -214,6 +215,64 @@ type settingsConfigRow struct {
 	Value       string
 	Editable    bool
 	Error       string
+}
+
+// ── phase 3: invites ───────────────────────────────────────────────
+
+// settingsInvitesData is the payload for the "settings_invites"
+// template. Active / Expired / Revoked are pre-bucketed so the
+// template renders three sections without repeating the filter
+// logic in templates. CreateError is rendered above the create form
+// when CreateInvite fails; RedeemError above the redeem form;
+// RedeemAccepted populated on a successful redeem so the operator
+// sees confirmation without reloading.
+type settingsInvitesData struct {
+	Active        []inviteRow
+	Expired       []inviteRow
+	Revoked       []inviteRow
+	CreateError   string
+	CreatedInvite *createdInvite
+	RedeemError   string
+	RedeemResult  *redeemFlash
+	Error         string
+}
+
+// inviteRow is the per-row payload for the "invite_row" template.
+// All rendered fields are either plain strings (so html/template
+// auto-escaping applies) or numbers; no template.HTML escapes pass
+// through.
+type inviteRow struct {
+	ID            string // full id (used for stable dom ids and revoke action)
+	IDShort       string // first 8 hex chars — what the operator types to revoke
+	CreatedAt     time.Time
+	ExpiresAt     time.Time // zero ⇒ never
+	MaxUses       int       // 0 ⇒ unlimited
+	Uses          int
+	IssuerLabel   string
+	RedeemerLabel string
+	Status        string // "active" / "expired" / "revoked"
+}
+
+// createdInvite is the success-flash shown immediately after the
+// operator hits Create — the URI must be visible exactly once,
+// foregrounded, with a copy-button. Subsequent reloads re-render
+// the row in the Active section without the URI (it's not stored).
+type createdInvite struct {
+	IDShort    string
+	URI        string
+	ExpiresAt  time.Time // zero ⇒ never
+	MaxUses    int
+	SingleUse  bool
+	Unlimited  bool
+	Redeemer   string
+	IssuerHint string
+}
+
+// redeemFlash is the success-flash shown after a redeem completes.
+type redeemFlash struct {
+	IssuerNpub  string
+	IssuerRelay string
+	AcceptedBy  []string
 }
 
 // confirmModalData is the payload for the shared "confirm_modal" template.

@@ -564,6 +564,149 @@ export async function removeContactWithConfirm(page, expectedPhrase) {
 }
 
 /**
+ * List invite rows currently rendered on the Invites pane. Pass
+ * 'active' (default), 'history' (the collapsed expired+revoked section
+ * inside the <details>), or 'all'.
+ *
+ * Returns Array<{idShort, redeemer, uses, cap, expiresText, issuedText, status}>.
+ * Selectors mirror invite_row.html.
+ */
+export async function listInviteRows(page, section = 'active') {
+  return await page.evaluate((sec) => {
+    let rows;
+    if (sec === 'active') {
+      rows = Array.from(document.querySelectorAll('#invite-rows-active tr.invite-row'));
+    } else if (sec === 'history') {
+      rows = Array.from(document.querySelectorAll('details.invites-history tr.invite-row'));
+    } else {
+      rows = Array.from(document.querySelectorAll('tr.invite-row'));
+    }
+    return rows.map((tr) => {
+      const idShort = (tr.querySelector('td.invite-id code')?.textContent || '').trim();
+      const redeemerEm = tr.querySelector('td.invite-redeemer em');
+      const redeemer = redeemerEm
+        ? (redeemerEm.textContent || '').trim()
+        : ((tr.querySelector('td.invite-redeemer span.muted')?.textContent || '').trim() || null);
+      const uses = (tr.querySelector('td.invite-uses .uses-count')?.textContent || '').trim();
+      const cap = (tr.querySelector('td.invite-uses .uses-cap')?.textContent || '').trim();
+      const expiresText = (tr.querySelector('td.invite-expiry')?.textContent || '').trim();
+      const issuedText = (tr.querySelector('td.invite-issued')?.textContent || '').trim();
+      const status = Array.from(tr.classList).find((c) => c.startsWith('is-'))?.replace(/^is-/, '') || '';
+      return { idShort, redeemer, uses, cap, expiresText, issuedText, status };
+    });
+  }, section);
+}
+
+/**
+ * Submit the "Issue an invitation" form. Returns
+ * {ok, idShort, uri, error}. On success, the create-success slip is
+ * rendered and we read the URI out of it.
+ */
+export async function createInvite(page, opts = {}) {
+  const { redeemerLabel = '', expires = '', maxUses = '' } = opts;
+  const form = await page.$('form.invite-issue-form');
+  if (!form) {
+    return { ok: false, error: 'no invite-issue-form found on page' };
+  }
+  if (redeemerLabel) {
+    await page.fill('form.invite-issue-form input[name="redeemer_label"]', redeemerLabel);
+  }
+  if (expires) {
+    await page.fill('form.invite-issue-form input[name="expires"]', expires);
+  }
+  if (maxUses) {
+    await page.fill('form.invite-issue-form input[name="max_uses"]', maxUses);
+  }
+  await Promise.all([
+    page.waitForResponse((r) =>
+      /\/settings\/invites$/i.test(r.url()) && r.request().method() === 'POST',
+      { timeout: 10000 },
+    ),
+    page.click('form.invite-issue-form button[type="submit"]'),
+  ]);
+  // Wait for either the slip or an error flash to land in #settings-pane.
+  await page.waitForFunction(() =>
+    document.querySelector('aside.invite-slip') ||
+    document.querySelector('.invite-issue .form-flash.is-error'),
+    null, { timeout: 5000 });
+  const result = await page.evaluate(() => {
+    const err = document.querySelector('.invite-issue .form-flash.is-error');
+    if (err) return { ok: false, error: (err.textContent || '').trim() };
+    const slip = document.querySelector('aside.invite-slip:not(.is-redeem)');
+    if (!slip) return { ok: false, error: 'no slip rendered' };
+    const idShort = (slip.querySelector('h4 code')?.textContent || '').trim();
+    const uri = (slip.querySelector('code.invite-uri')?.textContent || '').trim();
+    return { ok: true, idShort, uri };
+  });
+  return result;
+}
+
+/**
+ * Submit the "Redeem an invitation" form with the given URI/token.
+ * Returns {ok, issuerNpub, error}.
+ */
+export async function redeemInviteOnDashboard(page, token) {
+  await page.fill('form.invite-redeem-form input[name="token"]', token);
+  await Promise.all([
+    page.waitForResponse((r) =>
+      /\/settings\/invites\/redeem$/i.test(r.url()) && r.request().method() === 'POST',
+      { timeout: 15000 },
+    ),
+    page.click('form.invite-redeem-form button[type="submit"]'),
+  ]);
+  await page.waitForFunction(() =>
+    document.querySelector('aside.invite-slip.is-redeem') ||
+    document.querySelector('.invite-redeem .form-flash.is-error'),
+    null, { timeout: 8000 });
+  const result = await page.evaluate(() => {
+    const err = document.querySelector('.invite-redeem .form-flash.is-error');
+    if (err) return { ok: false, error: (err.textContent || '').trim() };
+    const slip = document.querySelector('aside.invite-slip.is-redeem');
+    if (!slip) return { ok: false, error: 'no redeem slip rendered' };
+    const dds = Array.from(slip.querySelectorAll('dd'));
+    const issuerNpub = dds[0] ? (dds[0].textContent || '').trim() : '';
+    return { ok: true, issuerNpub };
+  });
+  return result;
+}
+
+/**
+ * Click Revoke on the active row whose IDShort matches `idShort`, then
+ * type the confirm phrase and submit. Returns {ok}.
+ */
+export async function revokeInviteWithConfirm(page, idShort) {
+  const rowSelector = `tr#invite-${idShort} button[hx-get*="/confirm-revoke"]`;
+  const btn = await page.$(rowSelector);
+  if (!btn) {
+    throw new Error(`revokeInviteWithConfirm: no Revoke button found for ${idShort}`);
+  }
+  await btn.click();
+  await page.waitForSelector('.confirm-modal .confirm-card', { timeout: 5000 });
+  await page.waitForTimeout(200);
+  await page.fill('.confirm-modal input[name="confirm"]', idShort);
+  await page.waitForFunction(() => {
+    const b = document.querySelector('.confirm-modal button.danger');
+    return b && !b.disabled;
+  }, null, { timeout: 3000 });
+  await Promise.all([
+    page.waitForResponse((r) =>
+      /\/settings\/invites\/[0-9a-f]+\/revoke$/i.test(r.url()) &&
+      r.request().method() === 'POST',
+      { timeout: 10000 },
+    ),
+    page.click('.confirm-modal button.danger'),
+  ]);
+  // Wait for the modal to be cleared (OOB swap empties #modal).
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const stillOpen = await page.$('.confirm-modal .confirm-card');
+    if (!stillOpen) return { ok: true };
+    await page.waitForTimeout(150);
+  }
+  return { ok: false };
+}
+
+/**
  * Read sidebar contact rows. Returns Array<{label, tier, href, pubkey}>.
  * Used by full-bidirectional.mjs to confirm both sides know each other.
  */

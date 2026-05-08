@@ -1171,5 +1171,131 @@ table.contacts-table tbody tr.contacts-empty:hover { background: transparent; cu
   font-size: 14px; line-height: 1.55;
 }
 
+/* ---------------------------------------------------------------- *
+ * Phase 3 — Invites (Tokens of welcome)
+ * Sealed-pass typography: a vermillion-edged "封" slip presents a
+ * just-issued URI; "受" marks a successful acceptance. The active
+ * list is a colophon table; expired/revoked history collapses
+ * behind a <details> so the live state isn't drowned by noise.
+ * ---------------------------------------------------------------- */
+
+table.invites-table th.th-id       { width: 12ch; }
+table.invites-table th.th-redeemer { width: 22%; }
+table.invites-table th.th-uses     { width: 8ch; }
+table.invites-table th.th-expiry   { width: 14%; }
+table.invites-table th.th-issued   { width: 14%; }
+table.invites-table td.invite-id code {
+  font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em;
+  color: var(--fg); background: var(--bg-2);
+  padding: 1px 6px; border: 1px solid var(--rule);
+}
+table.invites-table td.invite-redeemer em { font-style: italic; font-size: 15px; }
+table.invites-table td.invite-uses .uses-fraction {
+  font-family: var(--mono); font-size: 12.5px;
+  font-feature-settings: "tnum" 1, "zero" 1;
+  color: var(--fg);
+}
+table.invites-table td.invite-uses .uses-sep { margin: 0 4px; color: var(--fg-mute); }
+table.invites-table td.invite-uses .uses-cap { color: var(--fg-dim); }
+table.invites-table td.invite-expiry,
+table.invites-table td.invite-issued {
+  font-family: var(--mono); font-size: 11.5px; color: var(--fg-mute);
+  letter-spacing: 0.02em;
+}
+table.invites-table td.invite-actions { text-align: right; padding-right: 0; }
+table.invites-table tbody tr.invite-row.is-revoked,
+table.invites-table tbody tr.invite-row.is-expired {
+  color: var(--fg-mute);
+}
+table.invites-table tbody tr.invite-row.is-revoked td.invite-id code,
+table.invites-table tbody tr.invite-row.is-expired td.invite-id code {
+  color: var(--fg-mute); border-color: var(--rule);
+}
+table.invites-table tbody tr.invites-empty:hover { background: transparent; }
+table.invites-table.is-history { font-size: 13px; }
+table.invites-table.is-history td { padding: 9px 18px 9px 0; }
+
+/* collapsed history */
+.invites-history { margin: 28px 0 0; max-width: none; }
+.invites-history > summary {
+  cursor: pointer; padding: 10px 0;
+  font-family: var(--mono); font-size: 10px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.22em;
+  color: var(--fg-dim); list-style: none;
+  border-top: 1px solid var(--rule);
+}
+.invites-history > summary::-webkit-details-marker { display: none; }
+.invites-history > summary::before {
+  content: "▸ "; color: var(--fg-mute); margin-right: 6px;
+  display: inline-block; transition: transform 160ms ease;
+}
+.invites-history[open] > summary::before { transform: rotate(90deg); }
+.invites-history > summary:hover { color: var(--seal); }
+.invites-history > summary .muted { letter-spacing: 0.04em; text-transform: none; font-size: 11px; }
+
+/* the "封" slip — issued or redeemed */
+.invite-slip {
+  margin: 0 0 28px;
+  padding: 22px 28px 20px;
+  border-top: 2px solid var(--seal);
+  border-right: 1px solid var(--rule-2);
+  border-bottom: 1px solid var(--rule-2);
+  border-left: 1px solid var(--rule-2);
+  background: var(--bg-2);
+  animation: paper-fade 280ms ease-out both;
+  max-width: var(--measure);
+}
+.invite-slip.is-redeem { border-top-color: var(--fg-dim); }
+.invite-slip-head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 12px; }
+.invite-slip-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; flex-shrink: 0;
+  background: var(--seal); color: #fdf6e9;
+  font-family: var(--serif); font-size: 16px; font-weight: 500; letter-spacing: -0.04em;
+}
+.invite-slip.is-redeem .invite-slip-mark { background: var(--fg-dim); }
+.invite-slip-titlebar { flex: 1; min-width: 0; }
+.invite-slip-titlebar h4 {
+  margin: 0; font-family: var(--serif); font-style: italic; font-weight: 500;
+  font-size: 17px; letter-spacing: 0.01em; color: var(--fg);
+}
+.invite-slip-titlebar h4 code {
+  font-family: var(--mono); font-style: normal; font-size: 13px;
+  background: var(--bg); padding: 0 6px; margin-left: 4px; color: var(--seal);
+}
+.invite-slip-meta {
+  margin: 4px 0 0; font-family: var(--mono); font-size: 10.5px;
+  letter-spacing: 0.04em; color: var(--fg-mute);
+}
+.invite-slip-meta em { font-family: var(--serif); font-style: italic; color: var(--fg-dim); }
+.invite-slip-meta code {
+  font-family: var(--mono); font-size: 10.5px; word-break: break-all;
+}
+.invite-slip-hint {
+  margin: 0 0 14px; font-style: italic; color: var(--fg-dim);
+  font-size: 13.5px; line-height: 1.55;
+}
+.invite-uri-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 14px; background: var(--bg);
+  border: 1px solid var(--rule-2); flex-wrap: wrap;
+}
+.invite-uri {
+  flex: 1; min-width: 0; word-break: break-all;
+  font-family: var(--mono); font-size: 12.5px; color: var(--fg);
+  letter-spacing: 0.01em;
+}
+
+/* issue + redeem forms — extend contact-add-grid for invite-specific shapes */
+.invite-issue { margin-top: 36px; }
+.invite-redeem { margin-top: 28px; }
+.invite-issue-grid {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.8fr) minmax(0, 0.8fr) auto;
+}
+.invite-redeem-grid {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px; align-items: end;
+}
+
 /* ---------------------------------------------------------------- */
 

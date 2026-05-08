@@ -10,6 +10,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
+	"github.com/LucianoXu/eidopsyche/internal/invitedb"
 )
 
 // DashboardDeps is the narrow surface the HTTP handlers consume from the
@@ -91,6 +92,47 @@ type DashboardDeps interface {
 	// operator can confirm what they'd add. AlreadyContact is true
 	// when the card's pubkey is already in the contacts list.
 	ScanCard(ctx context.Context, cardURI string) (ScanPreview, error)
+
+	// ── phase 3: invites ─────────────────────────────────────────────
+	//
+	// ListInvites returns invites filtered by status. Pass "" for all.
+	// The list is ordered by created_at DESC.
+	ListInvites(ctx context.Context, status string) ([]*invitedb.Invite, error)
+
+	// CreateInvite signs a new invite token and persists the row.
+	// Returns the persisted invite (status='active', uses=0) plus the
+	// shareable mindgate-invite URI. Emits invite.created.
+	CreateInvite(ctx context.Context, opts InviteCreateOpts) (*invitedb.Invite, string, error)
+
+	// RevokeInvite marks the invite as revoked, looked up by ID
+	// prefix (8+ hex chars). Returns the full ID on success. Emits
+	// invite.revoked. The dashboard gates this with the typed-confirm
+	// modal; the adapter does not re-validate the phrase.
+	RevokeInvite(ctx context.Context, idPrefix string) (string, error)
+
+	// RedeemInvite verifies the invite token, adds the issuer as a
+	// contact, and publishes a kind:25001 redemption gift wrap.
+	// Emits invite.redeemed AND contact.added.
+	RedeemInvite(ctx context.Context, token string) (RedeemResult, error)
+}
+
+// InviteCreateOpts is the dashboard-local form of the create-invite
+// request body. Negative ExpiresSeconds means "no expiry"; zero means
+// "use the daemon's default (7d)". Unlimited overrides MaxUses.
+type InviteCreateOpts struct {
+	SingleUse      bool
+	Unlimited      bool
+	MaxUses        int
+	ExpiresSeconds int64
+	IssuerLabel    string
+	RedeemerLabel  string
+}
+
+// RedeemResult is the dashboard-local view of an invite redemption.
+type RedeemResult struct {
+	IssuerNpub  string
+	IssuerRelay string
+	AcceptedBy  []string
 }
 
 // ScanPreview is the read-only result of a card-scan dry-run.

@@ -36,6 +36,9 @@ func registerHandlersWithRenderer(mux *http.ServeMux, deps DashboardDeps, r *ren
 	mux.HandleFunc("/settings/contacts", settingsContactsHandler(deps, r, logger))
 	mux.HandleFunc("/settings/contacts/scan", settingsContactsScanHandler(deps, r, logger))
 	mux.HandleFunc("/settings/contacts/", settingsContactsByPubkeyHandler(deps, r, logger))
+	mux.HandleFunc("/settings/invites", settingsInvitesHandler(deps, r, logger))
+	mux.HandleFunc("/settings/invites/redeem", settingsInvitesRedeemHandler(deps, r, logger))
+	mux.HandleFunc("/settings/invites/", settingsInvitesByIDHandler(deps, r, logger))
 	hub := newSSEHub(deps)
 	mux.HandleFunc("/events", hub.handler(r, logger))
 	sub, err := staticSubFS()
@@ -773,6 +776,9 @@ func buildSettingsShell(ctx context.Context, deps DashboardDeps, active string) 
 	case "config":
 		v := buildSettingsConfig(deps, "", "", "")
 		out.Config = &v
+	case "invites":
+		v := buildSettingsInvites(ctx, deps)
+		out.Invites = &v
 	}
 	return out
 }
