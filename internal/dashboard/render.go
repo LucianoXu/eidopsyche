@@ -144,6 +144,7 @@ type settingsShellData struct {
 	Config   *settingsConfigData
 	Invites  *settingsInvitesData
 	Relays   *settingsRelaysData
+	Service  *settingsServiceData
 }
 
 // ── phase 2: contacts ──────────────────────────────────────────────
@@ -304,6 +305,39 @@ type settingsRelaysData struct {
 	HomeCount int
 	AddError  string
 	Error     string
+}
+
+// ── phase 5: service control ───────────────────────────────────────
+
+// settingsServiceData is the payload for settings_service.html.
+type settingsServiceData struct {
+	Version      string
+	Commit       string
+	BuildDate    string
+	StartedAt    time.Time
+	StateDir     string
+	DashboardURL string
+	IPCSocket    string
+	RelayEnabled bool
+	RelayMode    string
+	RelayListen  string
+	OwnLabel     string
+
+	// ActiveJob* fields are non-empty when a lifecycle job is in
+	// flight. Used to disable the action buttons (single-job-at-a-time
+	// invariant) and surface what's running.
+	ActiveJobID   string
+	ActiveJobArgs []string
+	ActiveJobAt   time.Time
+}
+
+// lifecycleLogData is the payload for lifecycle_log.html — the
+// streaming-<pre> + status-pill skeleton the operator sees as soon as
+// they confirm an action.
+type lifecycleLogData struct {
+	JobID         string
+	Kind          string // "reconnect" / "stop" / "purge" / "self-update"
+	DaemonKilling bool
 }
 
 // ownRelayRow is the per-row payload for the "relay_row" template.

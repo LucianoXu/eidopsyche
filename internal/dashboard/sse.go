@@ -119,9 +119,29 @@ func renderEvent(r *renderer, ev Event, logger *slog.Logger) (string, string) {
 		// own_relays row changes. The right-rail relays panel keeps
 		// using relay.state for connection-level transitions.
 		return ev.Kind, "(refresh)"
+	case "service.status":
+		// Phase 5 signal-only event. The Service tab refetches its
+		// own status block on the trigger; the lifecycle log doesn't
+		// reload (it's append-only — refetching would erase history).
+		return ev.Kind, "(refresh)"
 	default:
+		// Phase 5 lifecycle events use scoped kind names like
+		// "lifecycle.line:<jobID>" / "lifecycle.done:<jobID>". They
+		// carry the rendered HTML directly on Event.HTML — there's no
+		// renderer round-trip because the line text isn't known until
+		// the child writes it.
+		if ev.HTML != "" && (hasPrefix(ev.Kind, "lifecycle.line:") ||
+			hasPrefix(ev.Kind, "lifecycle.done:")) {
+			return ev.Kind, ev.HTML
+		}
 		return "", ""
 	}
+}
+
+// hasPrefix is a small helper so renderEvent doesn't import strings
+// just for one call. Kept private to this package.
+func hasPrefix(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
 // escapeSSEData replaces newlines so the payload fits on one `data:` line.

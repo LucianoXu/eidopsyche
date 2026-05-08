@@ -41,6 +41,8 @@ func registerHandlersWithRenderer(mux *http.ServeMux, deps DashboardDeps, r *ren
 	mux.HandleFunc("/settings/invites/", settingsInvitesByIDHandler(deps, r, logger))
 	mux.HandleFunc("/settings/relays", settingsRelaysHandler(deps, r, logger))
 	mux.HandleFunc("/settings/relays/", settingsRelaysBySlugHandler(deps, r, logger))
+	mux.HandleFunc("/settings/service", settingsServiceHandler(deps, r, logger))
+	mux.HandleFunc("/settings/service/", settingsServiceActionHandler(deps, r, logger))
 	hub := newSSEHub(deps)
 	mux.HandleFunc("/events", hub.handler(r, logger))
 	sub, err := staticSubFS()
@@ -784,6 +786,9 @@ func buildSettingsShell(ctx context.Context, deps DashboardDeps, active string) 
 	case "relays":
 		v := buildSettingsRelays(ctx, deps, "")
 		out.Relays = &v
+	case "service":
+		v := buildSettingsService(ctx, deps)
+		out.Service = &v
 	}
 	return out
 }

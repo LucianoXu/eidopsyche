@@ -17,6 +17,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
 	"github.com/LucianoXu/eidopsyche/internal/invitedb"
 	"github.com/LucianoXu/eidopsyche/internal/nostr"
+	"github.com/LucianoXu/eidopsyche/internal/version"
 )
 
 // dashboardAdapter wraps *Daemon to satisfy dashboard.DashboardDeps.
@@ -455,4 +456,35 @@ func (a dashboardAdapter) RemoveOwnRelay(ctx context.Context, rawURL string) err
 		return fmt.Errorf("%w: %v", dashboard.ErrRelayHomeRequired, err)
 	}
 	return err
+}
+
+// ── phase 5: service control ───────────────────────────────────────
+
+func (a dashboardAdapter) Status() dashboard.ServiceStatus {
+	out := dashboard.ServiceStatus{
+		Version:      version.Version,
+		Commit:       version.Commit,
+		BuildDate:    version.BuildDate,
+		StartedAt:    a.d.startedAt,
+		StateDir:     a.d.StateDir,
+		DashboardURL: "http://" + a.d.Cfg.Dashboard.Listen,
+		IPCSocket:    filepath.Join(a.d.StateDir, a.d.Cfg.Daemon.Socket),
+		RelayEnabled: a.d.Cfg.Relay.Enabled,
+		RelayMode:    a.d.Cfg.Relay.Mode,
+		RelayListen:  a.d.Cfg.Relay.Listen,
+	}
+	if life := a.d.LifecycleStatusSnapshot(); life.Active {
+		out.ActiveJobID = life.JobID
+		out.ActiveJobArgs = life.Args
+		out.ActiveJobAt = life.Started
+	}
+	return out
+}
+
+func (a dashboardAdapter) LifecycleRun(args []string) (string, error) {
+	id, err := a.d.LifecycleRun(args)
+	if errors.Is(err, ErrLifecycleBusy) {
+		return "", dashboard.ErrLifecycleBusy
+	}
+	return id, err
 }

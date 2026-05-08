@@ -22,6 +22,7 @@ number plus a one-line reason; success exits 0. CI greps for
 | `phase2-contacts.mjs` | Phase 2 smoke: empty-state → scan-preview → admit → detail pane → rename → tier cycle → typed-confirm remove → empty-state |
 | `phase3-invites.mjs` | Phase 3 smoke: empty-state → issue (single-use 24h) → list → issue (unlimited / never) → typed-confirm revoke → history bucket → malformed-redeem inline error |
 | `phase4-relays.mjs` | Phase 4 smoke: list seeded home → IsLastHome guard → add fallback → duplicate-add inline error → fallback remove (hx-confirm) → second-home add → original-home remove (typed-confirm modal) → restore baseline |
+| `phase5-service.mjs` | Phase 5 smoke: Service tab navigation → status colophon → 4 action cards rendered → Reconnect click → lifecycle log streams + status pill flips to is-ok → cards re-enabled. Stop / Purge / Self-update are NOT clicked (would kill the daemon); the integration test (build-tag integration) covers their wire-up. |
 | `full-bidirectional.mjs` | Selene + mbp regression: idempotent webui-driven invite/redeem pairing, mutual contact in sidebar AND Contacts tab, chat round-trip |
 
 ## One-time setup

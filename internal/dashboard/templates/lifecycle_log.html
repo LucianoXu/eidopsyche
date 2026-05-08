@@ -1,0 +1,68 @@
+{{define "lifecycle_log"}}
+<div class="lifecycle-log-pane">
+  <header class="lifecycle-log-head">
+    <span class="lifecycle-log-mark" aria-hidden="true">▣</span>
+    <div class="lifecycle-log-titlebar">
+      <h4>{{.Kind}} <code class="lifecycle-job-id">{{.JobID}}</code></h4>
+      <p class="lifecycle-log-meta">
+        Streaming child output — each line below was written by the spawned process.
+      </p>
+    </div>
+    <span id="status-{{.JobID}}" class="lifecycle-status is-running">running</span>
+  </header>
+
+  <p id="lifecycle-banner-{{.JobID}}" class="lifecycle-banner">
+    {{if .DaemonKilling}}
+      Daemon will exit. Connection will drop when {{.Kind}} completes; reload after restart.
+      {{if eq .Kind "purge"}}State directory will be removed; run <code class="inline-code">eidos gate init</code> to start over.{{end}}
+    {{else if eq .Kind "self-update"}}
+      Binary update in progress. The running daemon stays on the OLD binary until restart —
+      <code class="inline-code">eidos gate stop &amp;&amp; eidos gate start</code> to pick it up.
+    {{else}}
+      Reconnect re-enters the daemon over IPC and recomputes the relay set. Existing
+      subscriptions are torn down and reattached.
+    {{end}}
+  </p>
+
+  <pre id="log-{{.JobID}}" class="lifecycle-log"
+       sse-swap="lifecycle.line:{{.JobID}},lifecycle.done:{{.JobID}}"
+       hx-swap="beforeend"
+       aria-live="polite"
+       aria-atomic="false"><span class="lifecycle-line lifecycle-line-init">(waiting for output)</span></pre>
+
+  <p class="lifecycle-log-foot">
+    <a href="/settings/service"
+       hx-get="/settings/service"
+       hx-target="#settings-pane"
+       hx-swap="innerHTML"
+       hx-push-url="true">← Back to Service control</a>
+  </p>
+</div>
+
+<script>
+  // ~20 lines: drop the "(waiting for output)" placeholder on first
+  // streamed line, scroll the pre to follow new output, and flip the
+  // banner when the SSE connection drops (the daemon exited and
+  // closed the /events stream).
+  (function () {
+    var jobID = {{.JobID}};
+    var daemonKilling = {{if .DaemonKilling}}true{{else}}false{{end}};
+    var pre = document.getElementById("log-" + jobID);
+    var banner = document.getElementById("lifecycle-banner-" + jobID);
+    if (!pre || !banner) return;
+    pre.addEventListener("htmx:beforeSwap", function () {
+      var ph = pre.querySelector(".lifecycle-line-init");
+      if (ph) ph.remove();
+    });
+    pre.addEventListener("htmx:afterSwap", function () {
+      pre.scrollTop = pre.scrollHeight;
+    });
+    document.body.addEventListener("htmx:sseError", function () {
+      banner.classList.add("is-disconnected");
+      banner.textContent = daemonKilling
+        ? "Daemon stopped. Restart from a terminal: eidos gate start, then reload this page."
+        : "SSE connection dropped — output may be incomplete. Reload to recover.";
+    });
+  })();
+</script>
+{{end}}

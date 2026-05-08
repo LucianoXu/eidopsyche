@@ -57,6 +57,17 @@ type Daemon struct {
 	// need to take it.
 	configMu sync.Mutex
 
+	// lifecycle: at most one subprocess (eidos gate <subcmd> /
+	// eidos self-update) in flight at a time. lifeCtx is daemon-owned
+	// so the child outlives the HTTP request that spawned it; the
+	// dashboard handler returns the job id immediately and the line
+	// pump runs in its own goroutine.
+	lifeMu      sync.Mutex
+	lifeCtx     context.Context
+	lifeCancel  context.CancelFunc
+	lifeSpawner LifecycleSpawner
+	activeLife  *lifecycleJob
+
 	// testSendChatReply, if non-nil, replaces sendChatReply during tests
 	// to avoid actual NIP-17 publish over the network.
 	testSendChatReply func(ctx context.Context, toPubkey string, text string) error
@@ -154,6 +165,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 	d.Log.Info("ipc listening", "socket", socket)
+
+	d.installLifecycle(nil) // nil → use platform-default lifecycleSpawn
+	defer d.shutdownLifecycle()
 
 	go d.runSubscriber(ctx)
 	go func() {

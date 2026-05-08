@@ -43,6 +43,7 @@ Use the label `YingteSelene` for `selene`, and `YingteXu` for `mbp`.
    - Phase 2 (Contacts editor): `phase2-contacts.mjs` — needs `eidos` on PATH (or `EIDOS_BIN` env var) so it can spawn a transient peer-daemon for a real card URI to scan.
    - Phase 3 (Invites): `phase3-invites.mjs` — local-only smoke; the cross-machine redeem path is exercised by `full-bidirectional.mjs`.
    - Phase 4 (Relays): `phase4-relays.mjs` — local-only smoke; exercises the IsLastHome guard, fallback add/remove, and the home-relay typed-confirm modal. Idempotent: restores the seeded home before exit.
+   - Phase 5 (Service control): `phase5-service.mjs` — local-only smoke; exercises the Service tab + Reconnect lifecycle stream end-to-end. Stop / Purge / Self-update are intentionally NOT clicked by the script (they'd take the daemon down or rewrite its binary); the build-tag `integration` test covers their wire-up via a fake spawner. Manual ops verification of those actions is left to the operator.
    - Each script exits 0 on success with a numbered step log; non-zero on the first failure with the failing step name.
 
 The Playwright runner doubles as the project's regression net: every
