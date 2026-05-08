@@ -99,15 +99,23 @@ func New(cfg Config) (*Server, error) {
 // whose authed pubkey matches every #p tag value in the filter. The
 // first unauthenticated REQ also pushes a fresh AUTH challenge so the
 // client knows what to do.
+//
+// Per NIP-01, an absent or empty `kinds` array matches all kinds —
+// including 1059. We must therefore treat such filters as "potentially
+// covers 1059" and require AUTH, not as "doesn't mention 1059, pass".
+// Otherwise an unauthenticated client could read every gift wrap by
+// simply omitting kinds.
 func requireAuthForKind1059Reads(ctx context.Context, filter gnostr.Filter) (bool, string) {
-	wantsKind1059 := false
-	for _, k := range filter.Kinds {
-		if k == 1059 {
-			wantsKind1059 = true
-			break
+	mayMatchKind1059 := len(filter.Kinds) == 0
+	if !mayMatchKind1059 {
+		for _, k := range filter.Kinds {
+			if k == 1059 {
+				mayMatchKind1059 = true
+				break
+			}
 		}
 	}
-	if !wantsKind1059 {
+	if !mayMatchKind1059 {
 		return false, ""
 	}
 	authed := khatru.GetAuthed(ctx)

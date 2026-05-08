@@ -1,6 +1,7 @@
 package relayd
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -94,6 +95,11 @@ func TestPairedModeRejection(t *testing.T) {
 
 // generateSelfSignedCert writes a fresh self-signed cert + key into dir
 // and returns the (certPath, keyPath). Used by TLS startup tests.
+//
+// Errors at every step are surfaced via t.Fatal — a partially-written
+// cert / key surfaces several lines later as an opaque TLS startup
+// failure, which is much harder to diagnose than the underlying I/O
+// error.
 func generateSelfSignedCert(t *testing.T, dir string) (string, string) {
 	t.Helper()
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -114,24 +120,25 @@ func generateSelfSignedCert(t *testing.T, dir string) (string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	certPath := filepath.Join(dir, "cert.pem")
-	keyPath := filepath.Join(dir, "key.pem")
-	cf, err := os.Create(certPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pem.Encode(cf, &pem.Block{Type: "CERTIFICATE", Bytes: der})
-	cf.Close()
 	keyDER, err := x509.MarshalECPrivateKey(priv)
 	if err != nil {
 		t.Fatal(err)
 	}
-	kf, err := os.Create(keyPath)
-	if err != nil {
+	var certBuf, keyBuf bytes.Buffer
+	if err := pem.Encode(&certBuf, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
 		t.Fatal(err)
 	}
-	pem.Encode(kf, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-	kf.Close()
+	if err := pem.Encode(&keyBuf, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}); err != nil {
+		t.Fatal(err)
+	}
+	certPath := filepath.Join(dir, "cert.pem")
+	keyPath := filepath.Join(dir, "key.pem")
+	if err := os.WriteFile(certPath, certBuf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, keyBuf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	return certPath, keyPath
 }
 
@@ -362,6 +369,51 @@ func TestRelayd_Auth_RejectsAuthenticatedMismatchedP(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("expected auth-mismatch CLOSED within 3s")
+	}
+}
+
+// Regression test: NIP-01 says an empty/absent Kinds list matches all
+// kinds (including 1059). Without this gate, an unauthenticated client
+// could read every gift wrap by simply omitting kinds from the REQ.
+func TestRelayd_Auth_RejectsUnauthenticatedEmptyKinds(t *testing.T) {
+	addr := freePort(t)
+	srv, err := New(Config{
+		Mode:   ModePublic,
+		Listen: addr,
+		Auth:   AuthConfig{Required: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.ListenAndServe()
+	defer srv.Shutdown(context.Background())
+	time.Sleep(150 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	relay, err := gnostr.RelayConnect(ctx, "ws://"+addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer relay.Close()
+
+	// REQ with no kinds, only a #p tag. NIP-01 says this matches all kinds
+	// including 1059 — must be rejected as auth-required.
+	sk := gnostr.GeneratePrivateKey()
+	pk, _ := gnostr.GetPublicKey(sk)
+	sub, err := relay.Subscribe(ctx, gnostr.Filters{{
+		Tags: gnostr.TagMap{"p": []string{pk}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case reason := <-sub.ClosedReason:
+		if !contains(reason, "auth-required") {
+			t.Fatalf("unauth empty-kinds REQ closed with %q; want auth-required", reason)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("unauth empty-kinds REQ was not rejected — bypass!")
 	}
 }
 

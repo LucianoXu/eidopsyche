@@ -96,8 +96,9 @@ func renderEvent(r *renderer, ev Event, logger *slog.Logger) (string, string) {
 	case "relay.state":
 		// The relay panel renders the full table on every transition —
 		// the panel is small and per-event diffing is more code than it
-		// saves. Browser-side, htmx swaps the partial into #relays-tbody
-		// (see templates/relays.html).
+		// saves. Browser-side, the <aside id="relays-panel"> in
+		// templates/shell.html re-fetches /relays via hx-get on
+		// sse:relay.state and swaps the rendered partial as innerHTML.
 		return ev.Kind, "(refresh)"
 	default:
 		return "", ""

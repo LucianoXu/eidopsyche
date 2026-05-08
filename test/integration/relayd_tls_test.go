@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -44,15 +45,28 @@ func mkSelfSignedCert(t *testing.T) (certPath, keyPath string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	keyDER, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Build PEM blocks in memory and write atomically with os.WriteFile —
+	// a partially-written cert/key would surface as a confusing TLS
+	// startup error several lines later, much harder to diagnose.
+	var certBuf, keyBuf bytes.Buffer
+	if err := pem.Encode(&certBuf, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
+		t.Fatal(err)
+	}
+	if err := pem.Encode(&keyBuf, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}); err != nil {
+		t.Fatal(err)
+	}
 	certPath = filepath.Join(dir, "cert.pem")
 	keyPath = filepath.Join(dir, "key.pem")
-	cf, _ := os.Create(certPath)
-	pem.Encode(cf, &pem.Block{Type: "CERTIFICATE", Bytes: der})
-	cf.Close()
-	keyDER, _ := x509.MarshalECPrivateKey(priv)
-	kf, _ := os.Create(keyPath)
-	pem.Encode(kf, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-	kf.Close()
+	if err := os.WriteFile(certPath, certBuf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, keyBuf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	return certPath, keyPath
 }
 

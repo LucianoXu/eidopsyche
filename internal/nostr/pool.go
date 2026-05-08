@@ -282,22 +282,31 @@ func (p *Pool) pumpSubscription(
 }
 
 // signFuncFor returns a sign callback bound to a specific relay connection.
-// The callback validates that the AUTH event's ["relay", ...] tag matches
-// the connection URL — defends against a hypothetical malicious go-nostr
-// build that might construct the event with the wrong URL — then signs
-// with the Pool's signer.
+// The callback validates that the AUTH event includes a ["relay", url] tag
+// matching the connection URL — defends against a hypothetical malicious
+// go-nostr build that might construct the event with the wrong URL or
+// without the relay tag — then signs with the Pool's signer.
+//
+// NIP-42 mandates the relay tag; missing tag is treated as a defect that
+// could just as plausibly be a deliberate evasion as a bug, so we refuse
+// to sign rather than fall back to "URL must just be the connection one".
 func (p *Pool) signFuncFor(r *gnostr.Relay) func(ev *gnostr.Event) error {
 	return func(ev *gnostr.Event) error {
 		if p.signer == nil {
 			return errors.New("AUTH challenge received but Pool has no signer")
 		}
+		seenRelayTag := false
 		for _, t := range ev.Tags {
 			if len(t) >= 2 && t[0] == "relay" {
+				seenRelayTag = true
 				if t[1] != r.URL {
 					return fmt.Errorf("AUTH event relay tag %q does not match connection URL %q", t[1], r.URL)
 				}
 				break
 			}
+		}
+		if !seenRelayTag {
+			return fmt.Errorf("AUTH event missing required [\"relay\", %q] tag", r.URL)
 		}
 		ev.PubKey = p.signer.PublicHex()
 		return p.signer.Sign(ev)

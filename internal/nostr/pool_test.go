@@ -167,6 +167,25 @@ func TestPool_SignFunc_AcceptsMatchingURL(t *testing.T) {
 	}
 }
 
+func TestPool_SignFunc_RefusesMissingRelayTag(t *testing.T) {
+	signer := &fakeSigner{pub: "abcd"}
+	p := NewPoolWithSigner(signer)
+	r := &gnostr.Relay{URL: "wss://us.example"}
+	signFn := p.signFuncFor(r)
+
+	// Event has a challenge tag but no relay tag — refuse.
+	ev := &gnostr.Event{
+		Kind: 22242,
+		Tags: gnostr.Tags{gnostr.Tag{"challenge", "x"}},
+	}
+	if err := signFn(ev); err == nil {
+		t.Fatal("expected refusal when relay tag is absent")
+	}
+	if len(signer.signed) != 0 {
+		t.Errorf("signer was called despite missing relay tag")
+	}
+}
+
 func TestPool_SignFunc_NoSignerErrors(t *testing.T) {
 	p := NewPool() // no signer
 	r := &gnostr.Relay{URL: "wss://us"}
