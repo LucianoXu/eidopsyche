@@ -115,6 +115,11 @@ type fakeDeps struct {
 	removeOwnRelayFn  func(ctx context.Context, rawURL string) error
 	addOwnRelayCalls  *[]addOwnRelayCall
 	removeOwnRelayLog *[]string
+
+	// ── phase 5 ─────────────────────────────────────────────────
+	statusSnapshot  ServiceStatus
+	lifecycleRunFn  func(args []string) (string, error)
+	lifecycleRunLog *[][]string
 }
 
 // addOwnRelayCall captures one AddOwnRelay invocation for assertions.
@@ -279,4 +284,16 @@ func (f fakeDeps) RemoveOwnRelay(ctx context.Context, rawURL string) error {
 		return f.removeOwnRelayFn(ctx, rawURL)
 	}
 	return nil
+}
+
+func (f fakeDeps) Status() ServiceStatus { return f.statusSnapshot }
+
+func (f fakeDeps) LifecycleRun(args []string) (string, error) {
+	if f.lifecycleRunLog != nil {
+		*f.lifecycleRunLog = append(*f.lifecycleRunLog, append([]string(nil), args...))
+	}
+	if f.lifecycleRunFn != nil {
+		return f.lifecycleRunFn(args)
+	}
+	return "stub-job-id", nil
 }

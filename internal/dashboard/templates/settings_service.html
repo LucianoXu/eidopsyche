@@ -1,0 +1,84 @@
+{{define "settings_service"}}
+<div class="service-pane"
+     hx-get="/settings/service"
+     hx-trigger="sse:service.status from:body"
+     hx-swap="outerHTML">
+  <h2>Service control</h2>
+  <p class="pane-aside">
+    Lifecycle actions on this daemon. Reconnect is harmless and can be fired anytime;
+    Stop, Purge, and Self-update each take down or rewrite this process and require a
+    typed phrase.
+  </p>
+
+  {{if .ActiveJobID}}
+  <aside class="lifecycle-banner is-active" role="status">
+    <span class="lifecycle-banner-mark" aria-hidden="true">▣</span>
+    Job <code>{{.ActiveJobID}}</code> running —
+    <em>{{range $i, $a := .ActiveJobArgs}}{{if $i}} {{end}}{{$a}}{{end}}</em>
+    · started {{reltime .ActiveJobAt}}.
+    Other actions are locked until it completes.
+  </aside>
+  {{end}}
+
+  <dl class="identity-card service-status">
+    <dt>Version</dt>     <dd class="mono">{{.Version}}</dd>
+    <dt>Commit</dt>      <dd class="mono">{{.Commit}}</dd>
+    <dt>Built</dt>       <dd class="mono">{{.BuildDate}}</dd>
+    <dt>Started</dt>     <dd class="mono"><span title="{{.StartedAt.Format "2006-01-02 15:04:05"}}">{{reltime .StartedAt}}</span></dd>
+    <dt>State dir</dt>   <dd class="mono">{{.StateDir}}</dd>
+    <dt>Dashboard</dt>   <dd class="mono">{{.DashboardURL}}</dd>
+    <dt>IPC socket</dt>  <dd class="mono">{{.IPCSocket}}</dd>
+    <dt>Relay</dt>
+    <dd class="mono">
+      {{if .RelayEnabled}}enabled · mode={{.RelayMode}} · listen={{.RelayListen}}
+      {{else}}<span class="muted">disabled</span>{{end}}
+    </dd>
+  </dl>
+
+  <section class="service-actions" aria-label="Lifecycle actions">
+    <button type="button" class="action-card {{if .ActiveJobID}}is-busy{{end}}"
+            {{if .ActiveJobID}}disabled aria-disabled="true"{{end}}
+            hx-post="/settings/service/reconnect"
+            hx-target="#settings-pane"
+            hx-swap="innerHTML">
+      <span class="action-key" aria-hidden="true">R</span>
+      <h4>Reconnect</h4>
+      <p>Recompute relay set and reattach. Always safe.</p>
+    </button>
+
+    <button type="button" class="action-card is-danger {{if .ActiveJobID}}is-busy{{end}}"
+            {{if .ActiveJobID}}disabled aria-disabled="true"{{end}}
+            hx-get="/settings/service/confirm/stop"
+            hx-target="#modal"
+            hx-swap="innerHTML">
+      <span class="action-key" aria-hidden="true">S</span>
+      <h4>Stop</h4>
+      <p>Send SIGTERM. State preserved on disk; restart from terminal.</p>
+    </button>
+
+    <button type="button" class="action-card is-danger {{if .ActiveJobID}}is-busy{{end}}"
+            {{if .ActiveJobID}}disabled aria-disabled="true"{{end}}
+            hx-get="/settings/service/confirm/purge"
+            hx-target="#modal"
+            hx-swap="innerHTML">
+      <span class="action-key" aria-hidden="true">P</span>
+      <h4>Purge</h4>
+      <p>Stop AND wipe state directory. Irreversible — new pubkey on next init.</p>
+    </button>
+
+    <button type="button" class="action-card is-warn {{if .ActiveJobID}}is-busy{{end}}"
+            {{if .ActiveJobID}}disabled aria-disabled="true"{{end}}
+            hx-get="/settings/service/confirm/self-update"
+            hx-target="#modal"
+            hx-swap="innerHTML">
+      <span class="action-key" aria-hidden="true">U</span>
+      <h4>Self-update</h4>
+      <p>Run install script. Old binary stays mapped until restart.</p>
+    </button>
+  </section>
+
+  {{if .ActiveJobID}}
+  <p class="service-busy-note">Another action is already in flight — wait for it to finish or reload the page.</p>
+  {{end}}
+</div>
+{{end}}

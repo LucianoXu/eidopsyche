@@ -828,6 +828,72 @@ export async function removeOwnRelay(page, rawURL) {
 }
 
 /**
+ * Click the Reconnect action card on /settings/service. Waits for the
+ * lifecycle-log frame to render, then for the lifecycle.done event to
+ * arrive (status pill flips to is-ok or is-err). Returns
+ * {ok, jobID, status, lineCount}.
+ *
+ * Reconnect is the only Service action that doesn't open a typed-confirm
+ * modal — the click POSTs directly. Stop / Purge / Self-update each
+ * route through `/settings/service/confirm/<action>` first; helpers for
+ * those would need to know how to fill the modal AND would risk
+ * actually killing the daemon, so they're not included here.
+ */
+export async function fireServiceReconnect(page) {
+  const btn = await page.$(
+    '.service-actions .action-card:not(.is-danger):not(.is-warn):not([disabled])');
+  if (!btn) return { ok: false, reason: 'no Reconnect button' };
+  await Promise.all([
+    page.waitForResponse((r) =>
+      /\/settings\/service\/reconnect$/i.test(r.url()) &&
+      r.request().method() === 'POST',
+      { timeout: 10000 },
+    ),
+    btn.click(),
+  ]);
+  await page.waitForSelector('.lifecycle-log-pane', { timeout: 5000 });
+  const jobID = await page.evaluate(() => {
+    const code = document.querySelector('.lifecycle-job-id');
+    return code ? (code.textContent || '').trim() : '';
+  });
+  const deadline = Date.now() + 8000;
+  let status = 'running';
+  while (Date.now() < deadline) {
+    status = await page.evaluate(() => {
+      const pill = document.querySelector('.lifecycle-status');
+      if (!pill) return 'missing';
+      return Array.from(pill.classList).find((c) => c.startsWith('is-'))?.replace(/^is-/, '') || 'running';
+    });
+    if (status !== 'running' && status !== 'missing') break;
+    await page.waitForTimeout(200);
+  }
+  const lineCount = await page.evaluate(() => {
+    return document.querySelectorAll(
+      'pre.lifecycle-log .lifecycle-line:not(.lifecycle-line-init)').length;
+  });
+  return { ok: status === 'ok', jobID, status, lineCount };
+}
+
+/**
+ * Read the Service tab's status colophon (Version / Commit / etc).
+ * Returns the dl rows as a {label: value} map.
+ */
+export async function readServiceStatus(page) {
+  return await page.evaluate(() => {
+    const dl = document.querySelector('dl.service-status');
+    if (!dl) return null;
+    const out = {};
+    Array.from(dl.querySelectorAll('dt')).forEach((dt) => {
+      const dd = dt.nextElementSibling;
+      if (!dd) return;
+      out[(dt.textContent || '').trim().toLowerCase()] =
+        (dd.textContent || '').trim().replace(/\s+/g, ' ');
+    });
+    return out;
+  });
+}
+
+/**
  * Read sidebar contact rows. Returns Array<{label, tier, href, pubkey}>.
  * Used by full-bidirectional.mjs to confirm both sides know each other.
  */

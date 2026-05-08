@@ -48,6 +48,13 @@
      tabindex="{{if eq .Active "config"}}0{{else}}-1{{end}}"
      href="/settings/config"
      hx-get="/settings/config" hx-target="#settings-pane" hx-push-url="true">Config</a>
+  <a id="tab-service" class="settings-tab is-danger {{if eq .Active "service"}}is-active{{end}}"
+     role="tab"
+     aria-selected="{{if eq .Active "service"}}true{{else}}false{{end}}"
+     aria-controls="settings-pane"
+     tabindex="{{if eq .Active "service"}}0{{else}}-1{{end}}"
+     href="/settings/service"
+     hx-get="/settings/service" hx-target="#settings-pane" hx-push-url="true">Service</a>
 </nav>
 <section class="settings-pane" id="settings-pane" role="tabpanel"
          aria-labelledby="tab-{{.Active}}">
@@ -56,5 +63,6 @@
   {{if eq .Active "invites"}}{{template "settings_invites" .Invites}}{{end}}
   {{if eq .Active "relays"}}{{template "settings_relays" .Relays}}{{end}}
   {{if eq .Active "config"}}{{template "settings_config" .Config}}{{end}}
+  {{if eq .Active "service"}}{{template "settings_service" .Service}}{{end}}
 </section>
 {{end}}

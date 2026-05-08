@@ -144,6 +144,7 @@ type settingsShellData struct {
 	Config   *settingsConfigData
 	Invites  *settingsInvitesData
 	Relays   *settingsRelaysData
+	Service  *settingsServiceData
 }
 
 // ── phase 2: contacts ──────────────────────────────────────────────
@@ -276,9 +277,15 @@ type redeemFlash struct {
 }
 
 // confirmModalData is the payload for the shared "confirm_modal" template.
-// Used in later phases (remove-contact, revoke-invite, gate stop/purge,
-// self-update). Defined here so handler tests can exercise the renderer
-// before the destructive endpoints land.
+// Used in remove-contact, revoke-invite, gate stop/purge/self-update.
+//
+// AckField, when non-empty, renders an additional checkbox in the modal
+// — its form name is AckField and the danger button stays disabled
+// until BOTH the typed phrase matches AND the checkbox is checked.
+// Server-side, the corresponding handler must verify req.Form.Get(
+// AckField) == "1". Used by Phase 5's purge action ("I have backed up
+// state.db" acknowledgement) so the operator can't fire the
+// state-wiping action with just the typed-confirm.
 type confirmModalData struct {
 	Action         string
 	Target         string
@@ -288,6 +295,8 @@ type confirmModalData struct {
 	Warning        string
 	ExpectedPhrase string
 	ConfirmLabel   string
+	AckField       string // optional checkbox form-field name (purge: "ack-backup")
+	AckText        string // human-readable label for the checkbox
 }
 
 // ── phase 4: own relays ────────────────────────────────────────────
@@ -304,6 +313,39 @@ type settingsRelaysData struct {
 	HomeCount int
 	AddError  string
 	Error     string
+}
+
+// ── phase 5: service control ───────────────────────────────────────
+
+// settingsServiceData is the payload for settings_service.html.
+type settingsServiceData struct {
+	Version      string
+	Commit       string
+	BuildDate    string
+	StartedAt    time.Time
+	StateDir     string
+	DashboardURL string
+	IPCSocket    string
+	RelayEnabled bool
+	RelayMode    string
+	RelayListen  string
+	OwnLabel     string
+
+	// ActiveJob* fields are non-empty when a lifecycle job is in
+	// flight. Used to disable the action buttons (single-job-at-a-time
+	// invariant) and surface what's running.
+	ActiveJobID   string
+	ActiveJobArgs []string
+	ActiveJobAt   time.Time
+}
+
+// lifecycleLogData is the payload for lifecycle_log.html — the
+// streaming-<pre> + status-pill skeleton the operator sees as soon as
+// they confirm an action.
+type lifecycleLogData struct {
+	JobID         string
+	Kind          string // "reconnect" / "stop" / "purge" / "self-update"
+	DaemonKilling bool
 }
 
 // ownRelayRow is the per-row payload for the "relay_row" template.

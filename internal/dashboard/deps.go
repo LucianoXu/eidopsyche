@@ -134,7 +134,46 @@ type DashboardDeps interface {
 	// the adapter does not re-validate the phrase. Refuses when
 	// removing the row would leave zero home relays. Emits relay.removed.
 	RemoveOwnRelay(ctx context.Context, rawURL string) error
+
+	// ── phase 5: service control ────────────────────────────────────
+	//
+	// Status returns a snapshot of daemon-process metadata for the
+	// Service tab. Reads only — no side effects.
+	Status() ServiceStatus
+
+	// LifecycleRun spawns `os.Args[0] <args...>` and returns the
+	// job id immediately. Stdout is streamed via SSE
+	// (`lifecycle.line:<jobID>` / `lifecycle.done:<jobID>`). At most
+	// one job in flight at a time; concurrent calls return ErrLifecycleBusy.
+	// No ctx parameter on purpose: the request context is canceled the
+	// moment the handler returns the job id, but the subprocess must
+	// outlive that — the daemon owns a long-lived lifecycle context
+	// internally.
+	LifecycleRun(args []string) (jobID string, err error)
 }
+
+// ServiceStatus is the snapshot read by /settings/service. Pulled from
+// the daemon at request time; no caching.
+type ServiceStatus struct {
+	Version       string
+	Commit        string
+	BuildDate     string
+	StartedAt     time.Time
+	StateDir      string
+	DashboardURL  string
+	IPCSocket     string
+	RelayEnabled  bool
+	RelayMode     string
+	RelayListen   string
+	ActiveJobID   string    // empty when no lifecycle job is in flight
+	ActiveJobArgs []string  // job's argv, e.g. ["gate","reconnect"]
+	ActiveJobAt   time.Time // when the in-flight job started
+}
+
+// ErrLifecycleBusy is the dashboard-side sentinel returned by
+// LifecycleRun when another job is already in flight. The handler maps
+// it to HTTP 409 Conflict.
+var ErrLifecycleBusy = errors.New("lifecycle: another job is already in flight")
 
 // OwnRelay is the dashboard-local view of an own_relays row.
 type OwnRelay struct {
@@ -184,8 +223,16 @@ type ScanPreview struct {
 
 // Event is the SSE-bound broadcast type. Kind discriminates the union;
 // only the matching pointer field is populated.
+//
+// HTML, when non-empty, replaces all rendering in renderEvent and is
+// emitted directly as the SSE data: payload. The lifecycle stream
+// (Phase 5) sets this so each child stdout line lands in the page
+// without round-tripping through the templates — the renderer can't
+// know the line text in advance, and the cost of rendering a one-line
+// fragment via html/template would be wasteful.
 type Event struct {
 	Kind    string
+	HTML    string
 	Message *inbox.Message
 	Sent    *inbox.Sent
 	Contact *contacts.Contact

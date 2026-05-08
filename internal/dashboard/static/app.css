@@ -934,6 +934,17 @@ table.config-table .row-error {
   border-color: var(--seal);
 }
 
+.confirm-ack {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 0 18px;
+  font-style: italic; font-size: 14px; color: var(--fg);
+}
+.confirm-ack input[type=checkbox] {
+  margin: 0; flex-shrink: 0;
+  accent-color: var(--seal);
+  cursor: pointer;
+}
+
 .confirm-actions {
   display: flex;
   gap: 12px;
@@ -1380,6 +1391,143 @@ table.relays-table tbody tr.relay-row.is-home td.relay-url code { border-left: 2
   border: 1px solid var(--rule-2);
 }
 .relay-add .role-select:focus { outline: none; border-color: var(--seal); }
+
+/* ---------------------------------------------------------------- *
+ * Phase 5 — Service control
+ * The operator's actuator panel: a status colophon, four lever-cards
+ * arranged 2x2, and the streaming-log frame that replaces the pane
+ * once a lifecycle action fires. Vermillion-edged cards flag
+ * destructive levers (Stop, Purge); body-ink edge for warn (Self-
+ * update); plain rule for safe (Reconnect).
+ * ---------------------------------------------------------------- */
+
+dl.service-status { margin-top: 12px; }
+
+section.service-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 36px 0 0;
+  max-width: var(--measure);
+}
+
+button.action-card {
+  position: relative;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 22px 24px 20px;
+  background: var(--bg-2);
+  border-top: 2px solid var(--rule-2);
+  border-right: 1px solid var(--rule-2);
+  border-bottom: 1px solid var(--rule-2);
+  border-left: 1px solid var(--rule-2);
+  text-align: left; cursor: pointer;
+  font-family: var(--serif);
+  transition: background 160ms ease, border-color 160ms ease, transform 120ms ease;
+}
+button.action-card:hover {
+  background: var(--bg-3);
+  transform: translateY(-1px);
+}
+button.action-card:focus-visible {
+  outline: 2px solid var(--seal); outline-offset: -2px;
+}
+button.action-card.is-danger { border-top-color: var(--seal); }
+button.action-card.is-danger:hover { background: var(--seal-mute); border-color: var(--seal); }
+button.action-card.is-warn   { border-top-color: var(--fg-dim); }
+button.action-card[disabled],
+button.action-card.is-busy {
+  opacity: 0.45; cursor: not-allowed; pointer-events: none;
+  transform: none; background: var(--bg-2);
+}
+
+button.action-card .action-key {
+  position: absolute; top: 12px; right: 14px;
+  font-family: var(--mono); font-size: 9.5px; font-weight: 500;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--fg-mute);
+}
+button.action-card.is-danger .action-key { color: var(--seal); }
+button.action-card h4 {
+  margin: 0; font-style: italic; font-weight: 500;
+  font-size: 19px; letter-spacing: 0.005em; color: var(--fg);
+}
+button.action-card p {
+  margin: 0; font-style: italic; color: var(--fg-dim);
+  font-size: 13.5px; line-height: 1.5;
+}
+
+p.service-busy-note {
+  margin: 16px 0 0; font-style: italic; color: var(--warn);
+  font-size: 13px; max-width: var(--measure);
+}
+
+/* lifecycle log frame — shown after an action fires */
+
+.lifecycle-log-pane { animation: paper-fade 280ms ease-out both; max-width: none; }
+
+.lifecycle-log-head {
+  display: flex; align-items: flex-start; gap: 16px;
+  margin-bottom: 14px; padding-bottom: 14px;
+  border-bottom: 1px solid var(--rule);
+}
+.lifecycle-log-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; flex-shrink: 0;
+  background: var(--seal); color: #fdf6e9;
+  font-family: var(--serif); font-size: 16px; font-weight: 500;
+}
+.lifecycle-log-titlebar { flex: 1; min-width: 0; }
+.lifecycle-log-titlebar h4 {
+  margin: 0; font-family: var(--serif); font-style: italic; font-weight: 500;
+  font-size: 18px; letter-spacing: 0.01em;
+}
+.lifecycle-log-titlebar h4 .lifecycle-job-id {
+  font-family: var(--mono); font-style: normal; font-size: 12.5px;
+  background: var(--bg-2); padding: 0 6px; margin-left: 6px; color: var(--fg-mute);
+}
+.lifecycle-log-meta {
+  margin: 4px 0 0; font-style: italic; color: var(--fg-dim);
+  font-size: 13px; line-height: 1.5;
+}
+
+.lifecycle-status {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-family: var(--mono); font-size: 10px; font-weight: 500;
+  letter-spacing: 0.20em; text-transform: uppercase;
+  color: var(--fg-dim); border: 1px solid var(--rule-2);
+  align-self: center;
+}
+.lifecycle-status.is-running { color: var(--fg-dim); }
+.lifecycle-status.is-ok      { color: var(--fg);   border-color: var(--rule-2); background: var(--bg-2); }
+.lifecycle-status.is-err     { color: var(--warn); border-color: var(--warn);   background: var(--warn-soft); }
+
+.lifecycle-banner {
+  margin: 0 0 14px; padding: 10px 16px;
+  border-left: 2px solid var(--seal); background: var(--seal-mute);
+  font-style: italic; font-size: 14px; color: var(--fg);
+  max-width: var(--measure); line-height: 1.55;
+}
+.lifecycle-banner.is-disconnected {
+  border-left-color: var(--warn); background: var(--warn-soft); color: var(--warn);
+}
+
+pre.lifecycle-log {
+  margin: 0; padding: 16px 20px;
+  background: var(--bg); border: 1px solid var(--rule-2);
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--fg); white-space: pre-wrap; word-break: break-word;
+  max-height: 60vh; overflow-y: auto;
+}
+pre.lifecycle-log .lifecycle-line { display: block; }
+pre.lifecycle-log .lifecycle-line-init { color: var(--fg-mute); font-style: italic; }
+
+p.lifecycle-log-foot {
+  margin: 18px 0 0; font-family: var(--mono);
+  font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase;
+}
+p.lifecycle-log-foot a { color: var(--fg-mute); text-decoration: none; }
+p.lifecycle-log-foot a:hover { color: var(--seal); }
 
 /* ---------------------------------------------------------------- */
 

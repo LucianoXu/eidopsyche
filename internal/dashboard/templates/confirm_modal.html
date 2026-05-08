@@ -29,9 +29,21 @@
              spellcheck="false"
              autofocus
              required
-             hx-on:input="this.closest('form').querySelector('button.danger').disabled=(this.value.trim()!==this.dataset.expected)"
-             data-expected="{{.ExpectedPhrase}}">
+             data-expected="{{.ExpectedPhrase}}"
+             hx-on:input="const f=this.closest('form');const a=f.querySelector('input[type=checkbox]');const ok=this.value.trim()===this.dataset.expected&&(!a||a.checked);f.querySelector('button.danger').disabled=!ok">
     </label>
+
+    {{if .AckField}}
+    <label class="confirm-ack" for="confirm-ack">
+      <input id="confirm-ack"
+             name="{{.AckField}}"
+             type="checkbox"
+             value="1"
+             required
+             hx-on:change="const f=this.closest('form');const t=f.querySelector('input[name=confirm]');const ok=t.value.trim()===t.dataset.expected&&this.checked;f.querySelector('button.danger').disabled=!ok">
+      <span>{{.AckText}}</span>
+    </label>
+    {{end}}
 
     <div class="confirm-actions">
       <button type="button" class="ghost"
