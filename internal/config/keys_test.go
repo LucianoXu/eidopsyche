@@ -32,9 +32,9 @@ func TestKeyByPath_DashboardListen_NonLoopback(t *testing.T) {
 	k, _ := KeyByPath("dashboard.listen")
 	for _, v := range []string{
 		"0.0.0.0:22893",
-		":22893",               // bare port = bind-all = non-loopback
-		"157.180.52.174:22893", // a public IP
-		"yingte.io:22893",      // a hostname that's not localhost
+		":22893",             // bare port = bind-all = non-loopback
+		"192.0.2.1:22893",    // RFC 5737 TEST-NET-1; never routed in the wild
+		"example.test:22893", // RFC 6761 reserved TLD (no real DNS)
 	} {
 		err := k.Set(&cfg, v)
 		if err == nil {
