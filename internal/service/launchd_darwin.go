@@ -23,6 +23,10 @@ func platformNew(cfg Config) (Manager, error) {
 
 type launchd struct {
 	cfg Config
+	// run is the function that actually invokes the launchctl binary.
+	// Tests substitute it; production callers leave it nil and fall
+	// through to defaultLaunchctl via the launchctl method below.
+	run func(ctx context.Context, args ...string) ([]byte, error)
 }
 
 // domainTarget returns the launchctl domain identifier for the configured
@@ -52,7 +56,12 @@ func (l *launchd) plistPath(label string) (string, error) {
 // launchctl runs `launchctl <args...>` and returns combined output. As with
 // the systemd manager, query-shaped subcommands signal state via exit code,
 // so we do not treat non-zero as a hard error.
+//
+// The actual invocation is routed through l.run, which tests can override.
 func (l *launchd) launchctl(ctx context.Context, args ...string) ([]byte, error) {
+	if l.run != nil {
+		return l.run(ctx, args...)
+	}
 	return exec.CommandContext(ctx, "launchctl", args...).CombinedOutput()
 }
 
@@ -114,19 +123,18 @@ func (l *launchd) Start(ctx context.Context) error {
 // = {SuccessfulExit=false}, the gate daemon's clean SIGTERM handler exits 0
 // and launchd does not respawn it. The agent stays loaded; bring it back
 // with `eidos gate start` (or remove with purge).
+//
+// `launchctl stop`'s exit codes are not documented well enough to tell apart
+// "not running" / "already stopped" / "KeepAlive-respawning" / other
+// transient conditions — in the field we have observed exit 3 with empty
+// output on units that were genuinely loaded and running. So this is
+// best-effort: any error from launchctl is swallowed, and `eidos gate
+// status` is the source of truth for whether the units actually stopped.
+// Uninstall already follows the same pattern (`_, _ = l.launchctl(ctx,
+// "stop", ...)`); Stop now matches.
 func (l *launchd) Stop(ctx context.Context) error {
 	for _, u := range l.units() {
-		out, err := l.launchctl(ctx, "stop", l.serviceTarget(u.label))
-		if err != nil {
-			lower := strings.ToLower(string(out))
-			if strings.Contains(lower, "could not find") ||
-				strings.Contains(lower, "no such") ||
-				strings.Contains(lower, "not loaded") {
-				continue
-			}
-			return fmt.Errorf("launchctl stop %s: %w (output: %s)",
-				u.label, err, strings.TrimSpace(string(out)))
-		}
+		_, _ = l.launchctl(ctx, "stop", l.serviceTarget(u.label))
 	}
 	return nil
 }
