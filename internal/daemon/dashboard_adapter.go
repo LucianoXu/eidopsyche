@@ -133,8 +133,12 @@ func (a dashboardAdapter) Send(ctx context.Context, toPubkey string, env envelop
 		// a sent-bubble that vanishes on next reload.
 		return "", fmt.Errorf("append outbox: %w", err)
 	}
-	sc := sent
-	a.d.emitDashEvent(dashboard.Event{Kind: "outbox.message", Sent: &sc})
+	// Intentionally do NOT emit dashboard.Event{Kind: "outbox.message"} here:
+	// the dashboard's POST /thread/<pk>/send response already swaps the
+	// rendered bubble into #thread-body. An SSE emit would race that swap
+	// and the originating tab would render the same event twice with
+	// identical data-event-id. Multi-tab outbox sync is out of scope for
+	// v1; reload to see sends from a sibling tab.
 	return wrapBob.ID, nil
 }
 
