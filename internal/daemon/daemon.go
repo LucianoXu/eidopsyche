@@ -89,14 +89,32 @@ func Start(stateDir string) (*Daemon, error) {
 		selfWrapIDs: make(map[string]struct{}, 1024),
 		relayHealth: newRelayHealthStore(),
 	}
-	// Wire Pool's per-URL state hook so transitions surface in d.relayHealth.
+	// Wire Pool's per-URL state hook so transitions surface in d.relayHealth
+	// AND in the dashboard SSE hub. The hook runs from inside the Pool's
+	// per-URL Subscribe pumps; emitting the dashboard event here keeps the
+	// dashboard panel live without daemon's runSubscriber needing to know.
 	d.Pool.SetStateHook(func(url, state, lastErr string) {
-		_ = d.relayHealth.setState(url, state, lastErr)
+		h := d.relayHealth.setState(url, state, lastErr)
+		d.emitRelayState(h)
 	})
 	d.Pool.SetEventHook(func(url string) {
 		d.relayHealth.markEvent(url)
 	})
 	return d, nil
+}
+
+// emitRelayState fans the just-updated RelayHealth out to dashboard SSE
+// subscribers. Daemon owns the dashSubs slice (see dashboard_event.go);
+// this helper keeps the conversion in one place.
+func (d *Daemon) emitRelayState(h RelayHealth) {
+	state := dashboard.RelayState{
+		URL:         h.URL,
+		Role:        h.Role,
+		State:       h.State,
+		LastError:   h.LastError,
+		LastEventAt: h.LastEventAt,
+	}
+	d.emitDashEvent(dashboard.Event{Kind: "relay.state", Relay: &state})
 }
 
 // Stop closes the relay pool and database.
