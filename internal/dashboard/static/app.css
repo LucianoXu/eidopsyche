@@ -974,5 +974,202 @@ table.config-table .row-error {
 
 .confirm-actions button.danger:not(:disabled):hover { filter: brightness(1.08); }
 
+/* ---------------------------------------------------------------- *
+ * Phase 2 — Contacts (Address book)
+ * The operator's correspondents, filed as colophon entries. Reuses
+ * .config-table rhythm + .identity-card vocabulary; the only bespoke
+ * note is the "card preview" slip rendered after a Scan.
+ * ---------------------------------------------------------------- */
+
+table.contacts-table td.contact-label { font-style: italic; font-size: 16px; width: 22%; }
+table.contacts-table td.contact-tier  { width: 14%; }
+table.contacts-table td.contact-hex   { width: 22%; }
+table.contacts-table td.contact-hex code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-dim);
+  letter-spacing: 0.02em;
+}
+table.contacts-table td.contact-seen  {
+  width: 14%;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--fg-mute);
+  letter-spacing: 0.02em;
+}
+table.contacts-table td.contact-actions { width: auto; text-align: right; padding-right: 0; }
+
+table.contacts-table tbody tr.contact-row { cursor: pointer; transition: background 120ms ease; }
+table.contacts-table tbody tr.contact-row:hover { background: var(--seal-mute); }
+table.contacts-table tbody tr.contacts-empty:hover { background: transparent; cursor: default; }
+
+.muted { color: var(--fg-mute); }
+
+/* tier-badge tier-coloured variants — vermillion for master, neutral for the rest */
+.tier-badge.is-master       { color: var(--seal); border-color: var(--seal); }
+.tier-badge.is-friend       { color: var(--fg-dim);  border-color: var(--rule-2); }
+.tier-badge.is-acquaintance { color: var(--fg-mute); border-color: var(--rule-2); }
+.tier-badge.is-blocked      { color: var(--warn);    border-color: var(--warn); background: var(--warn-soft); }
+
+/* danger button (full and small) — ghost outline that flips vermillion on hover */
+.danger-button, .danger-button-sm {
+  background: transparent;
+  color: var(--fg-dim);
+  border: 1px solid var(--rule-2);
+  font-family: var(--mono);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.danger-button     { font-size: 11px; padding: 9px 18px; }
+.danger-button-sm  { font-size: 9.5px; padding: 4px 10px; }
+.danger-button:hover, .danger-button-sm:hover {
+  color: var(--seal);
+  border-color: var(--seal);
+  background: var(--seal-mute);
+}
+
+/* ghost button companion to .settings-form button[type=submit] */
+.ghost-button {
+  padding: 10px 18px;
+  background: transparent;
+  color: var(--fg-dim);
+  border: 1px solid var(--rule-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.ghost-button:hover { color: var(--seal); border-color: var(--seal); }
+
+/* compose-style add form, sitting at the foot of the address book */
+.contact-add { margin-top: 36px; }
+.contact-add h4 {
+  font-family: var(--serif); font-style: italic; font-weight: 500;
+  font-size: 18px; letter-spacing: 0.01em; margin: 0 0 6px;
+}
+.contact-add .hint {
+  margin: 0 0 18px; font-style: italic; color: var(--fg-dim);
+  font-size: 14px; line-height: 1.55;
+}
+.contact-add-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+.contact-add-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.contact-add-label {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 500;
+  letter-spacing: 0.22em; text-transform: uppercase; color: var(--fg-mute);
+}
+.contact-add-field input[type=text] {
+  padding: 10px 14px; border: 1px solid var(--rule-2);
+  background: var(--bg-2); color: var(--fg);
+  font-family: var(--mono); font-size: 13px;
+}
+.contact-add-field input[type=text]:focus { outline: none; border-color: var(--seal); }
+.contact-add-actions { display: flex; gap: 10px; }
+.contact-add-actions button[type=submit]:not(.ghost-button) {
+  padding: 10px 22px;
+  background: var(--seal); color: #fdf6e9; border: 1px solid var(--seal);
+  font-family: var(--mono); font-size: 12px;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  cursor: pointer; transition: filter 120ms ease;
+}
+.contact-add-actions button[type=submit]:not(.ghost-button):hover { filter: brightness(1.08); }
+
+/* card preview "slip" — wax-stamp the result of POST /settings/contacts/scan */
+.contact-scan {
+  margin-top: 20px;
+  padding: 20px 24px 18px;
+  border-top: 2px solid var(--seal);
+  border-right: 1px solid var(--rule-2);
+  border-bottom: 1px solid var(--rule-2);
+  border-left: 1px solid var(--rule-2);
+  background: var(--bg-2);
+  animation: paper-fade 240ms ease-out both;
+  max-width: var(--measure);
+}
+.contact-scan-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.contact-scan-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  background: var(--seal); color: #fdf6e9;
+  font-family: var(--serif); font-size: 14px; font-weight: 500; letter-spacing: -0.04em;
+}
+.contact-scan-head h4 {
+  margin: 0;
+  font-family: var(--serif); font-style: italic; font-weight: 500;
+  font-size: 17px; letter-spacing: 0.01em;
+}
+.scan-grid {
+  display: grid; grid-template-columns: 70px 1fr;
+  column-gap: 24px; row-gap: 8px; margin: 0 0 18px;
+}
+.scan-grid dt {
+  font-family: var(--mono); font-size: 9px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.22em;
+  color: var(--fg-mute); text-align: right; align-self: center;
+}
+.scan-grid dd {
+  margin: 0; font-family: var(--mono); font-size: 12px;
+  word-break: break-all; color: var(--fg);
+}
+.scan-grid dd.serif { font-family: var(--serif); font-size: 16px; word-break: normal; }
+.contact-scan-confirm { display: flex; gap: 10px; }
+.contact-scan-confirm button[type=submit] {
+  padding: 9px 20px;
+  background: var(--seal); color: #fdf6e9; border: 1px solid var(--seal);
+  font-family: var(--mono); font-size: 11px;
+  letter-spacing: 0.20em; text-transform: uppercase;
+  cursor: pointer; transition: filter 120ms ease;
+}
+.contact-scan-confirm button[type=submit]:hover { filter: brightness(1.08); }
+
+/* contact detail pane — back-link, relay list, danger-zone */
+.contact-detail .back-link {
+  margin: 0 0 18px;
+  font-family: var(--mono); font-size: 10.5px;
+  letter-spacing: 0.18em; text-transform: uppercase;
+}
+.contact-detail .back-link a { color: var(--fg-mute); text-decoration: none; }
+.contact-detail .back-link a:hover { color: var(--seal); }
+.contact-detail .relay-list { list-style: none; padding: 0; margin: 0; }
+.contact-detail .relay-list li {
+  padding: 2px 0;
+  font-family: var(--mono); font-size: 12.5px;
+  word-break: break-all;
+}
+.contact-detail .settings-form { margin-bottom: 32px; }
+.contact-detail .tier-select {
+  flex: 1;
+  padding: 10px 14px;
+  font: inherit; font-size: 14px;
+  background: var(--bg-2); color: var(--fg);
+  border: 1px solid var(--rule-2);
+}
+.contact-detail .tier-select:focus { outline: none; border-color: var(--seal); }
+.contact-danger-zone {
+  margin-top: 40px;
+  padding-top: 24px;
+  border-top: 1px solid var(--rule);
+  max-width: var(--measure);
+}
+.contact-danger-zone h4 {
+  font-family: var(--serif); font-style: italic; font-weight: 500;
+  font-size: 18px; letter-spacing: 0.01em; margin: 0 0 6px;
+  color: var(--seal);
+}
+.contact-danger-zone .hint {
+  margin: 0 0 16px; font-style: italic; color: var(--fg-dim);
+  font-size: 14px; line-height: 1.55;
+}
+
 /* ---------------------------------------------------------------- */
 

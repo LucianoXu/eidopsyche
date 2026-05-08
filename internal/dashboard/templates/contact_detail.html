@@ -1,0 +1,98 @@
+{{define "contact_detail"}}
+<div class="contact-detail"
+     hx-get="/settings/contacts/{{.Pubkey}}"
+     hx-trigger="sse:contact.relabeled,sse:contact.tier-changed from:body"
+     hx-swap="outerHTML">
+  <p class="back-link">
+    <a href="/settings/contacts"
+       hx-get="/settings/contacts"
+       hx-target="#settings-pane"
+       hx-swap="innerHTML"
+       hx-push-url="true">← Back to address book</a>
+  </p>
+
+  <h2>{{.Label}}</h2>
+  <p class="pane-aside">
+    The colophon for one peer. The pubkey is canonical; label and tier are local
+    bookkeeping and only ever leave this host inside the cards <em>you</em> publish.
+  </p>
+
+  <dl class="identity-card contact-card">
+    <dt>Label</dt>
+    <dd class="serif">{{.Label}}</dd>
+
+    <dt>Tier</dt>
+    <dd><span class="tier-badge is-{{.Tier}}">{{.Tier}}</span></dd>
+
+    <dt>Npub</dt>
+    <dd class="mono">{{.Npub}}</dd>
+
+    <dt>Hex</dt>
+    <dd class="mono">{{.Pubkey}}</dd>
+
+    <dt>Relays</dt>
+    <dd class="mono">
+      {{if .Relays}}
+        <ul class="relay-list">
+          {{range .Relays}}<li>{{.}}</li>{{end}}
+        </ul>
+      {{else}}
+        <span class="muted">— none on file</span>
+      {{end}}
+    </dd>
+  </dl>
+
+  <form class="settings-form contact-label-form"
+        hx-post="/settings/contacts/{{.Pubkey}}/label"
+        hx-target="#settings-pane"
+        hx-swap="innerHTML">
+    <h4>Rename this peer</h4>
+    <p class="hint">
+      Local-only; the peer keeps their own self-chosen label until they publish a fresh card.
+    </p>
+    {{if .LabelError}}<div class="form-flash is-error" role="alert">{{.LabelError}}</div>{{end}}
+    {{if .LabelSaved}}<div class="form-flash">Saved</div>{{end}}
+    <div class="field-row">
+      <input type="text" name="label" value="{{.FormLabel}}" required maxlength="64"
+             autocomplete="off" spellcheck="false">
+      <button type="submit">Apply</button>
+    </div>
+  </form>
+
+  <form class="settings-form contact-tier-form"
+        hx-post="/settings/contacts/{{.Pubkey}}/tier"
+        hx-target="#settings-pane"
+        hx-swap="innerHTML">
+    <h4>Change tier</h4>
+    <p class="hint">
+      Tiers gate inbound: <em>master</em> always lands; <em>friend</em> and
+      <em>acquaintance</em> follow normal rules; <em>blocked</em> is silently dropped.
+    </p>
+    {{if .TierError}}<div class="form-flash is-error" role="alert">{{.TierError}}</div>{{end}}
+    {{if .TierSaved}}<div class="form-flash">Saved</div>{{end}}
+    <div class="field-row">
+      <select name="tier" class="tier-select">
+        <option value="master"       {{if eq (printf "%s" .Tier) "master"}}selected{{end}}>master</option>
+        <option value="friend"       {{if eq (printf "%s" .Tier) "friend"}}selected{{end}}>friend</option>
+        <option value="acquaintance" {{if eq (printf "%s" .Tier) "acquaintance"}}selected{{end}}>acquaintance</option>
+        <option value="blocked"      {{if eq (printf "%s" .Tier) "blocked"}}selected{{end}}>blocked</option>
+      </select>
+      <button type="submit">Apply</button>
+    </div>
+  </form>
+
+  <section class="contact-danger-zone">
+    <h4>Remove from address book</h4>
+    <p class="hint">
+      Drops the local row. The pubkey itself is unaffected; you can re-admit the peer
+      later from a fresh card.
+    </p>
+    <button type="button"
+            class="danger-button"
+            aria-label="Remove contact {{.Label}}"
+            hx-get="/settings/contacts/{{.Pubkey}}/confirm-remove"
+            hx-target="#modal"
+            hx-swap="innerHTML">Remove contact</button>
+  </section>
+</div>
+{{end}}

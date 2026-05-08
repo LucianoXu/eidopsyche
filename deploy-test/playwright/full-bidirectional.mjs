@@ -28,11 +28,13 @@
 import { launch, gotoStable } from './_lib/chromium.mjs';
 import {
   gotoSettings,
+  clickSettingsTab,
   getIdentity,
   openContactThread,
   sendInThread,
   waitForInbound,
   listSidebarContacts,
+  listContactsRows,
 } from './_lib/dashboard.mjs';
 
 function parseArgs(argv) {
@@ -136,8 +138,50 @@ async function main() {
     }
     logOk(step, 'mutual contact confirmed on both sidebars');
 
-    // ── 4. Bidirectional chat round-trip. ──────────────────────────
+    // ── 4. Phase 2: Selene's Contacts tab lists mbp as a friend. ───
     step = 4;
+    logStep(step, 'selene: open Contacts tab, verify mbp appears as friend');
+    await gotoSettings(sp, selene, 'identity');
+    await clickSettingsTab(sp, 'Contacts');
+    const seleneContactRows = await listContactsRows(sp);
+    const seleneRow = seleneContactRows.find(
+      (r) => (r.pubkey || '').toLowerCase() === mbpId.hex.toLowerCase(),
+    );
+    if (!seleneRow) {
+      throw new Error(
+        `selene Contacts pane should list mbp (${mbpId.hex.slice(0, 16)}…); rows=${JSON.stringify(seleneContactRows)}`,
+      );
+    }
+    if (seleneRow.tier !== 'friend') {
+      throw new Error(
+        `selene's row for mbp expected tier=friend, got ${JSON.stringify(seleneRow.tier)}`,
+      );
+    }
+    logOk(step, `selene Contacts: mbp row label=${seleneRow.label} tier=${seleneRow.tier}`);
+
+    // ── 5. Phase 2: mbp's Contacts tab lists selene as a friend. ───
+    step = 5;
+    logStep(step, 'mbp: open Contacts tab, verify selene appears as friend');
+    await gotoSettings(mp, mbp, 'identity');
+    await clickSettingsTab(mp, 'Contacts');
+    const mbpContactRows = await listContactsRows(mp);
+    const mbpRow = mbpContactRows.find(
+      (r) => (r.pubkey || '').toLowerCase() === seleneId.hex.toLowerCase(),
+    );
+    if (!mbpRow) {
+      throw new Error(
+        `mbp Contacts pane should list selene (${seleneId.hex.slice(0, 16)}…); rows=${JSON.stringify(mbpContactRows)}`,
+      );
+    }
+    if (mbpRow.tier !== 'friend') {
+      throw new Error(
+        `mbp's row for selene expected tier=friend, got ${JSON.stringify(mbpRow.tier)}`,
+      );
+    }
+    logOk(step, `mbp Contacts: selene row label=${mbpRow.label} tier=${mbpRow.tier}`);
+
+    // ── 6. Bidirectional chat round-trip. ──────────────────────────
+    step = 6;
     logStep(step, 'open contact threads and exchange messages both ways');
     await openContactThread(sp, mbpId.hex);
     await openContactThread(mp, seleneId.hex);
@@ -158,8 +202,8 @@ async function main() {
 
     logOk(step, 'bidirectional chat round-trip complete');
 
-    // ── 5. Tear down. ──────────────────────────────────────────────
-    step = 5;
+    // ── 7. Tear down. ──────────────────────────────────────────────
+    step = 7;
     logStep(step, 'close browsers and exit 0');
     await seleneH.browser.close();
     await mbpH.browser.close();

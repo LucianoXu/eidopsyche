@@ -154,6 +154,54 @@ func (r *Repo) Remove(ctx context.Context, pubkey string) error {
 
 // SetLabel updates the label of an existing contact identified by pubkey.
 // Returns ErrNotFound if no row matches.
+// AddRelay appends one relay URL to the contact's relay-hint list.
+// Idempotent on the (pubkey, relay_url) primary key — duplicate calls
+// are silently ignored. Priority is set to one past the current max
+// so this row sorts last (existing higher-priority hints stay first).
+// Returns ErrNotFound if the contact does not exist.
+func (r *Repo) AddRelay(ctx context.Context, pubkey, relayURL string) error {
+	if _, err := r.Get(ctx, pubkey); err != nil {
+		return err
+	}
+	var maxPri int
+	row := r.db.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(priority), -1) FROM contact_relays WHERE pubkey=?`, pubkey)
+	if err := row.Scan(&maxPri); err != nil {
+		return err
+	}
+	_, err := r.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO contact_relays(pubkey,relay_url,priority) VALUES(?,?,?)`,
+		pubkey, relayURL, maxPri+1)
+	return err
+}
+
+// SetTier updates the tier of an existing contact.
+//
+// The tier value is validated against the four named constants
+// (TierMaster / TierFriend / TierAcquaintance / TierBlocked); any
+// other value is rejected to keep the column predictable. Returns
+// ErrNotFound if the contact does not exist.
+func (r *Repo) SetTier(ctx context.Context, pubkey string, tier Tier) error {
+	switch tier {
+	case TierMaster, TierFriend, TierAcquaintance, TierBlocked:
+		// valid
+	default:
+		return fmt.Errorf("invalid tier %q (must be master|friend|acquaintance|blocked)", tier)
+	}
+	now := time.Now().Unix()
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE contacts SET tier=?, updated_at=? WHERE pubkey=?`,
+		string(tier), now, pubkey)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *Repo) SetLabel(ctx context.Context, pubkey, label string) error {
 	now := time.Now().Unix()
 	res, err := r.db.ExecContext(ctx,

@@ -16,9 +16,11 @@ number plus a one-line reason; success exits 0. CI greps for
 | Script | Purpose |
 |---|---|
 | `_lib/chromium.mjs` | Chromium launcher; pinned binary path; `--no-sandbox` |
-| `_lib/dashboard.mjs` | Page-object helpers (`gotoSettings`, `setLabel`, `setConfigValue`, `sendInThread`, `waitForInbound`, …) |
+| `_lib/dashboard.mjs` | Page-object helpers (`gotoSettings`, `setLabel`, `setConfigValue`, `sendInThread`, `waitForInbound`, `listContactsRows`, `addContactByCard`, `scanCardPreview`, `openContactDetail`, `setContactLabelInDetail`, `setContactTierInDetail`, `removeContactWithConfirm`, …) |
+| `_lib/daemon.mjs` | Spawns a transient `eidos gate daemon` in a temp state-dir on ephemeral loopback ports; used to mint a real card URI for Phase 2 admit-correspondent flows |
 | `phase1-identity-config.mjs` | Phase 1 smoke: Settings shell + Identity tab + Config tab round-trips |
-| `full-bidirectional.mjs` | Selene + mbp sanity check: identity cards on both, mutual contact, chat round-trip |
+| `phase2-contacts.mjs` | Phase 2 smoke: empty-state → scan-preview → admit → detail pane → rename → tier cycle → typed-confirm remove → empty-state |
+| `full-bidirectional.mjs` | Selene + mbp regression: identity cards on both, mutual contact in sidebar AND Contacts tab, chat round-trip |
 
 ## One-time setup
 
@@ -57,15 +59,23 @@ The scripts honour these env vars (CLI flags override them):
 
 | Env | Default | Used by |
 |---|---|---|
-| `BASE_URL` | `http://127.0.0.1:22893` | `phase1-identity-config.mjs` (when no `--base`) |
+| `BASE_URL` | `http://127.0.0.1:22893` | `phase1-identity-config.mjs`, `phase2-contacts.mjs` (when no `--base`) |
 | `SELENE_URL` | `http://127.0.0.1:22893` | `full-bidirectional.mjs` (when no `--selene`) |
 | `MBP_URL` | `http://127.0.0.1:22894` | `full-bidirectional.mjs` (when no `--mbp`) |
+| `EIDOS_BIN` | `eidos` (PATH-resolved) | `phase2-contacts.mjs` (which spawns a transient daemon to mint a card) |
 | `SSH_KEY` | — | SSH-tunnel recipe below (not read by the scripts) |
 | `MBP_HOST` | — | SSH-tunnel recipe below |
 | `MBP_USER` | — | SSH-tunnel recipe below |
 
 `phase1-identity-config.mjs` currently parses `--base` only; export
 `BASE_URL` for ergonomic shell usage and pass `--base "$BASE_URL"`.
+
+`phase2-contacts.mjs` honours `BASE_URL` directly when `--base` is
+omitted. It additionally needs the `eidos` binary on PATH (or pointed at
+via `EIDOS_BIN`) to spawn a second, transient daemon in a temp state-dir
+— that daemon's sole purpose is producing a real `mindgate://…` card URI
+to scan and admit through the dashboard. The transient daemon is bound
+to ephemeral loopback ports and torn down on script exit.
 
 ## SSH tunnel: reaching mbp's loopback dashboard from selene
 
@@ -96,6 +106,14 @@ Phase 1 smoke (selene-local, no tunnel needed):
 node deploy-test/playwright/phase1-identity-config.mjs --base http://127.0.0.1:22893
 # debug with a visible browser:
 node deploy-test/playwright/phase1-identity-config.mjs --base http://127.0.0.1:22893 --headed
+```
+
+Phase 2 smoke (selene-local; spawns a transient peer-daemon for a real card URI):
+
+```bash
+# `eidos` must be on PATH or EIDOS_BIN must point at the binary
+node deploy-test/playwright/phase2-contacts.mjs --base http://127.0.0.1:22893
+EIDOS_BIN=$(go env GOPATH)/bin/eidos node deploy-test/playwright/phase2-contacts.mjs --base http://127.0.0.1:22893 --headed
 ```
 
 Cross-machine bidirectional (selene + mbp via tunnel):

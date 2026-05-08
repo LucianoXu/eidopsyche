@@ -12,6 +12,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/dashboard"
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
+	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
 	"github.com/LucianoXu/eidopsyche/internal/nostr"
 )
@@ -216,4 +217,149 @@ func (a dashboardAdapter) ConfigSet(ctx context.Context, path, value string) err
 	}
 	a.d.emitDashEvent(dashboard.Event{Kind: "config.changed"})
 	return nil
+}
+
+// ── phase 2: contacts ──────────────────────────────────────────────
+
+func (a dashboardAdapter) GetContact(ctx context.Context, pubkey string) (*contacts.Contact, error) {
+	return a.d.Repo.Get(ctx, pubkey)
+}
+
+// AddContact admits a contact described by a mindgate:// card. If the
+// contact's pubkey is already known, the call upserts: label is
+// updated to whatever the operator typed (or the card's embedded
+// label, in that order), and the card's relay hint is appended to
+// contact_relays if not already present. The tier is preserved on
+// upsert so a refresh doesn't accidentally widen trust.
+func (a dashboardAdapter) AddContact(ctx context.Context, cardURI, labelOverride string) (*contacts.Contact, error) {
+	c, err := card.Parse(strings.TrimSpace(cardURI))
+	if err != nil {
+		return nil, fmt.Errorf("parse card: %w", err)
+	}
+	pubHex, err := identity.DecodeNpub(c.Npub)
+	if err != nil {
+		return nil, fmt.Errorf("decode npub: %w", err)
+	}
+	label := strings.TrimSpace(labelOverride)
+	if label == "" {
+		label = strings.TrimSpace(c.Label)
+	}
+	if label == "" {
+		return nil, fmt.Errorf("card has no label and none was provided")
+	}
+
+	// Refresh path: contact already exists — update label, ensure the
+	// card's relay hint is present, leave tier alone.
+	if existing, err := a.d.Repo.Get(ctx, pubHex); err == nil && existing != nil {
+		if err := a.d.Repo.SetLabel(ctx, pubHex, label); err != nil {
+			return nil, fmt.Errorf("refresh label: %w", err)
+		}
+		relayAdded := false
+		if c.Relay != "" && !contains(existing.Relays, c.Relay) {
+			if err := a.d.Repo.AddRelay(ctx, pubHex, c.Relay); err != nil {
+				return nil, fmt.Errorf("refresh relay: %w", err)
+			}
+			relayAdded = true
+		}
+		a.d.emitDashEvent(dashboard.Event{Kind: "contact.relabeled"})
+		// Kick the subscriber so the new relay enters the subscription
+		// set immediately — otherwise the daemon stays bound to the
+		// old set until restart and may miss inbound from the
+		// just-refreshed peer.
+		if relayAdded {
+			a.d.Refresh()
+		}
+		saved, _ := a.d.Repo.Get(ctx, pubHex)
+		return saved, nil
+	}
+
+	// New contact path. Only persist a relay hint if the card carried
+	// one; an empty string would later end up in subscriptionURLs and
+	// poison relay health with dial failures.
+	contact := contacts.Contact{
+		Pubkey: pubHex,
+		Label:  label,
+		Tier:   contacts.TierFriend,
+	}
+	if c.Relay != "" {
+		contact.Relays = []string{c.Relay}
+	}
+	if err := a.d.Repo.Add(ctx, contact); err != nil {
+		return nil, err
+	}
+	a.d.emitDashEvent(dashboard.Event{Kind: "contact.added"})
+	// Same reason as the refresh branch: a fresh contact's relay
+	// joins our subscription set; kick so we pick it up now.
+	if c.Relay != "" {
+		a.d.Refresh()
+	}
+	saved, _ := a.d.Repo.Get(ctx, pubHex)
+	return saved, nil
+}
+
+// contains reports whether s contains x. Used for the relay-hint
+// dedup in AddContact's refresh path.
+func contains(s []string, x string) bool {
+	for _, v := range s {
+		if v == x {
+			return true
+		}
+	}
+	return false
+}
+
+func (a dashboardAdapter) RemoveContact(ctx context.Context, pubkey string) error {
+	if err := a.d.Repo.Remove(ctx, pubkey); err != nil {
+		return err
+	}
+	a.d.emitDashEvent(dashboard.Event{Kind: "contact.removed"})
+	// Symmetrical with AddContact: the removed contact's relay hints
+	// drop out of the union, so kick the subscriber to recompute and
+	// release any connection that's no longer in the set. Otherwise
+	// the daemon stays bound to the old set (and the relay-health
+	// panel keeps reporting the now-orphaned URL) until restart.
+	a.d.Refresh()
+	return nil
+}
+
+func (a dashboardAdapter) SetContactLabel(ctx context.Context, pubkey, label string) error {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return fmt.Errorf("label must not be empty")
+	}
+	if err := a.d.Repo.SetLabel(ctx, pubkey, label); err != nil {
+		return err
+	}
+	a.d.emitDashEvent(dashboard.Event{Kind: "contact.relabeled"})
+	return nil
+}
+
+func (a dashboardAdapter) SetContactTier(ctx context.Context, pubkey string, tier contacts.Tier) error {
+	if err := a.d.Repo.SetTier(ctx, pubkey, tier); err != nil {
+		return err
+	}
+	a.d.emitDashEvent(dashboard.Event{Kind: "contact.tier-changed"})
+	return nil
+}
+
+func (a dashboardAdapter) ScanCard(ctx context.Context, cardURI string) (dashboard.ScanPreview, error) {
+	c, err := card.Parse(strings.TrimSpace(cardURI))
+	if err != nil {
+		return dashboard.ScanPreview{}, fmt.Errorf("parse card: %w", err)
+	}
+	pubHex, err := identity.DecodeNpub(c.Npub)
+	if err != nil {
+		return dashboard.ScanPreview{}, fmt.Errorf("decode npub: %w", err)
+	}
+	already := false
+	if existing, err := a.d.Repo.Get(ctx, pubHex); err == nil && existing != nil {
+		already = true
+	}
+	return dashboard.ScanPreview{
+		Pubkey:         pubHex,
+		Npub:           c.Npub,
+		Label:          c.Label,
+		Relay:          c.Relay,
+		AlreadyContact: already,
+	}, nil
 }

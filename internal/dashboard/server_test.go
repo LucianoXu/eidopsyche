@@ -87,6 +87,23 @@ type fakeDeps struct {
 	configSnapErr  error
 	configSetErr   error
 	configSetCalls *[]configSetCall
+
+	// ── phase 2 ─────────────────────────────────────────────────
+	getContactFn        func(ctx context.Context, pubkey string) (*contacts.Contact, error)
+	addContactFn        func(ctx context.Context, cardURI, label string) (*contacts.Contact, error)
+	removeContactErr    error
+	removeContactCalls  *[]string
+	setContactLabelErr  error
+	setContactLabelFn   func(ctx context.Context, pubkey, label string) error
+	setContactTierErr   error
+	setContactTierCalls *[]contactTierCall
+	scanCardFn          func(ctx context.Context, cardURI string) (ScanPreview, error)
+}
+
+// contactTierCall captures one SetContactTier invocation for assertions.
+type contactTierCall struct {
+	Pubkey string
+	Tier   contacts.Tier
 }
 
 // configSetCall captures one ConfigSet invocation for assertions.
@@ -129,4 +146,51 @@ func (f fakeDeps) ConfigSet(_ context.Context, path, value string) error {
 		*f.configSetCalls = append(*f.configSetCalls, configSetCall{Path: path, Value: value})
 	}
 	return f.configSetErr
+}
+
+func (f fakeDeps) GetContact(ctx context.Context, pubkey string) (*contacts.Contact, error) {
+	if f.getContactFn != nil {
+		return f.getContactFn(ctx, pubkey)
+	}
+	for _, c := range f.contactsL {
+		if c.Pubkey == pubkey {
+			return c, nil
+		}
+	}
+	return nil, contacts.ErrNotFound
+}
+
+func (f fakeDeps) AddContact(ctx context.Context, cardURI, label string) (*contacts.Contact, error) {
+	if f.addContactFn != nil {
+		return f.addContactFn(ctx, cardURI, label)
+	}
+	return &contacts.Contact{Pubkey: "stub", Label: label, Tier: contacts.TierFriend}, nil
+}
+
+func (f fakeDeps) RemoveContact(_ context.Context, pubkey string) error {
+	if f.removeContactCalls != nil {
+		*f.removeContactCalls = append(*f.removeContactCalls, pubkey)
+	}
+	return f.removeContactErr
+}
+
+func (f fakeDeps) SetContactLabel(ctx context.Context, pubkey, label string) error {
+	if f.setContactLabelFn != nil {
+		return f.setContactLabelFn(ctx, pubkey, label)
+	}
+	return f.setContactLabelErr
+}
+
+func (f fakeDeps) SetContactTier(_ context.Context, pubkey string, tier contacts.Tier) error {
+	if f.setContactTierCalls != nil {
+		*f.setContactTierCalls = append(*f.setContactTierCalls, contactTierCall{Pubkey: pubkey, Tier: tier})
+	}
+	return f.setContactTierErr
+}
+
+func (f fakeDeps) ScanCard(ctx context.Context, cardURI string) (ScanPreview, error) {
+	if f.scanCardFn != nil {
+		return f.scanCardFn(ctx, cardURI)
+	}
+	return ScanPreview{}, nil
 }

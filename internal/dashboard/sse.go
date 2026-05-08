@@ -91,7 +91,7 @@ func renderEvent(r *renderer, ev Event, logger *slog.Logger) (string, string) {
 			return "", ""
 		}
 		return "outbox.message:" + ev.Sent.To, out
-	case "contact.added", "contact.removed", "contact.relabeled":
+	case "contact.added", "contact.removed", "contact.relabeled", "contact.tier-changed":
 		return ev.Kind, "(refresh)"
 	case "identity.label-changed", "config.changed":
 		// Phase 1 signal-only events: the consumer (topbar, Identity
