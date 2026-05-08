@@ -34,10 +34,10 @@ type Pool struct {
 	dialer      func(ctx context.Context, url string) (*gnostr.Relay, error)
 	alive       func(*gnostr.Relay) bool
 	timeout     time.Duration
-	signer      Signer                                // optional; when set, Subscribe handles NIP-42 AUTH transparently
-	stateHookMu sync.RWMutex                          // protects stateHook against concurrent SetStateHook calls
-	stateHook   func(url, state, lastErr string)      // optional; emits per-URL state transitions from Subscribe pumps
-	eventHook   func(url string)                      // optional; emits per-event hit from Subscribe pumps for LastEventAt tracking
+	signer      Signer                           // optional; when set, Subscribe handles NIP-42 AUTH transparently
+	stateHookMu sync.RWMutex                     // protects stateHook against concurrent SetStateHook calls
+	stateHook   func(url, state, lastErr string) // optional; emits per-URL state transitions from Subscribe pumps
+	eventHook   func(url string)                 // optional; emits per-event hit from Subscribe pumps for LastEventAt tracking
 }
 
 // NewPool returns an empty Pool with sane defaults and no signer (AUTH

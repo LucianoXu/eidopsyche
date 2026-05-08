@@ -10,8 +10,8 @@ import (
 // dashboard SSE event hub.
 type RelayHealth struct {
 	URL         string `json:"url"`
-	Role        string `json:"role"`             // "home" | "fallback" | "contact" | "extra"
-	State       string `json:"state"`            // "pending" | "connecting" | "connected" | "error" | "auth-failed"
+	Role        string `json:"role"`  // "home" | "fallback" | "contact" | "extra"
+	State       string `json:"state"` // "pending" | "connecting" | "connected" | "error" | "auth-failed"
 	LastError   string `json:"last_error,omitempty"`
 	LastEventAt int64  `json:"last_event_at,omitempty"` // unix seconds; 0 when never
 	UpdatedAt   int64  `json:"updated_at"`

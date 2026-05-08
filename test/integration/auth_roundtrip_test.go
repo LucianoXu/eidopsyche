@@ -112,10 +112,10 @@ func bringUpAuthRequired(t *testing.T, name string, mode relayd.Mode) *instance 
 }
 
 // TestAuth_RoundTrip_TwoUsersOnSharedRelay verifies that:
-//   1. A's relay is in public mode + AUTH-required.
-//   2. A and B both connect; their daemons authenticate transparently.
-//   3. A and B can mutually message via the same relay.
-//   4. relays.health on each side reports 'connected' (not 'auth-failed').
+//  1. A's relay is in public mode + AUTH-required.
+//  2. A and B both connect; their daemons authenticate transparently.
+//  3. A and B can mutually message via the same relay.
+//  4. relays.health on each side reports 'connected' (not 'auth-failed').
 func TestAuth_RoundTrip_TwoUsersOnSharedRelay(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
