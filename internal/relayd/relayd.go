@@ -143,4 +143,10 @@ func (s *Server) ListenAndServe() error {
 	return s.http.ListenAndServe()
 }
 func (s *Server) Shutdown(ctx context.Context) error { return s.http.Shutdown(ctx) }
-func (s *Server) Addr() string                       { return s.http.Addr }
+
+// Close forces an immediate stop: the listener closes and all active
+// connections (including upgraded WebSockets) are terminated. Use when
+// graceful drain isn't appropriate — chiefly tests that simulate a relay
+// disappearing under a daemon's feet.
+func (s *Server) Close() error { return s.http.Close() }
+func (s *Server) Addr() string { return s.http.Addr }
