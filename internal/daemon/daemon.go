@@ -46,6 +46,7 @@ type Daemon struct {
 	dashSubs    []*dashSub
 	dedupe      map[string]struct{}
 	selfWrapIDs map[string]struct{}
+	relayHealth *relayHealthStore
 
 	// testSendChatReply, if non-nil, replaces sendChatReply during tests
 	// to avoid actual NIP-17 publish over the network.
@@ -86,7 +87,15 @@ func Start(stateDir string) (*Daemon, error) {
 		kick:        make(chan struct{}, 1),
 		dedupe:      make(map[string]struct{}, 1024),
 		selfWrapIDs: make(map[string]struct{}, 1024),
+		relayHealth: newRelayHealthStore(),
 	}
+	// Wire Pool's per-URL state hook so transitions surface in d.relayHealth.
+	d.Pool.SetStateHook(func(url, state, lastErr string) {
+		_ = d.relayHealth.setState(url, state, lastErr)
+	})
+	d.Pool.SetEventHook(func(url string) {
+		d.relayHealth.markEvent(url)
+	})
 	return d, nil
 }
 
@@ -240,20 +249,22 @@ func nextBackoff(b, max time.Duration) time.Duration {
 }
 
 // subscriptionURLs returns the union of own relays, contact relays, and extra
-// relays from config.
+// relays from config. Side effect: refreshes per-URL Role in d.relayHealth
+// and prunes URLs no longer in the set so the snapshot stays in sync with
+// the live subscription target list.
 func (d *Daemon) subscriptionURLs(ctx context.Context) ([]string, error) {
-	uniq := map[string]struct{}{}
-	rows, err := d.DB.QueryContext(ctx, `SELECT relay_url FROM own_relays`)
+	roles := map[string]string{} // first-wins; "home" / "fallback" beats "contact" beats "extra"
+	rows, err := d.DB.QueryContext(ctx, `SELECT relay_url, role FROM own_relays`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
-		var u string
-		if err := rows.Scan(&u); err != nil {
+		var u, r string
+		if err := rows.Scan(&u, &r); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		uniq[u] = struct{}{}
+		roles[u] = r
 	}
 	rows.Close()
 	contactRelays, err := d.Repo.AllRelaysUnion(ctx)
@@ -261,14 +272,26 @@ func (d *Daemon) subscriptionURLs(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	for _, u := range contactRelays {
-		uniq[u] = struct{}{}
+		if _, taken := roles[u]; !taken {
+			roles[u] = "contact"
+		}
 	}
 	for _, u := range d.Cfg.Subscribe.ExtraRelays {
-		uniq[u] = struct{}{}
+		if _, taken := roles[u]; !taken {
+			roles[u] = "extra"
+		}
 	}
-	out := make([]string, 0, len(uniq))
-	for u := range uniq {
+	out := make([]string, 0, len(roles))
+	keep := make(map[string]struct{}, len(roles))
+	for u, role := range roles {
 		out = append(out, u)
+		keep[u] = struct{}{}
+		if d.relayHealth != nil {
+			d.relayHealth.setRole(u, role)
+		}
+	}
+	if d.relayHealth != nil {
+		d.relayHealth.reset(keep)
 	}
 	return out, nil
 }

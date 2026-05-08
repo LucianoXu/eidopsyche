@@ -29,12 +29,15 @@ type Signer interface {
 // Pool wraps a set of relay connections and provides concurrent publish /
 // subscribe helpers.
 type Pool struct {
-	mu      sync.Mutex
-	relays  map[string]*gnostr.Relay
-	dialer  func(ctx context.Context, url string) (*gnostr.Relay, error)
-	alive   func(*gnostr.Relay) bool
-	timeout time.Duration
-	signer  Signer // optional; when set, Subscribe handles NIP-42 AUTH transparently
+	mu          sync.Mutex
+	relays      map[string]*gnostr.Relay
+	dialer      func(ctx context.Context, url string) (*gnostr.Relay, error)
+	alive       func(*gnostr.Relay) bool
+	timeout     time.Duration
+	signer      Signer                                // optional; when set, Subscribe handles NIP-42 AUTH transparently
+	stateHookMu sync.RWMutex                          // protects stateHook against concurrent SetStateHook calls
+	stateHook   func(url, state, lastErr string)      // optional; emits per-URL state transitions from Subscribe pumps
+	eventHook   func(url string)                      // optional; emits per-event hit from Subscribe pumps for LastEventAt tracking
 }
 
 // NewPool returns an empty Pool with sane defaults and no signer (AUTH
@@ -57,6 +60,44 @@ func NewPoolWithSigner(signer Signer) *Pool {
 	p := NewPool()
 	p.signer = signer
 	return p
+}
+
+// SetStateHook registers a callback invoked from inside Subscribe's per-URL
+// pumps on state transitions. State is one of: "connecting", "connected",
+// "error", "auth-failed". Empty lastErr unless state ∈ {"error", "auth-failed"}.
+// The hook may be called from multiple goroutines; the callback must be safe
+// for concurrent use. Pass nil to remove.
+func (p *Pool) SetStateHook(h func(url, state, lastErr string)) {
+	p.stateHookMu.Lock()
+	p.stateHook = h
+	p.stateHookMu.Unlock()
+}
+
+// SetEventHook registers a callback invoked once per event delivered through
+// Subscribe, parameterised by the source URL. Used by callers that want to
+// track LastEventAt per relay. Same concurrency contract as SetStateHook.
+func (p *Pool) SetEventHook(h func(url string)) {
+	p.stateHookMu.Lock()
+	p.eventHook = h
+	p.stateHookMu.Unlock()
+}
+
+func (p *Pool) notifyState(url, state, lastErr string) {
+	p.stateHookMu.RLock()
+	h := p.stateHook
+	p.stateHookMu.RUnlock()
+	if h != nil {
+		h(url, state, lastErr)
+	}
+}
+
+func (p *Pool) notifyEvent(url string) {
+	p.stateHookMu.RLock()
+	h := p.eventHook
+	p.stateHookMu.RUnlock()
+	if h != nil {
+		h(url)
+	}
 }
 
 func defaultDial(ctx context.Context, url string) (*gnostr.Relay, error) {
@@ -155,14 +196,18 @@ func (p *Pool) Subscribe(ctx context.Context, urls []string, filter gnostr.Filte
 	var wg sync.WaitGroup
 	var anyOK bool
 	for _, u := range urls {
+		p.notifyState(u, "connecting", "")
 		r, err := p.Connect(ctx, u)
 		if err != nil {
+			p.notifyState(u, "error", err.Error())
 			continue
 		}
 		sub, err := r.Subscribe(ctx, gnostr.Filters{filter})
 		if err != nil {
+			p.notifyState(u, "error", err.Error())
 			continue
 		}
+		p.notifyState(u, "connected", "")
 		anyOK = true
 		wg.Add(1)
 		go p.pumpSubscription(ctx, &wg, u, r, sub, filter, out)
@@ -198,6 +243,7 @@ func (p *Pool) pumpSubscription(
 			if !ok {
 				return
 			}
+			p.notifyEvent(url)
 			select {
 			case out <- ev:
 			case <-ctx.Done():
@@ -212,15 +258,23 @@ func (p *Pool) pumpSubscription(
 				err := r.Auth(authCtx, p.signFuncFor(r))
 				cancel()
 				if err != nil {
+					p.notifyState(url, "auth-failed", err.Error())
 					return
 				}
 				authed = true
 				newSub, err := r.Subscribe(ctx, gnostr.Filters{filter})
 				if err != nil {
+					p.notifyState(url, "error", err.Error())
 					return
 				}
+				p.notifyState(url, "connected", "")
 				sub = newSub
 				continue
+			}
+			if strings.HasPrefix(reason, "auth-") {
+				p.notifyState(url, "auth-failed", reason)
+			} else {
+				p.notifyState(url, "error", reason)
 			}
 			return
 		}
