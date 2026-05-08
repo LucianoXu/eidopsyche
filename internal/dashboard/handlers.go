@@ -787,7 +787,7 @@ func buildSettingsShell(ctx context.Context, deps DashboardDeps, active string) 
 		v := buildSettingsRelays(ctx, deps, "")
 		out.Relays = &v
 	case "service":
-		v := buildSettingsService(ctx, deps)
+		v := buildSettingsService(ctx, deps, nil) // shell-render path: no logger handy
 		out.Service = &v
 	}
 	return out

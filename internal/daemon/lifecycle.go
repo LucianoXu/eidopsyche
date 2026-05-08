@@ -32,6 +32,10 @@ type lifecycleJob struct {
 	args    []string
 	cmd     *exec.Cmd
 	started time.Time
+	// done is closed by pumpLifecycle's deferred cleanup. shutdownLifecycle
+	// waits on this (with a small timeout) so the final lifecycle.done +
+	// service.status events flush before SSE subscribers tear down.
+	done chan struct{}
 }
 
 // LifecycleStatus is a snapshot of the daemon's lifecycle state shown
@@ -90,7 +94,13 @@ func (d *Daemon) LifecycleRun(args []string) (string, error) {
 		d.lifeMu.Unlock()
 		return "", ErrLifecycleBusy
 	}
-	if d.lifeCtx == nil {
+	// Re-init lifeCtx if it's missing OR already cancelled. The latter
+	// happens when a test calls shutdownLifecycle (via t.Cleanup) and
+	// a follow-up test re-uses the same Daemon struct.
+	if d.lifeCtx == nil || d.lifeCtx.Err() != nil {
+		if d.lifeCancel != nil {
+			d.lifeCancel()
+		}
 		d.lifeCtx, d.lifeCancel = context.WithCancel(context.Background())
 	}
 	spawner := d.lifeSpawner
@@ -102,28 +112,48 @@ func (d *Daemon) LifecycleRun(args []string) (string, error) {
 		d.lifeMu.Unlock()
 		return "", fmt.Errorf("job id: %w", err)
 	}
-	job := &lifecycleJob{id: jobID, args: append([]string(nil), args...), started: time.Now()}
+	job := &lifecycleJob{
+		id:      jobID,
+		args:    append([]string(nil), args...),
+		started: time.Now(),
+		done:    make(chan struct{}),
+	}
 	d.activeLife = job
 	d.lifeMu.Unlock()
 
 	cmd, err := spawner(d.lifeCtx, args)
 	if err != nil {
 		d.clearActiveLife(job)
+		d.logLifecycleErr("spawn", jobID, args, err)
 		return "", fmt.Errorf("spawn: %w", err)
 	}
 	job.cmd = cmd
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		d.clearActiveLife(job)
+		d.logLifecycleErr("stdout pipe", jobID, args, err)
 		return "", fmt.Errorf("stdout pipe: %w", err)
 	}
 	cmd.Stderr = cmd.Stdout
 	if err := cmd.Start(); err != nil {
 		d.clearActiveLife(job)
+		d.logLifecycleErr("start", jobID, args, err)
 		return "", fmt.Errorf("start: %w", err)
 	}
 	go d.pumpLifecycle(job, stdout)
 	return jobID, nil
+}
+
+// logLifecycleErr surfaces lifecycle setup failures on the daemon-side
+// log even when the dashboard handler is the only place that sees the
+// returned error. Without this, a 502 in the operator's browser leaves
+// no breadcrumb in the daemon log to debug the underlying spawn /
+// pipe / start failure.
+func (d *Daemon) logLifecycleErr(stage, jobID string, args []string, err error) {
+	if d.Log == nil {
+		return
+	}
+	d.Log.Error("lifecycle setup failed", "stage", stage, "job", jobID, "args", args, "err", err)
 }
 
 // LifecycleStatusSnapshot returns the current lifecycle status (active
@@ -149,8 +179,10 @@ func (d *Daemon) LifecycleStatusSnapshot() LifecycleStatus {
 // followed by a service.status signal so the rest of the page resyncs.
 //
 // The function runs in its own goroutine; cmd.Wait must run here, not
-// in the HTTP handler, so the request returns immediately.
+// in the HTTP handler, so the request returns immediately. The job.done
+// channel is closed last so shutdownLifecycle can wait on it.
 func (d *Daemon) pumpLifecycle(job *lifecycleJob, stdout io.ReadCloser) {
+	defer close(job.done)
 	defer d.clearActiveLife(job)
 	scanner := bufio.NewScanner(stdout)
 	// Allow long lines (some self-update output can include progress
@@ -189,21 +221,45 @@ func (d *Daemon) clearActiveLife(job *lifecycleJob) {
 	}
 }
 
-// shutdownLifecycle cancels the daemon-owned lifecycle context and
-// blocks briefly for in-flight jobs to wind down. Called from
-// daemon.Run's shutdown sequence; tests call it via t.Cleanup.
+// shutdownLifecycle cancels the daemon-owned lifecycle context, sends
+// a best-effort kill to any in-flight child, then waits up to 2s for
+// the pump goroutine to flush the final lifecycle.done + service.status
+// events. After the wait the lifeCtx slot is nilled so a subsequent
+// installLifecycle call (e.g. from a test that re-uses the same daemon)
+// gets a fresh context.
+//
+// Called from daemon.Run's shutdown sequence; tests call it via
+// t.Cleanup.
 func (d *Daemon) shutdownLifecycle() {
 	d.lifeMu.Lock()
 	cancel := d.lifeCancel
 	job := d.activeLife
+	d.lifeCtx, d.lifeCancel = nil, nil
 	d.lifeMu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 	if job != nil && job.cmd != nil && job.cmd.Process != nil {
-		// Best-effort kill; the spawner's session/cgroup isolation
-		// makes this a wakeup signal rather than a guaranteed reap.
-		_ = job.cmd.Process.Kill()
+		// Best-effort kill — log at debug if the kill itself fails so
+		// "daemon hung on shutdown" investigations have a trail. The
+		// spawner's session/cgroup isolation makes this a wakeup signal
+		// rather than a guaranteed reap; ESRCH/already-reaped is fine.
+		if err := job.cmd.Process.Kill(); err != nil && d.Log != nil {
+			d.Log.Debug("lifecycle child kill failed", "job", job.id, "err", err)
+		}
+	}
+	if job != nil {
+		// Wait for the pump goroutine to drain the final events. 2s is
+		// generous for a kill-induced exit; if the wait times out we
+		// log and continue rather than hang shutdown.
+		select {
+		case <-job.done:
+		case <-time.After(2 * time.Second):
+			if d.Log != nil {
+				d.Log.Warn("lifecycle pump did not drain in 2s; continuing shutdown",
+					"job", job.id)
+			}
+		}
 	}
 }
 
@@ -229,15 +285,20 @@ func lifecycleDoneHTML(jobID string, rc int) string {
 
 // lifecyclePrependStateDir inserts `--state-dir <dir>` at the start of
 // the eidos argv when the daemon was started with a non-default state
-// dir. The flag is a global on the eidos root command, so it has to
-// come BEFORE the subcommand name. Empty stateDir → no-op.
+// dir. The flag lives on `eidos gate`'s persistent flags (NOT on the
+// eidos root), so it MUST go between "gate" and the gate-subcommand
+// name — and it must NOT be added to non-gate subcommands like
+// `self-update`, which would fail with "unknown flag".
+//
+// Empty stateDir → no-op. args[0] != "gate" → no-op (self-update,
+// future top-level commands).
 func lifecyclePrependStateDir(args []string, stateDir string) []string {
-	if stateDir == "" {
+	if stateDir == "" || len(args) == 0 || args[0] != "gate" {
 		return args
 	}
 	out := make([]string, 0, len(args)+2)
-	out = append(out, "--state-dir", stateDir)
-	out = append(out, args...)
+	out = append(out, args[0], "--state-dir", stateDir)
+	out = append(out, args[1:]...)
 	return out
 }
 

@@ -42,7 +42,7 @@ func settingsServiceHandler(deps DashboardDeps, r *renderer, logger *slog.Logger
 			renderSettingsFullPage(w, deps, r, logger, ctx, "service")
 			return
 		}
-		renderServicePane(w, r, logger, buildSettingsService(ctx, deps))
+		renderServicePane(w, r, logger, buildSettingsService(ctx, deps, logger))
 	}
 }
 
@@ -71,7 +71,7 @@ func settingsServiceActionHandler(deps DashboardDeps, r *renderer, logger *slog.
 			handleServiceLifecycle(w, req, r, logger, deps, lifecycleAction{
 				name:   "stop",
 				args:   []string{"gate", "stop"},
-				phrase: func(s ServiceStatus) string { return ownLabelOf(deps) },
+				phrase: func(s ServiceStatus) string { return ownLabelOf(deps, logger) },
 			})
 		case "purge":
 			if req.Method != http.MethodPost {
@@ -81,7 +81,7 @@ func settingsServiceActionHandler(deps DashboardDeps, r *renderer, logger *slog.
 			handleServiceLifecycle(w, req, r, logger, deps, lifecycleAction{
 				name:              "purge",
 				args:              []string{"gate", "purge", "--yes"},
-				phrase:            func(s ServiceStatus) string { return ownLabelOf(deps) },
+				phrase:            func(s ServiceStatus) string { return ownLabelOf(deps, logger) },
 				extraConfirmField: "ack-backup",
 				extraConfirmText:  "I have backed up state.db",
 			})
@@ -106,6 +106,10 @@ func settingsServiceActionHandler(deps DashboardDeps, r *renderer, logger *slog.
 			}
 			renderServiceConfirmModal(w, r, logger, deps, parts[1])
 		default:
+			// Log unknown action names so a template/handler drift
+			// (a button POSTing to /settings/service/typo) shows up
+			// at warn level instead of as a silent 404.
+			logger.Warn("unknown service action", "name", parts[0])
 			http.NotFound(w, req)
 		}
 	}
@@ -125,6 +129,7 @@ type lifecycleAction struct {
 
 func handleServiceReconnect(w http.ResponseWriter, req *http.Request, r *renderer, logger *slog.Logger, deps DashboardDeps) {
 	if err := req.ParseForm(); err != nil {
+		logger.Warn("dashboard service: parse form failed", "path", req.URL.Path, "err", err)
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
@@ -143,6 +148,7 @@ func handleServiceReconnect(w http.ResponseWriter, req *http.Request, r *rendere
 
 func handleServiceLifecycle(w http.ResponseWriter, req *http.Request, r *renderer, logger *slog.Logger, deps DashboardDeps, act lifecycleAction) {
 	if err := req.ParseForm(); err != nil {
+		logger.Warn("dashboard service: parse form failed", "path", req.URL.Path, "err", err)
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
 	}
@@ -219,13 +225,13 @@ func renderServiceConfirmModal(w http.ResponseWriter, r *renderer, logger *slog.
 		title = "Stop the gate daemon"
 		body = "Sends SIGTERM to this daemon. Inbox messages and contacts are preserved on disk; pending sends are dropped."
 		warning = "The dashboard will lose its SSE connection when the daemon exits. Restart from a terminal: `eidos gate start`."
-		label = ownLabelOf(deps)
+		label = ownLabelOf(deps, logger)
 		confirmLabel = "Stop daemon"
 	case "purge":
 		title = "Purge state directory"
 		body = "Stops the daemon AND removes the entire state directory: identity key, contacts, inbox, invites, and config. This is irreversible — you'll generate a new pubkey on the next `eidos gate init`."
 		warning = "Type your label and tick the backup acknowledgement to confirm. Your peers will need to re-add you from a fresh card after init."
-		label = ownLabelOf(deps)
+		label = ownLabelOf(deps, logger)
 		confirmLabel = "Purge state"
 	case "self-update":
 		title = "Self-update binary"
@@ -261,8 +267,10 @@ func renderServiceConfirmModal(w http.ResponseWriter, r *renderer, logger *slog.
 }
 
 // buildSettingsService merges Status() with any in-flight job into a
-// single payload for the template. Read-only.
-func buildSettingsService(_ context.Context, deps DashboardDeps) settingsServiceData {
+// single payload for the template. Read-only. Pass a logger to
+// surface a label-read failure; callers without one (e.g. the shell
+// builder) pass nil and accept silent fallback.
+func buildSettingsService(_ context.Context, deps DashboardDeps, logger *slog.Logger) settingsServiceData {
 	st := deps.Status()
 	out := settingsServiceData{
 		Version:      st.Version,
@@ -275,7 +283,7 @@ func buildSettingsService(_ context.Context, deps DashboardDeps) settingsService
 		RelayEnabled: st.RelayEnabled,
 		RelayMode:    st.RelayMode,
 		RelayListen:  st.RelayListen,
-		OwnLabel:     ownLabelOf(deps),
+		OwnLabel:     ownLabelOf(deps, logger),
 	}
 	if st.ActiveJobID != "" {
 		out.ActiveJobID = st.ActiveJobID
@@ -290,9 +298,18 @@ func buildSettingsService(_ context.Context, deps DashboardDeps) settingsService
 // if the lookup fails the modal renders with an empty phrase, the
 // caller bails on the empty-phrase guard, and the operator gets a
 // clear 500 instead of a fall-through.
-func ownLabelOf(deps DashboardDeps) string {
+//
+// The logger argument lets us surface DB-side failures (sql.ErrNoRows
+// on a corrupted meta table; a locked DB; etc.) instead of swallowing
+// them — without this, the operator sees only the generic
+// "confirmation phrase mismatch" message and has no breadcrumb to
+// trace the real cause.
+func ownLabelOf(deps DashboardDeps, logger *slog.Logger) string {
 	label, err := deps.OwnLabel(context.Background())
 	if err != nil {
+		if logger != nil {
+			logger.Error("dashboard service: read own label", "err", err)
+		}
 		return ""
 	}
 	return label

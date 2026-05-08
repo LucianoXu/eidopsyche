@@ -674,8 +674,15 @@ type dashSub struct {
 // cancel() so concurrent emit() sends cannot panic; emit() picks done as
 // the abandon signal instead.
 func (d *Daemon) subscribeDashboard() (<-chan dashboard.Event, func()) {
+	// Buffer sized for lifecycle streams: a self-update can emit
+	// hundreds of progress lines in a burst while a slow browser /
+	// paused tab is draining the SSE response — without headroom,
+	// individual lines drop silently and the operator sees an
+	// incomplete log. 256 events is enough to absorb a typical
+	// install.sh output while keeping per-subscriber memory bounded
+	// (~16 KiB/sub at the typical event size).
 	sub := &dashSub{
-		ch:   make(chan dashboard.Event, 4),
+		ch:   make(chan dashboard.Event, 256),
 		done: make(chan struct{}),
 	}
 	d.mu.Lock()
@@ -710,9 +717,33 @@ func (d *Daemon) emitDashEvent(ev dashboard.Event) {
 			// subscriber cancelled; skip without sending
 		case sub.ch <- ev:
 		default:
-			d.Log.Warn("dashboard subscriber slow; dropping event", "kind", ev.Kind)
+			// Log at Error for lifecycle events so a buffer overflow
+			// during a self-update / streaming run is loud — the
+			// operator's <pre> shows an incomplete log and the only
+			// way to diagnose missing lines is the daemon log. Other
+			// signal-only kinds (refresh-style) are idempotent so a
+			// single Warn is enough.
+			level := "warn"
+			if hasLifecyclePrefix(ev.Kind) {
+				level = "error"
+			}
+			if level == "error" {
+				d.Log.Error("dashboard subscriber slow; lifecycle event dropped",
+					"kind", ev.Kind, "buffer_cap", cap(sub.ch))
+			} else {
+				d.Log.Warn("dashboard subscriber slow; dropping event", "kind", ev.Kind)
+			}
 		}
 	}
+}
+
+// hasLifecyclePrefix reports whether kind is a Phase-5 lifecycle event
+// (line, done, or service.status). Used by emitDashEvent to escalate
+// the drop log level.
+func hasLifecyclePrefix(kind string) bool {
+	return kind == "service.status" ||
+		(len(kind) >= 15 && kind[:15] == "lifecycle.line:") ||
+		(len(kind) >= 15 && kind[:15] == "lifecycle.done:")
 }
 
 // addSubscriber registers conn as an inbox push target and auto-removes it when

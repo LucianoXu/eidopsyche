@@ -182,6 +182,41 @@ func TestLifecycleRun_SpawnerError(t *testing.T) {
 	}
 }
 
+// TestLifecyclePrependStateDir locks in the argv shape the daemon
+// builds for the four lifecycle actions. The `--state-dir` flag is
+// registered on `eidos gate`'s PersistentFlags, so it MUST sit
+// between "gate" and the subcommand. self-update is a sibling of
+// "gate" at the eidos root and accepts NO --state-dir flag — adding
+// one would yield "error: unknown flag: --state-dir" on the child.
+func TestLifecyclePrependStateDir(t *testing.T) {
+	cases := []struct {
+		name     string
+		args     []string
+		stateDir string
+		want     []string
+	}{
+		{"empty state dir", []string{"gate", "reconnect"}, "", []string{"gate", "reconnect"}},
+		{"gate reconnect", []string{"gate", "reconnect"}, "/var/eidos", []string{"gate", "--state-dir", "/var/eidos", "reconnect"}},
+		{"gate stop", []string{"gate", "stop"}, "/var/eidos", []string{"gate", "--state-dir", "/var/eidos", "stop"}},
+		{"gate purge --yes", []string{"gate", "purge", "--yes"}, "/var/eidos", []string{"gate", "--state-dir", "/var/eidos", "purge", "--yes"}},
+		{"self-update untouched", []string{"self-update"}, "/var/eidos", []string{"self-update"}},
+		{"empty args untouched", []string{}, "/var/eidos", []string{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := lifecyclePrependStateDir(c.args, c.stateDir)
+			if len(got) != len(c.want) {
+				t.Fatalf("len got=%v want=%v", got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Errorf("argv[%d] = %q, want %q (full got=%v)", i, got[i], c.want[i], got)
+				}
+			}
+		})
+	}
+}
+
 func TestExitCodeOf(t *testing.T) {
 	if got := exitCodeOf(nil); got != 0 {
 		t.Errorf("nil err: got %d, want 0", got)

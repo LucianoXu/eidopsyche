@@ -134,6 +134,15 @@ func renderEvent(r *renderer, ev Event, logger *slog.Logger) (string, string) {
 			hasPrefix(ev.Kind, "lifecycle.done:")) {
 			return ev.Kind, ev.HTML
 		}
+		// Log unhandled `lifecycle.*` kinds so a producer-side typo or
+		// a future event family (lifecycle.error, lifecycle.heartbeat)
+		// shows up at warn level instead of vanishing silently. Other
+		// unrecognised kinds are returned empty (skipped) without a
+		// log — most are pre-Phase-1 cruft we don't care to surface.
+		if hasPrefix(ev.Kind, "lifecycle.") {
+			logger.Warn("unhandled lifecycle event kind; check producer/consumer alignment",
+				"kind", ev.Kind, "html_len", len(ev.HTML))
+		}
 		return "", ""
 	}
 }
