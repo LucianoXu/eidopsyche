@@ -1,0 +1,44 @@
+{{define "contact_scan"}}
+{{if .Error}}
+<div class="form-flash is-error" role="alert">{{.Error}}</div>
+{{else}}
+<div class="contact-scan" role="region" aria-label="Card preview">
+  <header class="contact-scan-head">
+    <span class="contact-scan-mark" aria-hidden="true">印</span>
+    <h4>Card preview</h4>
+  </header>
+
+  {{if .AlreadyContact}}
+  <p class="form-flash is-error" role="status" style="margin-bottom:14px">
+    Already on file — adding will refresh the label and relay hint.
+  </p>
+  {{end}}
+
+  <dl class="scan-grid">
+    <dt>Label</dt>
+    <dd class="serif"><em>{{.Label}}</em></dd>
+
+    <dt>Npub</dt>
+    <dd class="mono">{{.Npub}}</dd>
+
+    <dt>Pubkey</dt>
+    <dd class="mono">{{.Pubkey}}</dd>
+
+    <dt>Relay</dt>
+    <dd class="mono">{{if .Relay}}{{.Relay}}{{else}}<span class="muted">— none</span>{{end}}</dd>
+  </dl>
+
+  <form class="contact-scan-confirm"
+        hx-post="/settings/contacts"
+        hx-target="#contact-rows"
+        hx-swap="beforeend"
+        hx-on::after-request="if(event.detail.successful){document.getElementById('contact-add-result').innerHTML='';const f=document.getElementById('contact-add-form');if(f)f.reset()}">
+    <input type="hidden" name="card" value="{{.CardURI}}">
+    <input type="hidden" name="label" value="{{.Label}}">
+    <button type="submit">{{if .AlreadyContact}}Refresh contact{{else}}Confirm add{{end}}</button>
+    <button type="button" class="ghost-button"
+            hx-on:click="this.closest('#contact-add-result').innerHTML=''">Discard</button>
+  </form>
+</div>
+{{end}}
+{{end}}

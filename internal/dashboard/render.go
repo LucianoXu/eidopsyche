@@ -140,7 +140,48 @@ type settingsShellData struct {
 	OwnLabel string
 	Active   string
 	Identity *settingsIdentityData
+	Contacts *settingsContactsData
 	Config   *settingsConfigData
+}
+
+// ── phase 2: contacts ──────────────────────────────────────────────
+
+type settingsContactsData struct {
+	Rows  []contactRow
+	Error string
+}
+
+type contactRow struct {
+	Pubkey      string
+	PubkeyShort string // first 12 hex chars for stable DOM ids
+	Npub        string
+	Label       string
+	Tier        contacts.Tier
+	LastSeen    *time.Time
+}
+
+type contactDetailData struct {
+	Pubkey      string
+	PubkeyShort string
+	Npub        string
+	Label       string
+	FormLabel   string // separate from Label so a rejected entry doesn't poison the colophon
+	Tier        contacts.Tier
+	Relays      []string
+	LabelError  string
+	LabelSaved  bool
+	TierError   string
+	TierSaved   bool
+}
+
+type contactScanData struct {
+	CardURI        string
+	Pubkey         string
+	Npub           string
+	Label          string
+	Relay          string
+	AlreadyContact bool
+	Error          string
 }
 
 type settingsIdentityData struct {

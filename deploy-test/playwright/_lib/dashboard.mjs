@@ -242,6 +242,327 @@ export async function waitForInbound(page, peerHex, expectedText, timeoutMs = 10
   );
 }
 
+// ─── Phase 2: Contacts pane helpers ───────────────────────────────────────
+//
+// Selectors below mirror the actual phase-2 templates in
+// internal/dashboard/templates/{settings_contacts,contact_row,
+// contact_detail,contact_scan}.html. The row template does NOT carry a
+// `data-pubkey` attribute; the full hex pubkey only appears inside the
+// row's `hx-get="/settings/contacts/<hex>"` URL. We parse it out from
+// there and use the `id="contact-<short>"` (where <short> is the first
+// 16 hex chars per `truncate 16` in the template) for stable row
+// addressing.
+
+/**
+ * Read all `tr.contact-row` rows in the address book table.
+ *
+ * Returns Array<{pubkey, pubkeyShort, label, tier}>. Empty array if the
+ * empty-state placeholder (`tr.contacts-empty`) is showing instead.
+ *
+ * `pubkey` is recovered from the row's hx-get URL since
+ * `contact_row.html` doesn't expose a data-pubkey attribute. `pubkeyShort`
+ * is the row's id slug after `contact-`.
+ */
+export async function listContactsRows(page) {
+  return await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('tr.contact-row'));
+    return rows.map((tr) => {
+      const id = tr.getAttribute('id') || '';
+      const pubkeyShort = id.startsWith('contact-') ? id.slice('contact-'.length) : '';
+      const hxGet = tr.getAttribute('hx-get') || '';
+      // hxGet is "/settings/contacts/<hex>"
+      const m = hxGet.match(/\/settings\/contacts\/([0-9a-f]+)$/i);
+      const pubkey = m ? m[1] : '';
+      const label = (tr.querySelector('.contact-label')?.textContent || '').trim();
+      const tier = (tr.querySelector('.contact-tier .tier-badge')?.textContent || '').trim();
+      return { pubkey, pubkeyShort, label, tier };
+    });
+  });
+}
+
+/**
+ * Submit the contact-add form with a card URI and optional label override,
+ * clicking the Add button. Waits for either a new row to appear in the
+ * table OR an error chip in `#contact-add-result` (or the pane re-rendering
+ * with a `.form-flash.is-error`).
+ *
+ * Returns {ok, message}. On `ok` the new row is in the DOM; on failure the
+ * message is the visible error text.
+ */
+export async function addContactByCard(page, cardURI, labelOverride = '') {
+  await page.fill('#contact-add-form input[name="card"]', cardURI);
+  await page.fill('#contact-add-form input[name="label"]', labelOverride);
+  const beforeIDs = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('tr.contact-row')).map((r) => r.id),
+  );
+
+  // The Add button is the second submit (without formnovalidate); pick by
+  // its hx-post attribute to avoid relying on DOM order.
+  const addBtn = await page.$('#contact-add-form button[hx-post="/settings/contacts"]');
+  if (!addBtn) throw new Error('addContactByCard: Add button not found');
+  await Promise.all([
+    page.waitForResponse((r) =>
+      r.url().endsWith('/settings/contacts') && r.request().method() === 'POST',
+      { timeout: 10000 },
+    ),
+    addBtn.click(),
+  ]);
+  await page.waitForTimeout(500);
+
+  // Success path: handler returns the full pane (#settings-pane innerHTML
+  // swap) with the new row appended. Detect by diffing the row id set.
+  const after = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('tr.contact-row')).map((r) => r.id),
+  );
+  const fresh = after.filter((id) => !beforeIDs.includes(id));
+  if (fresh.length > 0) {
+    return { ok: true, message: '' };
+  }
+
+  // Failure path: an error flash either in #contact-add-result (when the
+  // scan endpoint repurposed the slot) or as a top-of-pane .form-flash.is-error.
+  const err = await page.evaluate(() => {
+    const local = document.querySelector('#contact-add-result .form-flash.is-error');
+    if (local) return (local.textContent || '').trim();
+    const top = document.querySelector('.contacts-pane .form-flash.is-error');
+    if (top) return (top.textContent || '').trim();
+    return '';
+  });
+  return { ok: false, message: err || '(no error chip found, no row appeared)' };
+}
+
+/**
+ * Submit the contact-add form with a card URI and click Scan (the
+ * formnovalidate button). Waits for the preview block in
+ * `#contact-add-result` to land. Returns the parsed preview as
+ * {pubkey, label, relay, alreadyContact}.
+ *
+ * The Scan endpoint renders contact_scan.html into `#contact-add-result`
+ * via `hx-target` on the form. Each labelled cell sits in a `dl.scan-grid`.
+ */
+export async function scanCardPreview(page, cardURI) {
+  await page.fill('#contact-add-form input[name="card"]', cardURI);
+  const scanBtn = await page.$('#contact-add-form button[hx-post="/settings/contacts/scan"]');
+  if (!scanBtn) throw new Error('scanCardPreview: Scan button not found');
+  await Promise.all([
+    page.waitForResponse((r) =>
+      r.url().endsWith('/settings/contacts/scan') && r.request().method() === 'POST',
+      { timeout: 10000 },
+    ),
+    scanBtn.click(),
+  ]);
+  // Wait for either the preview region or an error chip.
+  await page.waitForFunction(() => {
+    const root = document.querySelector('#contact-add-result');
+    if (!root) return false;
+    return !!root.querySelector('.contact-scan, .form-flash.is-error');
+  }, null, { timeout: 5000 });
+  await page.waitForTimeout(200);
+
+  return await page.evaluate(() => {
+    const root = document.querySelector('#contact-add-result');
+    const errEl = root?.querySelector('.form-flash.is-error');
+    if (errEl) {
+      return { error: (errEl.textContent || '').trim() };
+    }
+    const dl = root?.querySelector('dl.scan-grid');
+    if (!dl) return { error: '(no scan-grid)' };
+    const dts = Array.from(dl.querySelectorAll('dt'));
+    const map = {};
+    for (const dt of dts) {
+      const key = (dt.textContent || '').trim().toLowerCase();
+      const dd = dt.nextElementSibling;
+      if (!dd) continue;
+      map[key] = (dd.textContent || '').trim();
+    }
+    const already = !!root?.querySelector(
+      '.contact-scan .form-flash.is-error',
+    );
+    // Strip the "— none" placeholder that appears when no relay is on file.
+    const relay = map['relay'] && !/^—\s*none/.test(map['relay']) ? map['relay'] : '';
+    return {
+      pubkey: map['pubkey'] || '',
+      label: map['label'] || '',
+      relay,
+      alreadyContact: already,
+    };
+  });
+}
+
+/**
+ * Click a contact row (by full hex pubkey) and wait for the
+ * `.contact-detail` pane to render. The row's hx-get targets
+ * `#settings-pane`, so the whole pane is replaced.
+ */
+export async function openContactDetail(page, pubkey) {
+  const lower = String(pubkey).toLowerCase();
+  // Find the row by its hx-get URL (the only place the full hex appears).
+  const sel = `tr.contact-row[hx-get="/settings/contacts/${lower}"]`;
+  const row = await page.$(sel);
+  if (!row) {
+    throw new Error(`openContactDetail: no row with hx-get for pubkey ${lower.slice(0, 16)}…`);
+  }
+  await Promise.all([
+    page.waitForResponse((r) =>
+      r.url().endsWith(`/settings/contacts/${lower}`) && r.request().method() === 'GET',
+      { timeout: 10000 },
+    ),
+    row.click(),
+  ]);
+  await page.waitForSelector('.contact-detail', { timeout: 5000 });
+  await page.waitForTimeout(300);
+}
+
+/**
+ * Read the open `.contact-detail` pane. Returns
+ * {label, tier, npub, pubkey, relays:[], labelFlash, tierFlash}.
+ *
+ * Used both for assertions and for follow-up edits (the form inputs are
+ * the editable affordances).
+ */
+export async function readContactDetail(page) {
+  return await page.evaluate(() => {
+    const root = document.querySelector('.contact-detail');
+    if (!root) return null;
+    const dl = root.querySelector('dl.identity-card');
+    const pickDD = (label) => {
+      const dts = Array.from(dl?.querySelectorAll('dt') || []);
+      const dt = dts.find((d) => (d.textContent || '').trim().toLowerCase() === label);
+      return dt?.nextElementSibling;
+    };
+    const labelDD = pickDD('label');
+    const tierDD = pickDD('tier');
+    const npubDD = pickDD('npub');
+    const hexDD = pickDD('hex');
+    const relayDD = pickDD('relays');
+    const relays = relayDD
+      ? Array.from(relayDD.querySelectorAll('li')).map((li) => (li.textContent || '').trim())
+      : [];
+    const labelFlash = root.querySelector('.contact-label-form .form-flash');
+    const tierFlash = root.querySelector('.contact-tier-form .form-flash');
+    return {
+      label: (labelDD?.textContent || '').trim(),
+      tier: (tierDD?.querySelector('.tier-badge')?.textContent || '').trim(),
+      npub: (npubDD?.textContent || '').trim(),
+      pubkey: (hexDD?.textContent || '').trim(),
+      relays,
+      labelFlash: labelFlash ? (labelFlash.textContent || '').trim() : '',
+      tierFlash: tierFlash ? (tierFlash.textContent || '').trim() : '',
+    };
+  });
+}
+
+/**
+ * Type a new label in the detail pane's rename form and submit. Waits
+ * for the pane to re-render (the form does an innerHTML swap of
+ * `#settings-pane`). Returns {ok, message} based on the resulting
+ * `.form-flash` (success) or `.form-flash.is-error`.
+ */
+export async function setContactLabelInDetail(page, newLabel) {
+  await page.fill('.contact-label-form input[name="label"]', newLabel);
+  await Promise.all([
+    page.waitForResponse((r) =>
+      /\/settings\/contacts\/[0-9a-f]+\/label$/i.test(r.url())
+        && r.request().method() === 'POST',
+      { timeout: 10000 },
+    ),
+    page.click('.contact-label-form button[type="submit"]'),
+  ]);
+  await page.waitForSelector('.contact-detail', { timeout: 5000 });
+  await page.waitForTimeout(400);
+  return await page.evaluate(() => {
+    const errEl = document.querySelector('.contact-label-form .form-flash.is-error');
+    if (errEl) return { ok: false, message: (errEl.textContent || '').trim() };
+    const okEl = document.querySelector('.contact-label-form .form-flash');
+    return { ok: true, message: okEl ? (okEl.textContent || '').trim() : '' };
+  });
+}
+
+/**
+ * Pick a tier in the detail pane's tier select and submit. Waits for the
+ * pane to re-render. Returns {ok, message}. Valid tiers:
+ * "master" / "friend" / "acquaintance" / "blocked".
+ */
+export async function setContactTierInDetail(page, tier) {
+  await page.selectOption('.contact-tier-form select[name="tier"]', tier);
+  await Promise.all([
+    page.waitForResponse((r) =>
+      /\/settings\/contacts\/[0-9a-f]+\/tier$/i.test(r.url())
+        && r.request().method() === 'POST',
+      { timeout: 10000 },
+    ),
+    page.click('.contact-tier-form button[type="submit"]'),
+  ]);
+  await page.waitForSelector('.contact-detail', { timeout: 5000 });
+  await page.waitForTimeout(400);
+  return await page.evaluate(() => {
+    const errEl = document.querySelector('.contact-tier-form .form-flash.is-error');
+    if (errEl) return { ok: false, message: (errEl.textContent || '').trim() };
+    const okEl = document.querySelector('.contact-tier-form .form-flash');
+    return { ok: true, message: okEl ? (okEl.textContent || '').trim() : '' };
+  });
+}
+
+/**
+ * Click the row's Remove button (or the detail-pane's Remove), wait for
+ * the typed-confirm modal to render in `#modal`, fill the expected
+ * phrase, and click the danger button. Returns {ok} once the row
+ * disappears from the DOM.
+ *
+ * `expectedPhrase` is the operator-typed string (today: the contact's
+ * own label, see §7 of the dashboard-feature-parity spec).
+ */
+export async function removeContactWithConfirm(page, expectedPhrase) {
+  // The Remove button is either the table-row danger-button-sm or the
+  // detail-pane danger-button. Both share the hx-get to /confirm-remove.
+  const removeBtn = await page.$(
+    'button[hx-get*="/confirm-remove"]',
+  );
+  if (!removeBtn) {
+    throw new Error('removeContactWithConfirm: no Remove button found in current pane');
+  }
+  await removeBtn.click();
+  // Wait for the typed-confirm modal to render into #modal.
+  await page.waitForSelector('.confirm-modal .confirm-card', { timeout: 5000 });
+  await page.waitForTimeout(200);
+  // Snapshot existing row ids so we can wait for one to vanish.
+  const beforeIDs = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('tr.contact-row')).map((r) => r.id),
+  );
+  // Type the phrase; the danger button is initially disabled and enables on match.
+  await page.fill('.confirm-modal input[name="confirm"]', expectedPhrase);
+  await page.waitForFunction(
+    () => {
+      const btn = document.querySelector('.confirm-modal button.danger');
+      return btn && !btn.disabled;
+    },
+    null,
+    { timeout: 3000 },
+  );
+  await Promise.all([
+    page.waitForResponse((r) =>
+      /\/settings\/contacts\/[0-9a-f]+\/remove$/i.test(r.url())
+        && r.request().method() === 'POST',
+      { timeout: 10000 },
+    ),
+    page.click('.confirm-modal button.danger'),
+  ]);
+  // Wait for at least one row id to disappear OR for the pane to re-render
+  // without the row.
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const after = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('tr.contact-row')).map((r) => r.id),
+    );
+    const gone = beforeIDs.filter((id) => !after.includes(id));
+    if (gone.length > 0 || (beforeIDs.length > 0 && after.length === 0)) {
+      return { ok: true };
+    }
+    await page.waitForTimeout(150);
+  }
+  return { ok: false };
+}
+
 /**
  * Read sidebar contact rows. Returns Array<{label, tier, href, pubkey}>.
  * Used by full-bidirectional.mjs to confirm both sides know each other.

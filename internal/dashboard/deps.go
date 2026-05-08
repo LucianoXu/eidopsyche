@@ -60,6 +60,46 @@ type DashboardDeps interface {
 	// daemon — restart is still required to pick up changes; the
 	// dashboard surfaces this in its Restart-required note.
 	ConfigSet(ctx context.Context, path, value string) error
+
+	// ── phase 2: contacts ─────────────────────────────────────────────
+	//
+	// GetContact looks up a contact by hex pubkey. Returns nil + a
+	// not-found error if the pubkey is not in the contacts list.
+	GetContact(ctx context.Context, pubkey string) (*contacts.Contact, error)
+
+	// AddContact parses a mindgate:// card URI and persists the
+	// resulting contact (label / tier / relays). labelOverride, when
+	// non-empty, supersedes the label embedded in the card. Returns
+	// the persisted contact on success. Emits contact.added.
+	AddContact(ctx context.Context, cardURI, labelOverride string) (*contacts.Contact, error)
+
+	// RemoveContact deletes the contact by pubkey. The dashboard
+	// gates this with the typed-confirm modal; the adapter does not
+	// re-validate the phrase. Emits contact.removed.
+	RemoveContact(ctx context.Context, pubkey string) error
+
+	// SetContactLabel renames a contact. Empty (post-trim) is
+	// rejected. Emits contact.relabeled.
+	SetContactLabel(ctx context.Context, pubkey, label string) error
+
+	// SetContactTier moves a contact between trust tiers (master /
+	// friend / acquaintance / blocked). Emits contact.tier-changed.
+	SetContactTier(ctx context.Context, pubkey string, tier contacts.Tier) error
+
+	// ScanCard parses a mindgate:// card URI without persisting
+	// anything. Returns a preview the dashboard renders so the
+	// operator can confirm what they'd add. AlreadyContact is true
+	// when the card's pubkey is already in the contacts list.
+	ScanCard(ctx context.Context, cardURI string) (ScanPreview, error)
+}
+
+// ScanPreview is the read-only result of a card-scan dry-run.
+type ScanPreview struct {
+	Pubkey         string
+	Npub           string
+	Label          string
+	Relay          string
+	AlreadyContact bool
 }
 
 // Event is the SSE-bound broadcast type. Kind discriminates the union;

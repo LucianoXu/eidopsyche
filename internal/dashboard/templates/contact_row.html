@@ -1,0 +1,24 @@
+{{define "contact_row"}}
+<tr id="contact-{{.PubkeyShort}}" class="contact-row"
+    hx-get="/settings/contacts/{{.Pubkey}}"
+    hx-target="#settings-pane"
+    hx-swap="innerHTML"
+    hx-push-url="true">
+  <td class="contact-label"><em>{{.Label}}</em></td>
+  <td class="contact-tier">
+    <span class="tier-badge is-{{.Tier}}">{{.Tier}}</span>
+  </td>
+  <td class="contact-hex"><code>{{truncate 16 .Pubkey}}</code></td>
+  <td class="contact-seen">
+    {{if .LastSeen}}<span title="{{.LastSeen.Format "2006-01-02 15:04:05"}}">{{reltime .LastSeen}}</span>{{else}}<span class="muted">—</span>{{end}}
+  </td>
+  <td class="contact-actions" hx-on:click="event.stopPropagation()">
+    <button type="button"
+            class="danger-button-sm"
+            aria-label="Remove contact {{.Label}}"
+            hx-get="/settings/contacts/{{.Pubkey}}/confirm-remove"
+            hx-target="#modal"
+            hx-swap="innerHTML">Remove</button>
+  </td>
+</tr>
+{{end}}

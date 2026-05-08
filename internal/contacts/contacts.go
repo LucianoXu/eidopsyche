@@ -154,6 +154,33 @@ func (r *Repo) Remove(ctx context.Context, pubkey string) error {
 
 // SetLabel updates the label of an existing contact identified by pubkey.
 // Returns ErrNotFound if no row matches.
+// SetTier updates the tier of an existing contact.
+//
+// The tier value is validated against the four named constants
+// (TierMaster / TierFriend / TierAcquaintance / TierBlocked); any
+// other value is rejected to keep the column predictable. Returns
+// ErrNotFound if the contact does not exist.
+func (r *Repo) SetTier(ctx context.Context, pubkey string, tier Tier) error {
+	switch tier {
+	case TierMaster, TierFriend, TierAcquaintance, TierBlocked:
+		// valid
+	default:
+		return fmt.Errorf("invalid tier %q (must be master|friend|acquaintance|blocked)", tier)
+	}
+	now := time.Now().Unix()
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE contacts SET tier=?, updated_at=? WHERE pubkey=?`,
+		string(tier), now, pubkey)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *Repo) SetLabel(ctx context.Context, pubkey, label string) error {
 	now := time.Now().Unix()
 	res, err := r.db.ExecContext(ctx,

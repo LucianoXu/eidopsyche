@@ -1,0 +1,76 @@
+{{define "settings_contacts"}}
+<div class="contacts-pane"
+     hx-get="/settings/contacts"
+     hx-trigger="sse:contact.added,sse:contact.removed,sse:contact.relabeled,sse:contact.tier-changed from:body"
+     hx-swap="outerHTML">
+  <h2>Address book</h2>
+  <p class="pane-aside">
+    Peers you keep on file. The label is local; only the pubkey is canonical.
+    Paste a card below to admit a new correspondent — preview first, then commit.
+  </p>
+
+  {{if .Error}}<div class="form-flash is-error" role="alert" style="margin-bottom:18px">{{.Error}}</div>{{end}}
+
+  <table class="config-table contacts-table">
+    <thead>
+      <tr>
+        <th>Label</th>
+        <th>Tier</th>
+        <th>Pubkey</th>
+        <th>Last seen</th>
+        <th aria-label="Actions"></th>
+      </tr>
+    </thead>
+    <tbody id="contact-rows">
+      {{range .Rows}}
+      {{template "contact_row" .}}
+      {{else}}
+      <tr class="contacts-empty">
+        <td colspan="5" class="empty">
+          No contacts yet — paste a card below, or share yours via the Identity tab.
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+
+  <section class="contact-add">
+    <h4>Admit a correspondent</h4>
+    <p class="hint">
+      A card is a <code class="inline-code">mindgate://…</code> URI sealing a peer's pubkey,
+      label, and a relay hint. Scan to inspect; Add to commit.
+    </p>
+    <form class="contact-add-form"
+          id="contact-add-form"
+          autocomplete="off"
+          hx-on::after-request="if(event.detail.successful&&event.detail.requestConfig.path==='/settings/contacts'){this.reset();document.getElementById('contact-add-result').innerHTML=''}">
+      <div class="contact-add-grid">
+        <label class="contact-add-field card-field">
+          <span class="contact-add-label">Card URI</span>
+          <input type="text" name="card" required
+                 placeholder="mindgate://…"
+                 spellcheck="false" autocomplete="off">
+        </label>
+        <label class="contact-add-field label-field">
+          <span class="contact-add-label">Label override</span>
+          <input type="text" name="label" maxlength="64"
+                 placeholder="Optional"
+                 spellcheck="false" autocomplete="off">
+        </label>
+        <div class="contact-add-actions">
+          <button type="submit" class="ghost-button"
+                  formnovalidate
+                  hx-post="/settings/contacts/scan"
+                  hx-target="#contact-add-result"
+                  hx-swap="innerHTML">Scan</button>
+          <button type="submit"
+                  hx-post="/settings/contacts"
+                  hx-target="#contact-rows"
+                  hx-swap="beforeend">Add</button>
+        </div>
+      </div>
+    </form>
+    <div id="contact-add-result" aria-live="polite"></div>
+  </section>
+</div>
+{{end}}

@@ -12,6 +12,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/dashboard"
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
+	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
 	"github.com/LucianoXu/eidopsyche/internal/nostr"
 )
@@ -216,4 +217,90 @@ func (a dashboardAdapter) ConfigSet(ctx context.Context, path, value string) err
 	}
 	a.d.emitDashEvent(dashboard.Event{Kind: "config.changed"})
 	return nil
+}
+
+// ── phase 2: contacts ──────────────────────────────────────────────
+
+func (a dashboardAdapter) GetContact(ctx context.Context, pubkey string) (*contacts.Contact, error) {
+	return a.d.Repo.Get(ctx, pubkey)
+}
+
+func (a dashboardAdapter) AddContact(ctx context.Context, cardURI, labelOverride string) (*contacts.Contact, error) {
+	c, err := card.Parse(strings.TrimSpace(cardURI))
+	if err != nil {
+		return nil, fmt.Errorf("parse card: %w", err)
+	}
+	pubHex, err := identity.DecodeNpub(c.Npub)
+	if err != nil {
+		return nil, fmt.Errorf("decode npub: %w", err)
+	}
+	label := strings.TrimSpace(labelOverride)
+	if label == "" {
+		label = strings.TrimSpace(c.Label)
+	}
+	if label == "" {
+		return nil, fmt.Errorf("card has no label and none was provided")
+	}
+	contact := contacts.Contact{
+		Pubkey: pubHex,
+		Label:  label,
+		Tier:   contacts.TierFriend,
+		Relays: []string{c.Relay},
+	}
+	if err := a.d.Repo.Add(ctx, contact); err != nil {
+		return nil, err
+	}
+	a.d.emitDashEvent(dashboard.Event{Kind: "contact.added"})
+	saved, _ := a.d.Repo.Get(ctx, pubHex)
+	return saved, nil
+}
+
+func (a dashboardAdapter) RemoveContact(ctx context.Context, pubkey string) error {
+	if err := a.d.Repo.Remove(ctx, pubkey); err != nil {
+		return err
+	}
+	a.d.emitDashEvent(dashboard.Event{Kind: "contact.removed"})
+	return nil
+}
+
+func (a dashboardAdapter) SetContactLabel(ctx context.Context, pubkey, label string) error {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return fmt.Errorf("label must not be empty")
+	}
+	if err := a.d.Repo.SetLabel(ctx, pubkey, label); err != nil {
+		return err
+	}
+	a.d.emitDashEvent(dashboard.Event{Kind: "contact.relabeled"})
+	return nil
+}
+
+func (a dashboardAdapter) SetContactTier(ctx context.Context, pubkey string, tier contacts.Tier) error {
+	if err := a.d.Repo.SetTier(ctx, pubkey, tier); err != nil {
+		return err
+	}
+	a.d.emitDashEvent(dashboard.Event{Kind: "contact.tier-changed"})
+	return nil
+}
+
+func (a dashboardAdapter) ScanCard(ctx context.Context, cardURI string) (dashboard.ScanPreview, error) {
+	c, err := card.Parse(strings.TrimSpace(cardURI))
+	if err != nil {
+		return dashboard.ScanPreview{}, fmt.Errorf("parse card: %w", err)
+	}
+	pubHex, err := identity.DecodeNpub(c.Npub)
+	if err != nil {
+		return dashboard.ScanPreview{}, fmt.Errorf("decode npub: %w", err)
+	}
+	already := false
+	if existing, err := a.d.Repo.Get(ctx, pubHex); err == nil && existing != nil {
+		already = true
+	}
+	return dashboard.ScanPreview{
+		Pubkey:         pubHex,
+		Npub:           c.Npub,
+		Label:          c.Label,
+		Relay:          c.Relay,
+		AlreadyContact: already,
+	}, nil
 }
