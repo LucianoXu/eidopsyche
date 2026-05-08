@@ -334,6 +334,51 @@ func TestPostInvite_RevokeSuccess(t *testing.T) {
 	}
 }
 
+// TestPostInvite_RevokeShortPrefix guards the defense-in-depth check
+// that the URL path's id is at least the typed-confirm length and
+// lowercase-hex. A hand-crafted `/settings/invites/a/revoke` would
+// otherwise reduce the required confirm phrase to a single char.
+func TestPostInvite_RevokeShortPrefix(t *testing.T) {
+	calls := []string{}
+	deps := newPhase3Deps()
+	deps.revokeCalls = &calls
+	srv := newTestServer(t, deps)
+	form := url.Values{"confirm": {"a"}}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/settings/invites/a/revoke", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://"+req.Host)
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("short id should 400, got %d", rec.Code)
+	}
+	if len(calls) != 0 {
+		t.Errorf("RevokeInvite must not be called for short id; got %v", calls)
+	}
+}
+
+// TestPostInvite_RevokeNonHex guards the same defense against
+// URL-decoded path tricks (the path must be lowercase 0-9a-f).
+func TestPostInvite_RevokeNonHex(t *testing.T) {
+	calls := []string{}
+	deps := newPhase3Deps()
+	deps.revokeCalls = &calls
+	srv := newTestServer(t, deps)
+	id := "deadbeefXXdeadbeef" // contains non-hex chars
+	form := url.Values{"confirm": {id[:8]}}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/settings/invites/"+id+"/revoke", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://"+req.Host)
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("non-hex id should 400, got %d", rec.Code)
+	}
+	if len(calls) != 0 {
+		t.Errorf("RevokeInvite must not be called for non-hex id; got %v", calls)
+	}
+}
+
 func TestPostInvite_RevokeNotFound(t *testing.T) {
 	deps := newPhase3Deps()
 	deps.revokeInviteFn = func(ctx context.Context, idPrefix string) (string, error) {

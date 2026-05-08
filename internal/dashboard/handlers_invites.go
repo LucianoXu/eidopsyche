@@ -226,6 +226,16 @@ func handleInviteRevoke(w http.ResponseWriter, req *http.Request, r *renderer, l
 		return
 	}
 	ctx := req.Context()
+	// Reject path prefixes shorter than the typed-confirm length so
+	// hand-crafted URLs can't trick the server into accepting a 1-char
+	// confirm phrase. The Revoke button always emits the full 64-char
+	// invite ID; this check is defense-in-depth against curl misuse.
+	// Also require lowercase hex so an attacker can't smuggle URL-decoded
+	// junk through the lookup.
+	if len(idPrefix) < inviteIDConfirmLen || !isLowerHex(idPrefix) {
+		http.Error(w, "invalid invite id", http.StatusBadRequest)
+		return
+	}
 	// The typed-confirm phrase is the 8-char id prefix as the operator
 	// sees it in the list. The handler validates that the typed phrase
 	// matches before calling RevokeInvite. The id_prefix in the URL
@@ -283,9 +293,11 @@ func renderInvitesPane(w http.ResponseWriter, r *renderer, logger *slog.Logger, 
 func renderInviteRevokeModal(w http.ResponseWriter, r *renderer, logger *slog.Logger, ctx context.Context, deps DashboardDeps, idPrefix string) {
 	// Look up the invite so the modal can show identifying detail (the
 	// issuer/redeemer labels) — without that, "Revoke abc12345" is a
-	// fairly opaque ask. ErrNotFound and ErrPrefixAmbiguous both
-	// surface as 404 here; the operator clicks Revoke from a row, so
-	// either error means the row was stale and they should reload.
+	// fairly opaque ask. ErrNotFound surfaces as 404 (stale row in the
+	// operator's browser); ErrPrefixAmbiguous surfaces as 400 (the
+	// prefix in the URL collides with two rows; the operator should
+	// reload to pick up disambiguated full IDs). Either way the row was
+	// stale and they should reload.
 	invs, err := deps.ListInvites(ctx, "")
 	if err != nil {
 		http.Error(w, "list invites: "+err.Error(), http.StatusBadGateway)
@@ -302,7 +314,7 @@ func renderInviteRevokeModal(w http.ResponseWriter, r *renderer, logger *slog.Lo
 		}
 	}
 	if match == nil {
-		http.Error(w, "404 invite not found", http.StatusNotFound)
+		http.Error(w, "invite not found", http.StatusNotFound)
 		return
 	}
 	short := inviteIDShort(match.ID)
@@ -383,6 +395,22 @@ func inviteIDShort(id string) string {
 		return id
 	}
 	return id[:inviteIDConfirmLen]
+}
+
+// isLowerHex reports whether s is a non-empty lowercase hexadecimal
+// string. Used to gate revoke URL paths so the typed-confirm phrase
+// can't be smuggled below its 8-char minimum or routed to non-invite
+// rows by URL-decoded path tricks.
+func isLowerHex(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 // parseInviteDuration accepts the same tokens as `eidos gate invite

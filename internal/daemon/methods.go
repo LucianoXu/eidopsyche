@@ -595,14 +595,13 @@ func inviteRevoke(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMe
 	}
 	fullID, err := d.InviteRevoke(ctx, p.IDPrefix)
 	if err != nil {
-		if errors.Is(err, invitedb.ErrNotFound) {
-			return nil, &ipc.Error{Code: ipc.ErrInviteInvalidToken, Message: "invite not found"}
-		}
-		if errors.Is(err, invitedb.ErrPrefixAmbiguous) {
-			return nil, &ipc.Error{Code: ipc.ErrInvitePrefixAmbiguous, Message: "prefix matches multiple invites"}
-		}
-		if err.Error() == "id_prefix required" {
+		switch {
+		case errors.Is(err, errInviteIDPrefixRequired):
 			return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+		case errors.Is(err, invitedb.ErrNotFound):
+			return nil, &ipc.Error{Code: ipc.ErrInviteInvalidToken, Message: "invite not found"}
+		case errors.Is(err, invitedb.ErrPrefixAmbiguous):
+			return nil, &ipc.Error{Code: ipc.ErrInvitePrefixAmbiguous, Message: "prefix matches multiple invites"}
 		}
 		return nil, internalErr(err)
 	}

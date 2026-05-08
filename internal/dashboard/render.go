@@ -224,8 +224,8 @@ type settingsConfigRow struct {
 // template renders three sections without repeating the filter
 // logic in templates. CreateError is rendered above the create form
 // when CreateInvite fails; RedeemError above the redeem form;
-// RedeemAccepted populated on a successful redeem so the operator
-// sees confirmation without reloading.
+// RedeemResult is populated on a successful redeem so the operator
+// sees confirmation (issuer npub + accepted-by relays) without reloading.
 type settingsInvitesData struct {
 	Active        []inviteRow
 	Expired       []inviteRow

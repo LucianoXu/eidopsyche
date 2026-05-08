@@ -44,22 +44,30 @@ type InviteRedeemResult struct {
 	AcceptedBy  []string
 }
 
-// errInviteNotFound, errInvitePrefixAmbiguous, errInviteInvalidToken,
-// errInviteExpired, errInvalidNpub, errNoRelaysReachable map onto the
-// existing IPC error codes. Callers from the IPC dispatch path
-// translate them; callers from the dashboard adapter surface them
-// directly to the operator. Kept distinct from the invitedb sentinel
-// errors so the dashboard side can render a clean message without
-// pulling in invitedb's vocabulary.
+// errInviteInvalidToken, errInviteExpired, errNoRelaysReachable are the
+// sentinel errors the typed helpers return for redemption failures. The
+// IPC dispatch path translates them onto the existing ipc.Err* codes
+// (see methods.go::inviteRedeem); the dashboard adapter surfaces them
+// directly to the operator via the redeem-flash. Other failure modes
+// (invitedb.ErrNotFound, invitedb.ErrPrefixAmbiguous on revoke;
+// identity.DecodeNpub failures on redeem) come straight from their
+// owning packages — we don't re-wrap those because the IPC dispatch
+// already maps them to ipc.ErrInviteInvalidToken / ErrInvitePrefixAmbiguous /
+// ErrInvalidNpub via errors.Is and a substring fallback respectively.
 var (
 	errInviteInvalidToken = errors.New("invite: invalid token")
 	errInviteExpired      = errors.New("invite: expired")
 	errNoRelaysReachable  = errors.New("invite: no relay accepted publish")
+	// errInviteIDPrefixRequired is the sentinel returned by InviteRevoke
+	// when the caller passes an empty id_prefix. The IPC dispatch maps
+	// this onto ipc.ErrInvalidParams via errors.Is so the mapping
+	// doesn't depend on the error string.
+	errInviteIDPrefixRequired = errors.New("invite: id_prefix required")
 )
 
 // InviteCreate signs and persists a new invite, returning the URI for
-// the operator to share. Emits dashboard.invite.created on success so
-// every open dashboard refreshes its list.
+// the operator to share. Emits invite.created on success so every open
+// dashboard refreshes its list.
 func (d *Daemon) InviteCreate(ctx context.Context, opts InviteCreateOptions) (*InviteCreateResult, error) {
 	maxUses := opts.MaxUses
 	switch {
@@ -144,10 +152,10 @@ func (d *Daemon) InviteList(ctx context.Context, status string) ([]*invitedb.Inv
 }
 
 // InviteRevoke marks an invite as revoked, looked up by ID prefix.
-// Returns the full ID on success. Emits dashboard.invite.revoked.
+// Returns the full ID on success. Emits invite.revoked.
 func (d *Daemon) InviteRevoke(ctx context.Context, idPrefix string) (string, error) {
 	if idPrefix == "" {
-		return "", fmt.Errorf("id_prefix required")
+		return "", errInviteIDPrefixRequired
 	}
 	inv, err := d.Invites.FindByPrefix(ctx, idPrefix)
 	if err != nil {
