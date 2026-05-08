@@ -21,6 +21,15 @@ type Config struct {
 	Listen    string
 	OwnerHex  string
 	Whitelist *WhitelistSource
+	TLS       TLSConfig
+}
+
+// TLSConfig governs whether the relay terminates TLS itself. Both fields
+// must be set (or both empty) — setting only one is a startup error in
+// ListenAndServe. No autocert in this release.
+type TLSConfig struct {
+	CertFile string
+	KeyFile  string
 }
 
 type Server struct {
@@ -67,6 +76,20 @@ func New(cfg Config) (*Server, error) {
 	return srv, nil
 }
 
-func (s *Server) ListenAndServe() error              { return s.http.ListenAndServe() }
+// ListenAndServe blocks until the listener exits. When both TLS.CertFile
+// and TLS.KeyFile are set, it serves wss:// via http.ListenAndServeTLS.
+// Setting only one is a startup error (the asymmetry would otherwise be
+// silent and the user would see a TLS handshake failure with no
+// indication that the configuration was the cause).
+func (s *Server) ListenAndServe() error {
+	if s.cfg.TLS.CertFile != "" || s.cfg.TLS.KeyFile != "" {
+		if s.cfg.TLS.CertFile == "" || s.cfg.TLS.KeyFile == "" {
+			return fmt.Errorf("relay.tls: both cert_file and key_file must be set (got cert=%q key=%q)",
+				s.cfg.TLS.CertFile, s.cfg.TLS.KeyFile)
+		}
+		return s.http.ListenAndServeTLS(s.cfg.TLS.CertFile, s.cfg.TLS.KeyFile)
+	}
+	return s.http.ListenAndServe()
+}
 func (s *Server) Shutdown(ctx context.Context) error { return s.http.Shutdown(ctx) }
 func (s *Server) Addr() string                       { return s.http.Addr }
