@@ -80,6 +80,90 @@ func TestDefaults_Dashboard(t *testing.T) {
 	}
 }
 
+func TestDefaults_RelayAuthAndTLS(t *testing.T) {
+	d := Defaults()
+	if !d.Relay.Auth.Required {
+		t.Error("Defaults().Relay.Auth.Required must be true (NIP-17 §Recommendations default)")
+	}
+	if d.Relay.Auth.ServiceURL != "" {
+		t.Errorf("Defaults().Relay.Auth.ServiceURL = %q, want empty", d.Relay.Auth.ServiceURL)
+	}
+	if d.Relay.TLS.CertFile != "" || d.Relay.TLS.KeyFile != "" {
+		t.Errorf("Defaults().Relay.TLS must be empty: %+v", d.Relay.TLS)
+	}
+}
+
+func TestLoad_LegacyConfigKeepsAuthRequiredDefault(t *testing.T) {
+	// A v0.5 config has no [relay.auth] block; loading it must apply the
+	// spec-default Required=true rather than Go's zero-value false.
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	body := `
+log_level = "info"
+[relay]
+  enabled = false
+  mode = "paired"
+  listen = "0.0.0.0:22895"
+  data_dir = "relay"
+`
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Relay.Auth.Required {
+		t.Error("legacy config: Relay.Auth.Required should default to true")
+	}
+}
+
+func TestLoad_ExplicitAuthRequiredFalse(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	body := `
+[relay]
+  enabled = true
+[relay.auth]
+  required = false
+`
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Relay.Auth.Required {
+		t.Error("explicit required=false should override default")
+	}
+}
+
+func TestSaveLoadRoundtrip_RelayTLS(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	cfg := Defaults()
+	cfg.Relay.TLS.CertFile = "/etc/letsencrypt/live/example.com/fullchain.pem"
+	cfg.Relay.TLS.KeyFile = "/etc/letsencrypt/live/example.com/privkey.pem"
+	cfg.Relay.Auth.ServiceURL = "wss://example.com"
+	if err := Save(p, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Relay.TLS.CertFile != cfg.Relay.TLS.CertFile {
+		t.Errorf("CertFile roundtrip: got %q", loaded.Relay.TLS.CertFile)
+	}
+	if loaded.Relay.TLS.KeyFile != cfg.Relay.TLS.KeyFile {
+		t.Errorf("KeyFile roundtrip: got %q", loaded.Relay.TLS.KeyFile)
+	}
+	if loaded.Relay.Auth.ServiceURL != "wss://example.com" {
+		t.Errorf("Auth.ServiceURL roundtrip: got %q", loaded.Relay.Auth.ServiceURL)
+	}
+}
+
 func TestSaveLoadRoundtrip(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "config.toml")

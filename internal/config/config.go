@@ -29,10 +29,30 @@ type DaemonConfig struct {
 }
 
 type RelayConfig struct {
-	Enabled bool   `toml:"enabled"`
-	Mode    string `toml:"mode"`
-	Listen  string `toml:"listen"`
-	DataDir string `toml:"data_dir"`
+	Enabled bool            `toml:"enabled"`
+	Mode    string          `toml:"mode"`
+	Listen  string          `toml:"listen"`
+	DataDir string          `toml:"data_dir"`
+	Auth    RelayAuthConfig `toml:"auth"`
+	TLS     RelayTLSConfig  `toml:"tls"`
+}
+
+// RelayAuthConfig governs NIP-42 AUTH enforcement on the embedded relay.
+// Required defaults to true (NIP-17 §Recommendations). ServiceURL overrides
+// khatru's auto-derived URL — useful when the relay sits behind a reverse
+// proxy whose Host header doesn't reflect the externally-reachable URL.
+type RelayAuthConfig struct {
+	Required   bool   `toml:"required"`
+	ServiceURL string `toml:"service_url"`
+}
+
+// RelayTLSConfig enables native TLS in the relay process. Both fields must
+// be set to take effect; setting only one is a startup error. No autocert
+// in this release — cert lifecycle is BYO (certbot, manual, etc.) and the
+// relay reloads the cert only on restart.
+type RelayTLSConfig struct {
+	CertFile string `toml:"cert_file"`
+	KeyFile  string `toml:"key_file"`
 }
 
 // RelayEnabled reports whether the embedded relay should run on this host.
@@ -60,6 +80,7 @@ func Defaults() Config {
 			Mode:    "paired",
 			Listen:  "0.0.0.0:22895",
 			DataDir: "relay",
+			Auth:    RelayAuthConfig{Required: true},
 		},
 		Dashboard: DashboardConfig{
 			Enabled: true,
