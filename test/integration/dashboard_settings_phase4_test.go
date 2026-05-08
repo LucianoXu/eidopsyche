@@ -14,9 +14,10 @@ import (
 )
 
 // relaySlug mirrors internal/dashboard/handlers_relays.go:relaySlug.
-// Duplicated here because internal/* can't import other internal/*
-// packages from test/integration cleanly without a build cycle, and
-// the slug is just sha256(url)[:8].
+// Duplicated here because internal/dashboard's slug helper isn't
+// exported. The byte slice is the first 8 bytes of sha256(url) — once
+// hex-encoded that produces a 16-character slug, matching the value
+// the dashboard's row partial puts in `id="relay-<slug>"`.
 func relaySlugForTest(rawURL string) string {
 	h := sha256.Sum256([]byte(rawURL))
 	return hex.EncodeToString(h[:8])

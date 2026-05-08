@@ -88,21 +88,31 @@ func (d *Daemon) AddOwnRelay(ctx context.Context, rawURL, role string) error {
 // home relays (the daemon needs at least one home target to publish
 // own messages, so we refuse here as defense-in-depth — the dashboard
 // also gates this behind the typed-confirm modal). Emits relay.removed.
+//
+// The role read, home-count check, and DELETE run inside a single
+// transaction so two concurrent removes can't both pass the
+// `homeCount <= 1` guard and leave zero home relays — SQLite's busy
+// handler serialises the txn, the second caller sees the post-DELETE
+// state, and its guard correctly refuses.
 func (d *Daemon) RemoveOwnRelay(ctx context.Context, rawURL string) error {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
 		return errOwnRelayInvalidURL
 	}
-	// Look up the row to learn its role; we need to know whether
-	// removing it would leave us with no home.
+	tx, err := d.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
 	var role string
-	if err := d.DB.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(ctx,
 		`SELECT role FROM own_relays WHERE relay_url=?`, rawURL).Scan(&role); err != nil {
 		return errOwnRelayNotFound
 	}
 	if role == "home" {
 		var homeCount int
-		if err := d.DB.QueryRowContext(ctx,
+		if err := tx.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM own_relays WHERE role='home'`).Scan(&homeCount); err != nil {
 			return fmt.Errorf("count home relays: %w", err)
 		}
@@ -110,13 +120,16 @@ func (d *Daemon) RemoveOwnRelay(ctx context.Context, rawURL string) error {
 			return errOwnRelayHomeRequired
 		}
 	}
-	res, err := d.DB.ExecContext(ctx,
+	res, err := tx.ExecContext(ctx,
 		`DELETE FROM own_relays WHERE relay_url=?`, rawURL)
 	if err != nil {
 		return fmt.Errorf("delete own_relay: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return errOwnRelayNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
 	}
 	d.Refresh()
 	d.emitDashEvent(dashboard.Event{Kind: "relay.removed"})

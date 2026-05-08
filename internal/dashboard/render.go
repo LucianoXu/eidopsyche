@@ -311,14 +311,15 @@ type settingsRelaysData struct {
 // characters (// : .) that aren't valid in CSS selectors or hx-target
 // queries.
 type ownRelayRow struct {
-	URL          string
-	Slug         string
-	Role         string
-	AddedAt      time.Time
-	State        string // "connected", "connecting", "error", "(unknown)"
-	LastError    string
-	LastEventAgo string // "5s" / "12m" / "1d" / "—"
-	IsLastHome   bool   // true when role==home AND HomeCount==1
+	URL            string
+	Slug           string
+	Role           string
+	AddedAt        time.Time
+	State          string // "connected", "connecting", "error", "auth-failed", "pending", "unknown"
+	LastError      string
+	LastEventAgo   string // "5s" / "12m" / "1d"
+	LastEventKnown bool   // true iff health snapshot has a non-zero LastEventAt
+	IsLastHome     bool   // true when role==home AND HomeCount==1
 }
 
 // sortContactsForSidebar orders contacts by most-recent activity, then by

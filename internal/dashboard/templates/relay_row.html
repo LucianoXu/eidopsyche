@@ -10,7 +10,7 @@
     </span>
   </td>
   <td class="relay-seen">
-    {{if eq .LastEventAgo "—"}}<span class="muted">—</span>{{else}}{{.LastEventAgo}} ago{{end}}
+    {{if .LastEventKnown}}{{.LastEventAgo}} ago{{else}}<span class="muted">—</span>{{end}}
   </td>
   <td class="relay-added">
     {{if .AddedAt.IsZero}}<span class="muted">—</span>

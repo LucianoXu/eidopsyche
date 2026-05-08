@@ -1349,10 +1349,14 @@ table.relays-table tbody tr.relay-row.is-home td.relay-url code { border-left: 2
 }
 .state-pill.is-connected     { color: var(--fg);   border-color: var(--rule-2); }
 .state-pill.is-connected     .state-dot { background: var(--fg); }
-.state-pill.is-connecting    { color: var(--fg-dim); border-color: var(--rule-2); }
-.state-pill.is-connecting    .state-dot { animation: state-blink 1200ms ease-in-out infinite; }
-.state-pill.is-error         { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
-.state-pill.is-error         .state-dot { background: var(--warn); }
+.state-pill.is-connecting,
+.state-pill.is-pending       { color: var(--fg-dim); border-color: var(--rule-2); }
+.state-pill.is-connecting    .state-dot,
+.state-pill.is-pending       .state-dot { animation: state-blink 1200ms ease-in-out infinite; }
+.state-pill.is-error,
+.state-pill.is-auth-failed   { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+.state-pill.is-error         .state-dot,
+.state-pill.is-auth-failed   .state-dot { background: var(--warn); }
 .state-pill.is-unknown       { color: var(--fg-mute); }
 .state-pill.is-unknown       .state-dot { background: transparent; border: 1px solid var(--fg-mute); }
 

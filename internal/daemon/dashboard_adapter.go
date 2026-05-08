@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -427,10 +428,31 @@ func (a dashboardAdapter) ListOwnRelays(ctx context.Context) ([]dashboard.OwnRel
 	return out, nil
 }
 
+// AddOwnRelay forwards to the daemon helper and translates the daemon's
+// internal sentinels into dashboard-facing ones so the handler doesn't
+// have to grep error strings to map onto HTTP status codes.
 func (a dashboardAdapter) AddOwnRelay(ctx context.Context, rawURL, role string) error {
-	return a.d.AddOwnRelay(ctx, rawURL, role)
+	err := a.d.AddOwnRelay(ctx, rawURL, role)
+	switch {
+	case errors.Is(err, errOwnRelayInvalidURL):
+		return fmt.Errorf("%w: %v", dashboard.ErrRelayInvalidURL, err)
+	case errors.Is(err, errOwnRelayInvalidRole):
+		return fmt.Errorf("%w: %v", dashboard.ErrRelayInvalidRole, err)
+	case errors.Is(err, errOwnRelayDuplicate):
+		return fmt.Errorf("%w: %v", dashboard.ErrRelayDuplicate, err)
+	}
+	return err
 }
 
 func (a dashboardAdapter) RemoveOwnRelay(ctx context.Context, rawURL string) error {
-	return a.d.RemoveOwnRelay(ctx, rawURL)
+	err := a.d.RemoveOwnRelay(ctx, rawURL)
+	switch {
+	case errors.Is(err, errOwnRelayInvalidURL):
+		return fmt.Errorf("%w: %v", dashboard.ErrRelayInvalidURL, err)
+	case errors.Is(err, errOwnRelayNotFound):
+		return fmt.Errorf("%w: %v", dashboard.ErrRelayNotFound, err)
+	case errors.Is(err, errOwnRelayHomeRequired):
+		return fmt.Errorf("%w: %v", dashboard.ErrRelayHomeRequired, err)
+	}
+	return err
 }

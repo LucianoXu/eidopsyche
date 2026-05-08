@@ -128,17 +128,19 @@ func handleRelayRemove(w http.ResponseWriter, req *http.Request, r *renderer, lo
 		}
 	}
 	if err := deps.RemoveOwnRelay(ctx, row.URL); err != nil {
-		// Map the daemon's defensive refusals to specific status codes
-		// so a stale Remove click doesn't turn into a 500.
-		msg := err.Error()
+		// Map the typed sentinels onto specific status codes so a stale
+		// Remove click doesn't turn into a 500. Anything else surfaces
+		// as 502 with the wrapped error.
 		switch {
-		case strings.Contains(msg, "not in own_relays"):
-			http.Error(w, msg, http.StatusNotFound)
-		case strings.Contains(msg, "at least one home relay"):
-			http.Error(w, msg, http.StatusBadRequest)
+		case errors.Is(err, ErrRelayNotFound):
+			http.Error(w, err.Error(), http.StatusNotFound)
+		case errors.Is(err, ErrRelayHomeRequired):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		case errors.Is(err, ErrRelayInvalidURL):
+			http.Error(w, err.Error(), http.StatusBadRequest)
 		default:
 			logger.Warn("dashboard relay-remove failed", "err", err)
-			http.Error(w, "remove failed: "+msg, http.StatusBadGateway)
+			http.Error(w, "remove failed: "+err.Error(), http.StatusBadGateway)
 		}
 		return
 	}
@@ -161,14 +163,17 @@ func renderRelayRemoveModal(w http.ResponseWriter, r *renderer, logger *slog.Log
 		http.Error(w, "relay not found", http.StatusNotFound)
 		return
 	}
-	// Only home-relay removals route through this modal; the row's
-	// Remove button on a fallback row POSTs straight to /remove. If
-	// somehow a non-home slug arrives here, fall through to the same
-	// modal — the operator typing the URL is still meaningful UX.
-	body := fmt.Sprintf("Remove %s relay %s.", row.Role, row.URL)
-	if row.Role == "home" {
-		body += " The daemon needs at least one home target to publish; if this is your only home, the action is refused."
+	// Only home-relay removals require the typed-confirm modal —
+	// fallback rows POST straight to /remove via hx-confirm. A
+	// fallback slug landing here means the caller hand-crafted the URL
+	// (browser nav, curl); refuse with 400 rather than offering the
+	// modal as an alternative path that bypasses hx-confirm's
+	// browser dialog.
+	if row.Role != "home" {
+		http.Error(w, "confirm-remove modal is for home relays only", http.StatusBadRequest)
+		return
 	}
+	body := fmt.Sprintf("Remove home relay %s. The daemon needs at least one home target to publish; if this is your only home, the action is refused.", row.URL)
 	out, rerr := r.Render("confirm_modal", confirmModalData{
 		Action:         "/settings/relays/" + slug + "/remove",
 		Target:         "#settings-pane",
@@ -240,12 +245,16 @@ func buildSettingsRelays(ctx context.Context, deps DashboardDeps, addErr string)
 			row.LastError = h.LastError
 			if h.LastEventAt > 0 {
 				row.LastEventAgo = humanSince(time.Duration(now-h.LastEventAt) * time.Second)
-			} else {
-				row.LastEventAgo = "—"
+				row.LastEventKnown = true
 			}
 		} else {
-			row.State = "(unknown)"
-			row.LastEventAgo = "—"
+			// No relay-health entry yet (race between own_relays
+			// insert and the subscriber's first connect attempt). The
+			// state class must be a CSS-safe identifier so
+			// `is-{{.State}}` always lands on a real `.state-pill.is-*`
+			// rule; "unknown" pairs with the .is-unknown styling and
+			// the template renders "—" via LastEventKnown=false.
+			row.State = "unknown"
 		}
 		out.Rows = append(out.Rows, row)
 	}

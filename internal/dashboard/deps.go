@@ -4,6 +4,7 @@ package dashboard
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
@@ -141,6 +142,17 @@ type OwnRelay struct {
 	Role    string
 	AddedAt int64 // Unix timestamp; 0 if unknown
 }
+
+// ErrRelay* are the typed errors AddOwnRelay and RemoveOwnRelay return.
+// Handlers map them to HTTP status codes via errors.Is, avoiding the
+// brittle err.Error() substring-matching the first cut used.
+var (
+	ErrRelayInvalidURL   = errors.New("relay: invalid URL")
+	ErrRelayInvalidRole  = errors.New("relay: invalid role")
+	ErrRelayDuplicate    = errors.New("relay: already on file")
+	ErrRelayNotFound     = errors.New("relay: not on file")
+	ErrRelayHomeRequired = errors.New("relay: at least one home relay must remain")
+)
 
 // InviteCreateOpts is the dashboard-local form of the create-invite
 // request body. Negative ExpiresSeconds means "no expiry"; zero means
