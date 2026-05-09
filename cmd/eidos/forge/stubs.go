@@ -34,4 +34,3 @@ func newOntologyStatusCmd() *cobra.Command {
 	return stub("ontology-status", "git status + log on /eidos/ontology")
 }
 func newWakeInContainerCmd() *cobra.Command { return stub("wake", "in-container wake submission") }
-func newInitVolumeCmd() *cobra.Command      { return stub("init-volume", "init container entry (internal)") }
