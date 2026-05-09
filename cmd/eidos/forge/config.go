@@ -12,7 +12,8 @@ import (
 )
 
 type configFlags struct {
-	model string
+	model    string
+	modelSet bool // distinguishes "--model not given" from "--model \"\""
 }
 
 func newConfigCmd() *cobra.Command {
@@ -34,6 +35,7 @@ inside the container, so the registry's validation runs once.`,
 			if err := forgectl.ValidateName(name); err != nil {
 				return err
 			}
+			f.modelSet = cmd.Flags().Changed("model")
 			argv, err := buildConfigDockerArgv(name, f)
 			if err != nil {
 				return err
@@ -45,7 +47,7 @@ inside the container, so the registry's validation runs once.`,
 			return c.Run()
 		},
 	}
-	cmd.Flags().StringVar(&f.model, "model", "", "pin the claude model id (e.g. claude-sonnet-4-7)")
+	cmd.Flags().StringVar(&f.model, "model", "", `pin the claude model id (e.g. claude-sonnet-4-7); pass --model "" to unpin`)
 	return cmd
 }
 
@@ -53,9 +55,14 @@ inside the container, so the registry's validation runs once.`,
 // config update. Today only --model is supported; if more keys arrive
 // the cobra command grows a flag for each. Pre-validates on the host so
 // a typo aborts before we shell out.
+//
+// Empty --model is meaningful: pass --model "" to clear a previously
+// pinned model and let claude pick its subscription default. f.modelSet
+// distinguishes this from "the operator did not pass --model" (which is
+// an error — forge config without any flag has nothing to do).
 func buildConfigDockerArgv(name string, f configFlags) ([]string, error) {
-	if f.model == "" {
-		return nil, fmt.Errorf("forge config requires --model <id>")
+	if !f.modelSet {
+		return nil, fmt.Errorf("forge config requires --model <id> (pass --model \"\" to unpin)")
 	}
 	if err := config.ValidateModelID(f.model); err != nil {
 		return nil, fmt.Errorf("invalid --model: %w", err)

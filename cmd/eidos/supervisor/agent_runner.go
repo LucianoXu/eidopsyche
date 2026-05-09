@@ -127,10 +127,14 @@ func releaseAgentLock(f *os.File) {
 }
 
 // buildClaudeArgs constructs the argv passed to `claude` for one wake.
-// Reads the mind-form config to pick up an optional model pin. Errors
-// loading config are non-fatal — agent-runner falls back to claude's
-// default model so an unreachable / malformed config does not silently
-// brick wakes.
+// Reads the mind-form config to pick up an optional model pin.
+//
+// Config-load errors are tolerated: a missing or malformed config.toml
+// drops us back to claude's subscription default rather than bricking
+// the wake. Once a config loads, the model id is passed through
+// verbatim — host-side commands (forge create / forge config) validate
+// the id; a stale / hand-edited config with an unknown id surfaces at
+// the next wake when claude itself rejects it.
 func buildClaudeArgs(identity, msg, configPath string) []string {
 	args := []string{
 		"--append-system-prompt", identity,

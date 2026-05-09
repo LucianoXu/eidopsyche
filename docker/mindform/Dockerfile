@@ -65,11 +65,15 @@ COPY --from=claude /usr/local/bin/claude /usr/local/bin/claude
 COPY docker/mindform/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Crontab lives in the per-user spool. busybox crond -c reads each
-# file as that named user's crontab; eidos's spool entry runs the
-# heartbeat as eidos.
+# file as that named user's crontab and runs the job as that user
+# (via setuid). The crontab file itself MUST be owned by root, mode
+# 0600 — busybox crond silently ignores user-owned crontab files
+# (presumably to prevent privilege escalation by tampering with the
+# spool). The supervisor then runs crond as root via sudo so it can
+# setuid into eidos to run the heartbeat.
 COPY docker/mindform/crontab /var/spool/cron/crontabs/eidos
 RUN chmod +x /usr/local/bin/entrypoint.sh \
- && chown eidos:eidos /var/spool/cron/crontabs/eidos \
+ && chown root:root /var/spool/cron/crontabs/eidos \
  && chmod 0600 /var/spool/cron/crontabs/eidos \
  && rm -f /etc/crontabs/root
 

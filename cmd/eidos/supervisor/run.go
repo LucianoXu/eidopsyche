@@ -41,11 +41,15 @@ func newRunCmd() *cobra.Command {
 // Returns the first non-nil error so the caller can abort before entering
 // the wake loop.
 func startChildren(ctx context.Context, sp ChildSpawner) error {
-	// busybox crond reads each file in the spool dir as a user's
-	// crontab keyed by filename. We use /var/spool/cron/crontabs
-	// (the per-user spool); the image installs the heartbeat
-	// crontab as eidos's spool entry.
-	if err := sp.Spawn(ctx, "crond", "-f", "-c", "/var/spool/cron/crontabs"); err != nil {
+	// busybox crond requires its user crontab files to be root-owned
+	// (it silently ignores user-owned spool entries, presumably to
+	// prevent privilege escalation by tampering with the spool) AND
+	// crond itself must be root so it can setuid into the user named
+	// by the spool filename. The supervisor runs as eidos, so we use
+	// sudo (NOPASSWD per /etc/sudoers.d/eidos) to spawn crond as root.
+	// The heartbeat command then runs as eidos via crond's setuid
+	// because the crontab file is named "eidos".
+	if err := sp.Spawn(ctx, "sudo", "-n", "crond", "-f", "-c", "/var/spool/cron/crontabs"); err != nil {
 		return err
 	}
 	return sp.Spawn(ctx, "eidos", "gate", "daemon", "--state-dir", gateDir)
