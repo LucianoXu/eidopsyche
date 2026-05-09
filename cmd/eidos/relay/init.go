@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -39,11 +40,12 @@ func resolveOwnerPubkey(s string) (string, error) {
 }
 
 type initOpts struct {
-	dir    string
-	mode   string
-	listen string
-	owner  string
-	force  bool
+	dir     string
+	mode    string
+	listen  string
+	owner   string
+	force   bool
+	service bool
 }
 
 var initFlags initOpts
@@ -121,6 +123,17 @@ func runInit(o initOpts) error {
 	store.Close()
 
 	fmt.Printf("relay initialized at %s\n", o.dir)
+
+	if o.service {
+		mgr, err := buildRelayServiceManager(o.dir)
+		if err != nil {
+			return fmt.Errorf("install service: %w", err)
+		}
+		if err := mgr.StartRelay(context.Background(), o.dir); err != nil {
+			return fmt.Errorf("start service: %w", err)
+		}
+		fmt.Printf("✓ eidos-relay service installed and started\n")
+	}
 	return nil
 }
 
@@ -130,5 +143,10 @@ func init() {
 	initCmd.Flags().StringVar(&initFlags.listen, "listen", "", "address to bind, e.g. 0.0.0.0:7777 (required)")
 	initCmd.Flags().StringVar(&initFlags.owner, "owner", "", "owner pubkey, npub1… or 64-char hex (required iff --mode=paired)")
 	initCmd.Flags().BoolVar(&initFlags.force, "force", false, "overwrite existing config")
+	initCmd.Flags().BoolVar(&initFlags.service, "service", false, "after initializing, install and start the eidos-relay service in one step")
+	// --system here writes to the same package-level svcSystem variable that
+	// `eidos relay service ...` uses, so `init --service --system` selects
+	// host-wide unit installation. Default (unset) = per-user scope.
+	initCmd.Flags().BoolVar(&svcSystem, "system", false, "with --service: install host-wide instead of per-user (Linux: /etc/systemd/system, root)")
 	rootCmd.AddCommand(initCmd)
 }
