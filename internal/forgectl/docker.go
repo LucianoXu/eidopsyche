@@ -34,7 +34,18 @@ type Client interface {
 	// stdout+stderr and exit code. Container is auto-removed on exit.
 	RunInit(ctx context.Context, opts RunInitOpts) (RunInitResult, error)
 
+	// ContainerExec runs a command inside a running container and returns the
+	// combined output and exit code.
+	ContainerExec(ctx context.Context, name string, cmd []string) (ExecResult, error)
+
 	ImagePull(ctx context.Context, ref string, w io.Writer) error
+}
+
+// ExecResult is the outcome of a docker exec.
+type ExecResult struct {
+	ExitCode int
+	Stdout   []byte
+	Stderr   []byte
 }
 
 // CreateOpts is the subset of container create the forge orchestrator uses.
@@ -230,6 +241,31 @@ func (r *realClient) RunInit(ctx context.Context, opts RunInitOpts) (RunInitResu
 		return res, nil
 	}
 	return RunInitResult{Stdout: outBuf.Bytes(), Stderr: errBuf.Bytes()}, nil
+}
+
+func (r *realClient) ContainerExec(ctx context.Context, name string, cmdv []string) (ExecResult, error) {
+	resp, err := r.c.ContainerExecCreate(ctx, name, container.ExecOptions{
+		Cmd:          cmdv,
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+	if err != nil {
+		return ExecResult{}, fmt.Errorf("exec create: %w", err)
+	}
+	att, err := r.c.ContainerExecAttach(ctx, resp.ID, container.ExecStartOptions{})
+	if err != nil {
+		return ExecResult{}, fmt.Errorf("exec attach: %w", err)
+	}
+	defer att.Close()
+	var outBuf, errBuf writeBuffer
+	if _, err := stdcopy.StdCopy(&outBuf, &errBuf, att.Reader); err != nil {
+		return ExecResult{}, err
+	}
+	insp, err := r.c.ContainerExecInspect(ctx, resp.ID)
+	if err != nil {
+		return ExecResult{}, err
+	}
+	return ExecResult{ExitCode: insp.ExitCode, Stdout: outBuf.Bytes(), Stderr: errBuf.Bytes()}, nil
 }
 
 // writeBuffer is a tiny buffer that is also a slice accessor.

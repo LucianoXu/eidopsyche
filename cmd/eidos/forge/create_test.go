@@ -52,6 +52,9 @@ func (f *fakeClient) RunInit(_ context.Context, opts forgectl.RunInitOpts) (forg
 	f.inits = append(f.inits, opts)
 	return forgectl.RunInitResult{ExitCode: 0}, nil
 }
+func (f *fakeClient) ContainerExec(_ context.Context, _ string, _ []string) (forgectl.ExecResult, error) {
+	return forgectl.ExecResult{}, nil
+}
 
 // fakeClientPullErr wraps fakeClient to override ImagePull with an error func.
 type fakeClientPullErr struct {

@@ -14,8 +14,7 @@ func stub(use, short string) *cobra.Command {
 	}
 }
 
-func newStatusCmd() *cobra.Command   { return stub("status <name>", "show mind-form status") }
-func newListCmd() *cobra.Command     { return stub("list", "list mind-forms") }
+func newListCmd() *cobra.Command { return stub("list", "list mind-forms") }
 func newLogsCmd() *cobra.Command     { return stub("logs <name>", "show mind-form logs") }
 func newExecCmd() *cobra.Command     { return stub("exec <name>", "exec into mind-form container") }
 func newWakeHostCmd() *cobra.Command { return stub("wake <name>", "wake a mind-form") }
