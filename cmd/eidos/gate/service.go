@@ -35,12 +35,7 @@ func addSystemFlag(cmd *cobra.Command) {
 // path, the resolved gate state directory, and the --system flag. Returns
 // a typed error when the host platform has no service-manager support so
 // callers can produce a friendly message.
-//
-// withRelay controls whether Install / Start will manage the relay unit.
-// stop / status / purge pass false because their backing methods iterate
-// both unit names regardless; only start needs the live config value
-// (use buildServiceManagerForStart for that).
-func buildServiceManager(withRelay bool) (service.Manager, error) {
+func buildServiceManager() (service.Manager, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("locate eidos binary: %w", err)
@@ -57,17 +52,16 @@ func buildServiceManager(withRelay bool) (service.Manager, error) {
 		BinaryPath: exe,
 		StateDir:   stateDir,
 		Scope:      scope,
-		WithRelay:  withRelay,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrUnsupported) {
 			return nil, fmt.Errorf(`%w
 Run the daemon and relay manually instead. Linux/macOS:
   eidos gate daemon &
-  eidos gate relay &
+  eidos relay start &
 PowerShell:
   Start-Job -Name eidos-gate -ScriptBlock { eidos.exe gate daemon }
-  Start-Job -Name eidos-relay -ScriptBlock { eidos.exe gate relay }`, err)
+  Start-Job -Name eidos-relay -ScriptBlock { eidos.exe relay start }`, err)
 		}
 		return nil, err
 	}

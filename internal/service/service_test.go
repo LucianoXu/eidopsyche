@@ -12,9 +12,10 @@ import (
 
 // These tests exercise the file-content + filesystem logic of the systemd
 // manager. They deliberately avoid running `systemctl` itself: they steer
-// every code path that doesn't shell out, plus they verify Install writes
-// the expected files. The systemctl-driven branches (Start, Stop, Status's
-// is-active probe) are exercised by the end-to-end smoke test on the host.
+// every code path that doesn't shell out, plus they verify InstallDaemon /
+// InstallRelay write the expected files. The systemctl-driven branches
+// (StartDaemon, StopDaemon, Status's is-active probe) are exercised by the
+// end-to-end smoke test on the host.
 
 func newTestManager(t *testing.T) (*systemd, string) {
 	t.Helper()
@@ -31,7 +32,7 @@ func TestUnitContentEmbedsBinaryAndStateDir(t *testing.T) {
 	mgr, _ := newTestManager(t)
 
 	daemon := mgr.daemonUnit()
-	relay := mgr.relayUnit()
+	relay := mgr.relayUnit("/tmp/relay-dir")
 
 	for _, want := range []string{
 		"ExecStart=/usr/local/bin/eidos gate daemon",
@@ -44,9 +45,10 @@ func TestUnitContentEmbedsBinaryAndStateDir(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"ExecStart=/usr/local/bin/eidos gate relay",
-		"Environment=EIDOS_GATE_HOME=/tmp/test-state",
-		"After=eidos-gate-daemon.service",
+		"ExecStart=/usr/local/bin/eidos relay start --dir /tmp/relay-dir",
+		"Environment=EIDOS_RELAY_HOME=/tmp/relay-dir",
+		"WorkingDirectory=/tmp/relay-dir",
+		"After=network-online.target",
 	} {
 		if !strings.Contains(relay, want) {
 			t.Errorf("relay unit missing %q\nfull:\n%s", want, relay)
@@ -56,10 +58,15 @@ func TestUnitContentEmbedsBinaryAndStateDir(t *testing.T) {
 
 func TestUnitContentOmitsEmptyStateDir(t *testing.T) {
 	mgr := &systemd{cfg: Config{BinaryPath: "/eidos", Scope: ScopeUser}}
-	for name, content := range map[string]string{"daemon": mgr.daemonUnit(), "relay": mgr.relayUnit()} {
-		if strings.Contains(content, "Environment=EIDOS_GATE_HOME=") {
-			t.Errorf("%s: empty StateDir should not produce an Environment= line\n%s", name, content)
-		}
+	if strings.Contains(mgr.daemonUnit(), "Environment=EIDOS_GATE_HOME=") {
+		t.Errorf("daemon: empty StateDir should not produce an Environment= line\n%s", mgr.daemonUnit())
+	}
+	relay := mgr.relayUnit("")
+	if strings.Contains(relay, "Environment=EIDOS_RELAY_HOME=") {
+		t.Errorf("relay: empty relayDir should not produce an Environment= line\n%s", relay)
+	}
+	if strings.Contains(relay, "WorkingDirectory=") {
+		t.Errorf("relay: empty relayDir should not produce a WorkingDirectory= line\n%s", relay)
 	}
 }
 
@@ -181,15 +188,6 @@ func TestScopeString(t *testing.T) {
 	}
 }
 
-func TestConfigWithRelayDefault(t *testing.T) {
-	// Daemon-only is the default; opting in to the local relay must be
-	// explicit at the call site.
-	cfg := Config{}
-	if cfg.WithRelay {
-		t.Errorf("zero-value Config.WithRelay = true, want false")
-	}
-}
-
 func TestSystemdInstallDaemonOnly(t *testing.T) {
 	tmp := t.TempDir()
 	mgr := &systemd{cfg: Config{
@@ -197,36 +195,38 @@ func TestSystemdInstallDaemonOnly(t *testing.T) {
 		StateDir:   "/tmp/test-state",
 		Scope:      ScopeUser,
 		UnitDir:    tmp,
-		WithRelay:  false,
 	}}
-	// Install attempts `systemctl daemon-reload` at the end of its body;
-	// in the test env systemctl typically isn't on PATH so that step
-	// errors. We deliberately discard the error here because the unit
-	// files are written *before* the daemon-reload call, and those file
-	// artifacts are what this test inspects.
-	_ = mgr.Install(context.Background())
+	// InstallDaemon attempts `systemctl daemon-reload` at the end; in the test
+	// env systemctl typically isn't on PATH so that step errors. We deliberately
+	// discard the error here because the unit file is written *before* the
+	// daemon-reload call, and that file artifact is what this test inspects.
+	_ = mgr.InstallDaemon(context.Background())
 	if _, err := os.Stat(filepath.Join(tmp, DaemonUnitName+".service")); err != nil {
 		t.Errorf("daemon unit not written: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(tmp, RelayUnitName+".service")); !os.IsNotExist(err) {
-		t.Errorf("relay unit was written despite WithRelay=false; err=%v", err)
+		t.Errorf("relay unit was written by InstallDaemon; err=%v", err)
 	}
 }
 
-func TestSystemdInstallBothUnits(t *testing.T) {
+func TestSystemdInstallRelayOnly(t *testing.T) {
 	tmp := t.TempDir()
 	mgr := &systemd{cfg: Config{
 		BinaryPath: "/usr/local/bin/eidos",
-		StateDir:   "/tmp/test-state",
 		Scope:      ScopeUser,
 		UnitDir:    tmp,
-		WithRelay:  true,
 	}}
-	_ = mgr.Install(context.Background())
-	if _, err := os.Stat(filepath.Join(tmp, DaemonUnitName+".service")); err != nil {
-		t.Errorf("daemon unit not written: %v", err)
-	}
+	_ = mgr.InstallRelay(context.Background(), "/tmp/relay-dir")
 	if _, err := os.Stat(filepath.Join(tmp, RelayUnitName+".service")); err != nil {
-		t.Errorf("relay unit not written despite WithRelay=true: %v", err)
+		t.Errorf("relay unit not written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, DaemonUnitName+".service")); !os.IsNotExist(err) {
+		t.Errorf("daemon unit was written by InstallRelay; err=%v", err)
+	}
+}
+
+func TestSystemdRelayUnitName(t *testing.T) {
+	if RelayUnitName != "eidos-relay" {
+		t.Errorf("RelayUnitName = %q, want %q", RelayUnitName, "eidos-relay")
 	}
 }

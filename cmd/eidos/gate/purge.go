@@ -17,13 +17,16 @@ var purgeYes bool
 
 var purgeCmd = &cobra.Command{
 	Use:   "purge",
-	Short: "Stop services, remove units, and delete the gate state directory",
+	Short: "Stop the gate daemon service, remove its unit, and delete the gate state directory",
 	Long: `Wipes everything this host knows about the gate identity:
-  1) stops the daemon and relay services if running
-  2) deregisters them from the host service manager
-     (systemd unit files on Linux, launchd plists on macOS, SCM
-     service entries on Windows)
+  1) stops the gate daemon service if running
+  2) deregisters it from the host service manager
+     (systemd unit file on Linux, launchd plist on macOS, SCM
+     service entry on Windows)
   3) deletes the gate state directory (key, state.db, config.toml, relay/)
+
+Removes the gate daemon unit only. Run 'eidos relay service uninstall'
+to remove the relay unit.
 
 Useful for tearing down test deployments and starting from a clean slate.
 
@@ -36,12 +39,13 @@ By default purge prompts for confirmation. Pass --yes to skip the prompt
 		if err != nil {
 			return err
 		}
-		mgr, _ := buildServiceManager(false) // may be nil on platforms without service support — fine, we still wipe state
+		mgr, _ := buildServiceManager() // may be nil on platforms without service support — fine, we still wipe state
 
 		fmt.Println("This will permanently remove:")
 		fmt.Printf("  - state directory: %s\n", stateDir)
 		if mgr != nil {
-			fmt.Printf("  - service entries: %s, %s (host service manager)\n", service.DaemonUnitName, service.RelayUnitName)
+			fmt.Printf("  - service entry: %s (host service manager)\n", service.DaemonUnitName)
+			fmt.Printf("  - (relay unit %s not touched; run 'eidos relay service uninstall' to remove it)\n", service.RelayUnitName)
 		} else {
 			fmt.Println("  - (system services not supported on this platform; skipping unit teardown)")
 		}
@@ -61,10 +65,10 @@ By default purge prompts for confirmation. Pass --yes to skip the prompt
 
 		ctx := context.Background()
 		if mgr != nil {
-			if err := mgr.Uninstall(ctx); err != nil {
-				return fmt.Errorf("uninstall services: %w", err)
+			if err := mgr.UninstallDaemon(ctx); err != nil {
+				return fmt.Errorf("uninstall gate daemon: %w", err)
 			}
-			fmt.Println("✓ services uninstalled")
+			fmt.Println("✓ gate daemon uninstalled")
 		}
 
 		if err := os.RemoveAll(stateDir); err != nil {
