@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -308,5 +309,42 @@ func TestDispatch_InboundAck_FirstAckWins(t *testing.T) {
 	rows, _ := d.Box.ListOutbox(nil, "", 0)
 	if rows[0].AckEventID != "ackwrap-original" {
 		t.Errorf("first-ack-wins violated: got %s", rows[0].AckEventID)
+	}
+}
+
+// TestDispatch_InboundAck_NoInboxNoWake guards against regressions of the
+// "ack must not surface as an inbox row and must not trigger a wake" rule.
+// Failure here would mean acks become user-visible chat or fire wake signals,
+// either of which would defeat the daemon-control nature of tier-2.
+func TestDispatch_InboundAck_NoInboxNoWake(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	to := "bob-pubkey-hex"
+	if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: to, Tier: contacts.TierFriend}); err != nil {
+		t.Fatal(err)
+	}
+	_ = d.Box.AppendOutbox(inbox.Sent{V: 1, EventID: "evW", InnerID: ackTestRumorRef, To: to, SentAt: 100})
+
+	wakeDir := t.TempDir()
+	d.wakeDir = wakeDir
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeAck, Ref: ackTestRumorRef}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ackwrap1"}, makeRumor(to, content))
+
+	// No inbox row should appear for the ack envelope.
+	msgs, _ := d.Box.ListInbox(nil, "", 0)
+	for _, m := range msgs {
+		if m.From == to {
+			t.Errorf("ack created inbox row: %+v", m)
+		}
+	}
+
+	// No wake-pending file should have been written.
+	entries, _ := os.ReadDir(wakeDir)
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".discarded") {
+			t.Errorf("ack triggered wake file: %s", e.Name())
+		}
 	}
 }
