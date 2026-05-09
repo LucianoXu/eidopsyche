@@ -10,7 +10,8 @@ import (
 )
 
 func newExecCmd() *cobra.Command {
-	return &cobra.Command{
+	var asUser string
+	cmd := &cobra.Command{
 		Use:                   "exec <name> [-- <cmd...>]",
 		Short:                 "Run an interactive shell or command inside the mind-form container",
 		Args:                  cobra.MinimumNArgs(1),
@@ -34,7 +35,12 @@ func newExecCmd() *cobra.Command {
 			if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
 				flags = "-it"
 			}
-			argv := append([]string{"exec", flags, forgectl.ContainerName(name)}, rest...)
+			argv := []string{"exec", flags}
+			if asUser != "" {
+				argv = append(argv, "-u", asUser)
+			}
+			argv = append(argv, forgectl.ContainerName(name))
+			argv = append(argv, rest...)
 			c := exec.Command("docker", argv...) //nolint:gosec // argv built from validated inputs
 			c.Stdin = os.Stdin
 			c.Stdout = os.Stdout
@@ -42,4 +48,6 @@ func newExecCmd() *cobra.Command {
 			return c.Run()
 		},
 	}
+	cmd.Flags().StringVar(&asUser, "user", "", `run as a specific user (e.g. "root" or "1000:1000"); default is the image's USER`)
+	return cmd
 }

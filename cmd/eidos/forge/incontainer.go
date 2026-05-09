@@ -24,6 +24,7 @@ func registerHost(root *cobra.Command) {
 		newLoginCmd(),
 		newOntologyCmd(),
 		newPurgeCmd(),
+		newConfigCmd(),
 	)
 }
 

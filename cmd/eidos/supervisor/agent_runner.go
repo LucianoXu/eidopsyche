@@ -12,9 +12,15 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 	"github.com/spf13/cobra"
 )
+
+// gateConfigPath is the in-container path to the gate's config.toml.
+// Hard-coded because the supervisor runs only inside the mind-form
+// container; the host's gate config never reaches this code path.
+const gateConfigPath = "/eidos/gate/config.toml"
 
 // EXIT_AUTH_REQUIRED is the exit code agent-runner uses when Claude's
 // /login token is expired or missing. The supervisor surfaces this state
@@ -64,32 +70,12 @@ func runAgent(wakeFile, ontologyDir string) error {
 		SinceLastWakeSeconds: sig.Context.SinceLastWakeSeconds,
 	})
 
-	// --permission-mode auto: a mind-form is invoked non-interactively
-	// from the supervisor; there is no operator on the other end of
-	// stdin to approve every Bash / Edit / Write tool call. Without an
-	// auto-accept mode, the agent can think but cannot act (`eidos gate
-	// send` returns "requires approval", file writes to memory/episodic
-	// are blocked). The container is the sandbox boundary — per SPEC,
-	// the volume + isolated process + scoped network are exactly the
-	// "trust-the-walls" frame this mode is designed for.
-	//
-	// Mode choice notes:
-	//   - bypassPermissions / --dangerously-skip-permissions: refuses
-	//     to run as uid 0, which is exactly what supervisor →
-	//     agent-runner → claude looks like in our root-by-default
-	//     container today. (Switching to a non-root user is a future
-	//     image improvement; for now we work with what root permits.)
-	//   - dontAsk: misleading name — it actually auto-DENIES tool
-	//     calls, leaving the agent able to read but not act. Caused
-	//     a memorable "alice is locked-in" wake on first deploy.
-	//   - acceptEdits: auto-accepts file edits but still gates Bash.
-	//   - auto: auto-accepts everything (Bash, Edit, Write, Read, …)
-	//     and runs cleanly as root. This is what we want.
-	c := exec.Command("claude",
-		"--append-system-prompt", string(identity),
-		"--permission-mode", "auto",
-		"-p", msg,
-	)
+	// The container is the trust boundary; --dangerously-skip-permissions
+	// is the documented sandbox path. Optional --model pins the model
+	// id when the operator has set mindform.model. See
+	// docs/superpowers/specs/2026-05-09-non-root-mindform-and-model-config-design.md.
+	args := buildClaudeArgs(string(identity), msg, gateConfigPath)
+	c := exec.Command("claude", args...)
 	c.Dir = ontologyDir
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
@@ -138,6 +124,29 @@ func acquireAgentLock(path string) (*os.File, error) {
 func releaseAgentLock(f *os.File) {
 	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 	_ = f.Close()
+}
+
+// buildClaudeArgs constructs the argv passed to `claude` for one wake.
+// Reads the mind-form config to pick up an optional model pin.
+//
+// Config-load errors are tolerated: a missing or malformed config.toml
+// drops us back to claude's subscription default rather than bricking
+// the wake. Once a config loads, the model id is passed through
+// verbatim — host-side commands (forge create / forge config) validate
+// the id; a stale / hand-edited config with an unknown id surfaces at
+// the next wake when claude itself rejects it.
+func buildClaudeArgs(identity, msg, configPath string) []string {
+	args := []string{
+		"--append-system-prompt", identity,
+		"--dangerously-skip-permissions",
+	}
+	if cfg, err := config.Load(configPath); err == nil {
+		if model := cfg.MindForm.Model; model != "" {
+			args = append(args, "--model", model)
+		}
+	}
+	args = append(args, "-p", msg)
+	return args
 }
 
 // isAuthError detects Claude's auth-required exit conditions. Heuristic:

@@ -40,18 +40,48 @@ RUN npm install -g @anthropic-ai/claude-code@latest
 
 # ---- Stage 4: final image ----
 FROM alpine:3.19
-RUN apk add --no-cache busybox-extras ca-certificates git tini bash nodejs
+
+# busybox-extras provides crond. sudo gives the eidos user a NOPASSWD
+# escalation path for explicit privilege; the container itself is the
+# trust boundary.
+RUN apk add --no-cache \
+        busybox-extras ca-certificates git tini bash nodejs sudo
+
+# Non-root daily-ops user. claude-code refuses to run as uid 0 with
+# --dangerously-skip-permissions, so daily ops (supervisor, gate
+# daemon, claude, crond) run as eidos:1000. sudo NOPASSWD lets alice
+# escalate when she genuinely needs root; passwd -l locks the root
+# account so the only path to root is via sudo.
+RUN addgroup -g 1000 eidos \
+ && adduser  -u 1000 -G eidos -h /eidos/claude -s /bin/sh -D eidos \
+ && echo 'eidos ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/eidos \
+ && chmod 0440 /etc/sudoers.d/eidos \
+ && passwd -l root
+
 COPY --from=build /out/eidos /usr/local/bin/eidos
 COPY --from=repobundle /opt/eidopsyche-bundle /opt/eidopsyche-bundle.git
 COPY --from=claude /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=claude /usr/local/bin/claude /usr/local/bin/claude
 COPY docker/mindform/entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY docker/mindform/crontab /etc/crontabs/root
-RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Crontab lives in the per-user spool. busybox crond -c reads each
+# file as that named user's crontab and runs the job as that user
+# (via setuid). The crontab file itself MUST be owned by root, mode
+# 0600 — busybox crond silently ignores user-owned crontab files
+# (presumably to prevent privilege escalation by tampering with the
+# spool). The supervisor then runs crond as root via sudo so it can
+# setuid into eidos to run the heartbeat.
+COPY docker/mindform/crontab /var/spool/cron/crontabs/eidos
+RUN chmod +x /usr/local/bin/entrypoint.sh \
+ && chown root:root /var/spool/cron/crontabs/eidos \
+ && chmod 0600 /var/spool/cron/crontabs/eidos \
+ && rm -f /etc/crontabs/root
 
 ENV EIDOS_IN_CONTAINER=1
 ENV EIDOS_GATE_HOME=/eidos/gate
 ENV HOME=/eidos/claude
+
+USER eidos
 
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["/usr/local/bin/entrypoint.sh"]

@@ -95,6 +95,10 @@ func runInitVolume(stdout, stderr io.Writer, stdin io.Reader) error {
 		return fmt.Errorf("save gate config (wake dir): %w", err)
 	}
 
+	if err := applyModelEnv(cfgPath, os.Getenv("EIDOS_FORGE_MODEL")); err != nil {
+		return fmt.Errorf("save gate config (model): %w", err)
+	}
+
 	// Add the master contact directly to state.db. We bypass `eidos gate
 	// add-contact` here on purpose: per the SPEC's single-call-path rule,
 	// every operator action goes through the gate daemon's methodTable —
@@ -125,8 +129,50 @@ func runInitVolume(stdout, stderr io.Writer, stdin io.Reader) error {
 		return fmt.Errorf("git commit: %w", err)
 	}
 
+	// Final ownership pass: init-volume runs as root via
+	// RunInitOpts.User="0:0" so it can extract the template tar, clone
+	// the bundle, and git-init the parent ontology with full privileges.
+	// The persistent container starts as eidos (uid 1000, image's USER
+	// directive), so we hand the volume off here. Hard-coded uid:gid
+	// 1000:1000 matches the Dockerfile's addgroup/adduser; resolving
+	// "eidos" via os/user would add a CGO dependency this binary avoids
+	// on principle.
+	if err := chownTree("/eidos", 1000, 1000); err != nil {
+		return fmt.Errorf("chown /eidos to eidos:eidos: %w", err)
+	}
+
 	fmt.Fprintln(stdout, "init-volume: ok")
 	return nil
+}
+
+// chownTree recursively chowns every entry under root to uid:gid. Uses
+// Lchown so symlinks themselves get chowned, not their targets.
+// Idempotent: a no-op when the tree is already correctly owned.
+func chownTree(root string, uid, gid int) error {
+	return filepath.Walk(root, func(p string, _ os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Lchown(p, uid, gid)
+	})
+}
+
+// applyModelEnv writes mindform.model into the gate config when model
+// is non-empty; validates first via config.ValidateModelID. Empty model
+// is a no-op (the operator did not pin a model at create time).
+func applyModelEnv(cfgPath, model string) error {
+	if model == "" {
+		return nil
+	}
+	if err := config.ValidateModelID(model); err != nil {
+		return err
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return fmt.Errorf("load gate config: %w", err)
+	}
+	cfg.MindForm.Model = model
+	return config.Save(cfgPath, cfg)
 }
 
 func extractTar(r io.Reader, target string) error {

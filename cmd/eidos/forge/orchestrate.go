@@ -72,12 +72,18 @@ func orchestrate(ctx context.Context, c forgectl.Client, name string, o createOp
 	res, err := c.RunInit(ctx, forgectl.RunInitOpts{
 		Image: image,
 		Mount: forgectl.Mount{VolumeName: vol, Target: "/eidos"},
+		// init-volume runs as root so it can extract the template tar,
+		// clone the bundle, and git-init the parent ontology with full
+		// privileges. Its last step chowns /eidos to 1000:1000; the
+		// persistent container then starts as the image's USER (eidos).
+		User: "0:0",
 		Env: []string{
 			"EIDOS_IN_CONTAINER=1",
 			"EIDOS_FORGE_NAME=" + name,
 			"EIDOS_FORGE_LABEL=" + o.label,
 			"EIDOS_FORGE_OWNER=" + o.owner,
 			"EIDOS_FORGE_RELAY=" + o.relay,
+			"EIDOS_FORGE_MODEL=" + o.model,
 		},
 		Cmd:   []string{"eidos", "forge", "init-volume"},
 		Stdin: pipeR,

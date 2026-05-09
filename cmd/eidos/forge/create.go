@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 	"github.com/spf13/cobra"
 )
@@ -15,6 +16,7 @@ type createOpts struct {
 	label   string
 	noLogin bool
 	image   string
+	model   string
 }
 
 func newCreateCmd() *cobra.Command {
@@ -39,6 +41,9 @@ func newCreateCmd() *cobra.Command {
 			if err := validateRelay(o.relay); err != nil {
 				return err
 			}
+			if err := validateModel(o.model); err != nil {
+				return err
+			}
 			if o.label == "" {
 				o.label = name
 			}
@@ -50,7 +55,12 @@ func newCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&o.label, "label", "", "human-readable label (default: <name>)")
 	cmd.Flags().BoolVar(&o.noLogin, "no-login", false, "skip the interactive claude /login step")
 	cmd.Flags().StringVar(&o.image, "image", "", "override container image (default: pinned in this binary)")
+	cmd.Flags().StringVar(&o.model, "model", "", "claude model id to pin (e.g. claude-sonnet-4-7); empty = claude default")
 	return cmd
+}
+
+func validateModel(s string) error {
+	return config.ValidateModelID(s)
 }
 
 func validateOwner(s string) error {

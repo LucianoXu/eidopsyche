@@ -16,6 +16,20 @@ type Config struct {
 	Subscribe SubscribeConfig `toml:"subscribe"`
 	Dashboard DashboardConfig `toml:"dashboard"`
 	Wake      WakeConfig      `toml:"wake"`
+	MindForm  MindFormConfig  `toml:"mindform"`
+}
+
+// MindFormConfig is the in-container gate's mind-form-runtime settings.
+// Lives in /eidos/gate/config.toml; host gates leave MindForm at its
+// zero value because the [mindform] block is absent from their config.
+type MindFormConfig struct {
+	// Model pins the claude model used by agent-runner. Empty = let
+	// claude pick its subscription default. The mindform.model
+	// registry key validates writes via ValidateModelID; Load tolerates
+	// anything so a hand-edited config.toml with an unknown id
+	// surfaces at the next wake when claude rejects it, not at
+	// gate-daemon startup.
+	Model string `toml:"model"`
 }
 
 // WakeConfig controls the optional wake-signal output used by the in-container
