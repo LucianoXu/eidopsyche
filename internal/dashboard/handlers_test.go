@@ -43,6 +43,40 @@ func TestHandler_Shell_OK(t *testing.T) {
 	if !strings.Contains(body, "alice") {
 		t.Errorf("shell missing label: %s", body)
 	}
+	// Toast region + global error-handling script must be present so
+	// htmx:responseError / htmx:sendError don't drop silently.
+	for _, want := range []string{
+		`id="toasts"`,
+		`htmx:responseError`,
+		`htmx:sendError`,
+		`window.eidosToast`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("shell missing toast wiring %q", want)
+		}
+	}
+}
+
+// TestHandler_Shell_BusyPathRegexAnchored guards against regressing
+// the PR #14 review finding: an unanchored alternation made
+// /settings/relays* user submits silently dropped alongside the
+// background /relays poll. The literal regex shipped to the browser
+// must contain the anchor.
+//
+// We assert on the served literal (string match) — running the regex
+// inside an in-process JS engine is overkill for a one-line guard.
+func TestHandler_Shell_BusyPathRegexAnchored(t *testing.T) {
+	deps := fakeDeps{pubkey: "abc123def456ghi789", label: "alice"}
+	srv := newTestServer(t, deps)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	srv.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	const want = `var BUSY_PATH_RE     = /^\/(events|relays|topbar|sidebar\/)/;`
+	if !strings.Contains(body, want) {
+		t.Errorf("BUSY_PATH_RE must be path-start anchored to avoid swallowing "+
+			"user-initiated /settings/relays* errors; expected literal %q in shell", want)
+	}
 }
 
 func TestHandler_Sidebar_RendersContacts(t *testing.T) {
@@ -161,6 +195,14 @@ func TestHandler_Send_RelayFailure_Returns502(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502, got %d body %s", rec.Code, rec.Body.String())
+	}
+	// The body must include the underlying error message in a form the
+	// global toast handler in shell.html can surface — without this,
+	// htmx 2.x silently drops the 502 and the operator sees nothing.
+	// Use a plain substring check; http.Error appends a newline.
+	if !strings.Contains(rec.Body.String(), "send failed: stub: no relay accepted") {
+		t.Errorf("502 body must include human-readable error for the toast layer; got: %q",
+			rec.Body.String())
 	}
 }
 

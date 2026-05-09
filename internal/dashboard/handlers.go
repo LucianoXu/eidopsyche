@@ -256,9 +256,13 @@ func sendChat(w http.ResponseWriter, req *http.Request, deps DashboardDeps, r *r
 	eventID, err := deps.Send(req.Context(), pk, env)
 	if err != nil {
 		logger.Warn("dashboard send failed", "err", err, "to", pk)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusBadGateway)
-		_, _ = w.Write([]byte(`<div class="error">send failed: ` + template.HTMLEscapeString(err.Error()) + `</div>`))
+		// Plain-text body so the global toast handler in shell.html
+		// surfaces it cleanly. htmx 2.x drops 4xx/5xx responses by
+		// default, so before the toast layer landed this 502 was
+		// silently invisible — the operator clicked Send and saw
+		// nothing. Status code stays 502 to keep the contract
+		// (programmatic clients can still distinguish failure).
+		http.Error(w, "send failed: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 
