@@ -17,12 +17,14 @@ FROM alpine:3.19 AS repobundle
 RUN apk add --no-cache git
 WORKDIR /src
 COPY . /src/eidopsyche-src
-# When building from a git worktree the COPY'd .git entry is a file (worktree
-# pointer) rather than a directory; git inside the container cannot resolve the
-# host path it points at.  Remove it, then initialise a fresh repo from the
-# source snapshot and produce the bare clone at the canonical path consumed by
-# `eidos forge init-volume`.
-RUN rm -f /src/eidopsyche-src/.git \
+# The COPY'd .git entry may be either a file (worktree pointer, when
+# building locally from a git worktree) or a directory (regular clone, as
+# in actions/checkout@v4).  In either case git inside the container cannot
+# safely use the host's pointer or commit history, so drop it entirely
+# with `rm -rf` (handles both shapes), then initialise a fresh repo from
+# the source snapshot and produce the bare clone at the canonical path
+# consumed by `eidos forge init-volume`.
+RUN rm -rf /src/eidopsyche-src/.git \
  && cd /src/eidopsyche-src \
  && git init \
  && git config user.email "build@eidopsyche" \

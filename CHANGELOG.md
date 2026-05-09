@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.10.1 — 2026-05-09
+
+### Fixed
+
+- `docker/mindform/Dockerfile` — the `repobundle` stage's `rm -f /src/eidopsyche-src/.git` failed when the build context was a regular checkout (where `.git` is a directory, e.g. `actions/checkout@v4` in CI) rather than a worktree pointer file. Use `rm -rf` to handle both shapes. v0.10.0's `mindform-image` job failed for this reason, so the `ghcr.io/lucianoxu/eidopsyche-mindform:v0.10.0` tag was never published; v0.10.1 produces the missing image alongside otherwise-identical content from v0.10.0.
+
+
 ## v0.10.0 — 2026-05-09
 
 ### Highlights
