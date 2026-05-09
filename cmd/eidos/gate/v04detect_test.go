@@ -47,13 +47,14 @@ log_level = "info"
 }
 
 func TestDetectV04_V05Config_ReturnsNil(t *testing.T) {
+	// Post-v0.9 (relay-top-level decoupling) gate config: [relay] is gone,
+	// [daemon].socket is the v0.5+ marker.
 	dir := writeConfig(t, `
 log_level = "info"
-[relay]
-  enabled = false
-  mode = "paired"
-  listen = "0.0.0.0:22895"
-  data_dir = "relay"
+[daemon]
+  socket = "sock"
+[wake]
+  dir = ""
 `)
 	if err := detectV04State(dir); err != nil {
 		t.Fatalf("expected nil for v0.5 config, got %v", err)
@@ -115,16 +116,20 @@ log_level = "info"
 	}
 }
 
-func TestDetectV04_V05ConfigEnabledTrue_ReturnsNil(t *testing.T) {
+func TestDetectV04_V05ConfigWithRelayBlock_ReturnsNil(t *testing.T) {
+	// Belt-and-braces: even if a v0.5+ user has hand-edited a [relay] block
+	// back in (e.g., for a self-hosted relay configuration sketch they
+	// haven't migrated to `eidos relay` yet), the [daemon].socket marker
+	// still wins. v0.5+ ≠ "relay block absent"; it's "daemon socket present".
 	dir := writeConfig(t, `
 log_level = "info"
+[daemon]
+  socket = "sock"
 [relay]
-  enabled = true
   mode = "paired"
   listen = "127.0.0.1:22895"
-  data_dir = "relay"
 `)
 	if err := detectV04State(dir); err != nil {
-		t.Fatalf("expected nil for v0.5 config with enabled=true, got %v", err)
+		t.Fatalf("expected nil for v0.5 config with daemon section, got %v", err)
 	}
 }
