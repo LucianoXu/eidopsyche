@@ -64,6 +64,11 @@ COPY --from=claude /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=claude /usr/local/bin/claude /usr/local/bin/claude
 COPY docker/mindform/entrypoint.sh /usr/local/bin/entrypoint.sh
 
+# Birth boot prompt — distinct from heartbeat / mindgate prompts. The
+# supervisor reads this file when consuming a one-shot birth.json wake
+# (delivered by the host's First Contact wizard at first start).
+COPY docker/mindform/prompts/birth.txt /usr/local/lib/eidos/prompts/birth.txt
+
 # Crontab lives in the per-user spool. busybox crond -c reads each
 # file as that named user's crontab and runs the job as that user
 # (via setuid). The crontab file itself MUST be owned by root, mode

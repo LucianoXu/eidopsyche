@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	wakeDir = "/eidos/run/wake"
-	gateDir = "/eidos/gate"
+	wakeDir     = "/eidos/run/wake"
+	gateDir     = "/eidos/gate"
+	ontologyDir = "/eidos/ontology"
 )
 
 func newRunCmd() *cobra.Command {
@@ -108,6 +109,10 @@ func recoverStaleActive(dir string) error {
 // one agent runs at a time (single-instance is enforced by agent-runner via
 // flock, but the supervisor also serializes here to avoid spawning into
 // the void).
+//
+// On every iteration (and once at startup) it also checks for a one-shot
+// birth.json — the First Contact wizard's hand-off — and runs the birth
+// handler before any normal wake. See cmd/eidos/supervisor/birth.go.
 func watchWakesIn(ctx context.Context, dir string, spawn SpawnAgent) error {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -116,6 +121,10 @@ func watchWakesIn(ctx context.Context, dir string, spawn SpawnAgent) error {
 	defer w.Close()
 	if err := w.Add(dir); err != nil {
 		return err
+	}
+	// Birth-wake: at most once per MindForm; consumed before any pending wake.
+	if err := drainBirthIfPresent(ctx, dir, ontologyDir, birthHandlerForProduction); err != nil {
+		log.Printf("birth drain (startup): %v", err)
 	}
 	// Drain any pre-existing pending.json.
 	if _, err := drainPending(ctx, dir, spawn); err != nil {
@@ -129,10 +138,17 @@ func watchWakesIn(ctx context.Context, dir string, spawn SpawnAgent) error {
 			if !ok {
 				return nil
 			}
-			if filepath.Base(ev.Name) != "pending.json" {
+			base := filepath.Base(ev.Name)
+			if base != "pending.json" && base != "birth.json" {
 				continue
 			}
 			if ev.Op&(fsnotify.Create|fsnotify.Rename|fsnotify.Write) == 0 {
+				continue
+			}
+			if base == "birth.json" {
+				if err := drainBirthIfPresent(ctx, dir, ontologyDir, birthHandlerForProduction); err != nil {
+					log.Printf("birth drain: %v", err)
+				}
 				continue
 			}
 			if _, err := drainPending(ctx, dir, spawn); err != nil {
