@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -20,10 +19,8 @@ import (
 )
 
 var (
-	initLabel          string
-	initHome           string
-	initWithLocalRelay bool
-	initListen         string
+	initLabel string
+	initHome  string
 )
 
 var initCmd = &cobra.Command{
@@ -35,8 +32,6 @@ var initCmd = &cobra.Command{
 func init() {
 	initCmd.Flags().StringVar(&initLabel, "label", "", "label for this identity (required; how others see your card by default — change later with `eidos gate set-label`)")
 	initCmd.Flags().StringVar(&initHome, "home", "", "home relay URL (required; ws:// or wss://) — the URL peers will dial to reach you")
-	initCmd.Flags().BoolVar(&initWithLocalRelay, "with-local-relay", false, "also run the embedded relay on this host")
-	initCmd.Flags().StringVar(&initListen, "listen", "", "relay bind address (host:port); requires --with-local-relay; default 0.0.0.0:22895")
 	if err := initCmd.MarkFlagRequired("label"); err != nil {
 		panic(err) // Cobra returns nil for known flags; surfacing a panic here is appropriate for a setup bug.
 	}
@@ -51,23 +46,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 	parsed, err := url.Parse(initHome)
 	if err != nil || (parsed.Scheme != "ws" && parsed.Scheme != "wss") || parsed.Host == "" {
 		return fmt.Errorf("--home must start with ws:// or wss:// and include a host, got %q", initHome)
-	}
-
-	// --listen is only meaningful with --with-local-relay.
-	if initListen != "" && !initWithLocalRelay {
-		return errors.New("--listen requires --with-local-relay")
-	}
-
-	// When --with-local-relay is set, validate or default --listen.
-	listen := ""
-	if initWithLocalRelay {
-		listen = initListen
-		if listen == "" {
-			listen = "0.0.0.0:22895"
-		}
-		if _, _, err := net.SplitHostPort(listen); err != nil {
-			return fmt.Errorf("invalid --listen value %q: must be host:port (%w)", listen, err)
-		}
 	}
 
 	dir, err := config.ResolveStateDir(globalStateDir)
@@ -115,9 +93,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// own_relays(role='home') always uses --home, never --listen. Bind
-	// address and home URL are independent: a host can bind 0.0.0.0:22895
-	// while telling peers wss://my.host (e.g. with a reverse proxy).
+	// own_relays(role='home') uses --home: the URL peers dial to reach this gate.
 	if _, err := db.ExecContext(ctx,
 		`INSERT OR IGNORE INTO own_relays(relay_url,role,added_at) VALUES(?,?,?)`,
 		initHome, "home", time.Now().Unix()); err != nil {
@@ -125,10 +101,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	cfg := config.Defaults()
-	cfg.Relay.Enabled = initWithLocalRelay
-	if listen != "" {
-		cfg.Relay.Listen = listen
-	}
 	if err := config.Save(filepath.Join(dir, "config.toml"), cfg); err != nil {
 		return err
 	}
@@ -138,16 +110,17 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("✓ wrote state.db (schema v%d)\n", store.SchemaVersion)
 	fmt.Printf("✓ wrote config.toml\n")
 	fmt.Printf("  home relay: %s\n", initHome)
-	if initWithLocalRelay {
-		fmt.Printf("  local relay: %s (paired)\n", listen)
-	} else {
-		fmt.Printf("  local relay: disabled (run 'eidos gate config set relay.enabled true' to opt in)\n")
-	}
 	fmt.Println("\nyour identity:")
 	fmt.Printf("  npub: %s\n", k.Npub)
 	fmt.Printf("  hex:  %s\n", k.PublicHex)
 	fmt.Println("\nnext steps:")
-	fmt.Println("  1) start services: eidos gate start")
-	fmt.Println("  2) share card:     eidos gate card")
+	fmt.Println("  eidos gate service install     # run daemon as a system service")
+	fmt.Println("  eidos gate service start")
+	fmt.Println("  eidos gate card                # show your identity card")
+	fmt.Println("\noptional — run a self-hosted relay on this host:")
+	fmt.Println("  eidos relay init --mode public --listen 0.0.0.0:7777")
+	fmt.Println("  # or: eidos relay init --mode paired --owner <npub> --listen 0.0.0.0:7777")
+	fmt.Println("  eidos relay service install")
+	fmt.Println("  eidos relay service start")
 	return nil
 }

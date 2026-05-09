@@ -151,21 +151,10 @@ func seedState(t *testing.T, dir, name, relayURL string) *identity.Keypair {
 
 func startRelayDir(t *testing.T, dir, addr, ownerHex string) *relayd.Server {
 	t.Helper()
-	db, err := store.Open(filepath.Join(dir, "state.db"), true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wl := relayd.NewWhitelistSource(db, 100*time.Millisecond)
-	ctx := context.Background()
-	if err := wl.RefreshNow(ctx); err != nil {
-		t.Fatal(err)
-	}
-	go wl.Run(ctx)
 	rsrv, err := relayd.New(relayd.Config{
-		Mode:      relayd.ModePaired,
-		Listen:    addr,
-		OwnerHex:  ownerHex,
-		Whitelist: wl,
+		Mode:     relayd.ModePaired,
+		Listen:   addr,
+		OwnerHex: ownerHex,
 	})
 	if err != nil {
 		t.Fatal(err)

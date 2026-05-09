@@ -41,25 +41,34 @@ $ eidos gate init --label alice --home wss://my-vps.example.com
 
 See `docs/INSTALL.md#self-hosting-the-embedded-relay` for the VPS side.
 
-### C) Bundled local relay (single-host two-instance debug, or
-self-hosting on the same box)
+### C) Self-hosted relay on the same box (or single-host two-instance debug)
+
+`eidos relay` is an independent top-level subcommand; initialize and start it
+separately from the gate:
 
 ```
-$ eidos gate init --label alice --home wss://alice.example.com \
-    --with-local-relay --listen 0.0.0.0:22895
+# Gate side:
+$ eidos gate init --label alice --home wss://alice.example.com
+
+# Relay side (run once to create ~/.config/eidos/relay/config.toml):
+$ eidos relay init --mode paired --listen 0.0.0.0:22895
 ```
 
-`--with-local-relay` flips `relay.enabled = true` so `eidos gate start`
-also installs the relay unit. `--home` and `--listen` are independent:
-the relay binds to `--listen` (`0.0.0.0:22895`), but peers dial the URL
-in `--home` (`wss://alice.example.com`, typically a reverse-proxied
-TLS endpoint forwarding to the local port).
+`--home` and `--listen` are independent: the relay binds to `--listen`
+(`0.0.0.0:22895`), but peers dial the URL in `--home`
+(`wss://alice.example.com`, typically a reverse-proxied TLS endpoint
+forwarding to the local port).
 
 For pure local debug (one host, two instances):
 
 ```
-$ eidos gate init --label alice --home ws://127.0.0.1:22895 \
-    --with-local-relay --listen 127.0.0.1:22895
+# Instance A
+$ eidos gate init --label alice --home ws://127.0.0.1:22895
+$ eidos relay init --dir /tmp/relay-a --mode paired --listen 127.0.0.1:22895
+
+# Instance B
+$ eidos gate --state-dir /tmp/mg-b init --label bob --home ws://127.0.0.1:22896
+$ eidos relay init --dir /tmp/relay-b --mode paired --listen 127.0.0.1:22896
 ```
 
 ## Step 1 — Each starts services
@@ -68,39 +77,58 @@ $ eidos gate init --label alice --home ws://127.0.0.1:22895 \
 $ eidos gate start
 ✓ gate services started
   eidos-gate-daemon      active  pid=4123
-  eidos-gate-relay       not-installed       # daemon-only deployments
 ```
 
 `eidos gate start` installs the appropriate OS service units for the
-gate and brings them up: systemd units on Linux
+gate daemon and brings them up: systemd units on Linux
 (`~/.config/systemd/user/`), launchd plists on macOS
-(`~/Library/LaunchAgents/`). The relay unit is only installed when
-`relay.enabled = true` (i.e. when you passed `--with-local-relay` at
-init). Use `eidos gate status` to check, `eidos gate stop` to halt
-without uninstalling, and `eidos gate purge` to remove everything.
-Append `--system` to any of these to install to the system path
-(`/etc/systemd/system/` or `/Library/LaunchDaemons/`, respectively) —
-requires root.
+(`~/Library/LaunchAgents/`). Use `eidos gate status` to check,
+`eidos gate stop` to halt without uninstalling, and `eidos gate purge`
+to remove everything. Append `--system` to any of these to install to
+the system path (`/etc/systemd/system/` or `/Library/LaunchDaemons/`,
+respectively) — requires root.
+
+If you set up a local relay, start it separately:
+
+```
+$ eidos relay service install
+$ eidos relay service start
+$ eidos relay service status
+  eidos-relay            active  pid=4124
+$ eidos relay status   # only readable when the relay process is stopped
+config dir: /home/alice/.config/eidos/relay
+mode:       paired
+listen:     0.0.0.0:22895
+owner:      0123…cdef
+tls:        cert="" key=""
+auth:       required=true service_url=""
+events:     0 stored
+```
+
+`eidos relay status` opens the badger event store directly to count
+events, so it cannot run while the relay process holds the directory
+lock. Use `eidos relay service status` for liveness while the unit
+is active; stop the unit before running `eidos relay status` for the
+event-count probe.
 
 On Linux user-mode, services survive your shell exiting; for survival
 across a full logout on a headless host, run
 `loginctl enable-linger <username>` once. macOS LaunchAgents auto-start
 at GUI login.
 
-For ad-hoc / debugging runs, the foreground commands `eidos gate daemon`
-and `eidos gate relay` still work — those are exactly what the OS
-service units invoke. `eidos gate relay` refuses to start when
-`relay.enabled = false`.
+For ad-hoc / debugging runs, use the foreground commands:
+- `eidos gate daemon` — run the gate daemon in the foreground
+- `eidos relay start` — run the relay in the foreground
 
 Logs:
-- Linux: `journalctl --user -u eidos-gate-daemon` (or `-u ...` for
-  `--system` mode).
+- Gate daemon on Linux: `journalctl --user -u eidos-gate-daemon`
+- Relay on Linux: `journalctl --user -u eidos-relay`
 - macOS: launchd redirects stdout/stderr to
-  `<state-dir>/logs/eidos-gate-{daemon,relay}.log`.
+  `<state-dir>/logs/eidos-gate-daemon.log` and
+  `~/.config/eidos/relay/logs/eidos-relay.log`.
 
 Daemon startup line: `eidos-gate-daemon starting state_dir=...`. Relay
-startup line (when enabled): `eidos-gate-relay listening 0.0.0.0:22895
-mode=paired`.
+startup line: `eidos-relay listening 0.0.0.0:22895 mode=paired`.
 
 ## Step 2 — Each prints their card
 
@@ -242,7 +270,7 @@ Service lifecycle:
 
 Foreground (debug) mode:
 - `eidos gate daemon` — run the daemon in the foreground
-- `eidos gate relay` — run the embedded relay in the foreground
+- `eidos relay start` — run the relay in the foreground
 
 Identity & contacts:
 - `eidos gate whoami` — your identity, label, home relays
@@ -330,27 +358,28 @@ The token is a self-contained signed credential. Anyone who holds it can redeem 
 
 ## Running two instances on one host (debugging)
 
-Each instance needs its own state directory and (since they are running
-local relays) its own relay port:
+Each gate instance needs its own state directory; each relay needs its own
+config directory and port. Gate and relay are independent processes:
 
 ```
-# Instance A
-$ eidos gate --state-dir /tmp/mg-a init --label alice \
-    --home ws://127.0.0.1:22895 --with-local-relay --listen 127.0.0.1:22895
+# Instance A — gate
+$ eidos gate --state-dir /tmp/mg-a init --label alice --home ws://127.0.0.1:22895
 $ eidos gate --state-dir /tmp/mg-a daemon &
-$ eidos gate --state-dir /tmp/mg-a relay &
+# Instance A — relay
+$ eidos relay init --dir /tmp/relay-a --mode paired --listen 127.0.0.1:22895
+$ eidos relay start --dir /tmp/relay-a &
 
-# Instance B
-$ eidos gate --state-dir /tmp/mg-b init --label bob \
-    --home ws://127.0.0.1:22896 --with-local-relay --listen 127.0.0.1:22896
+# Instance B — gate
+$ eidos gate --state-dir /tmp/mg-b init --label bob --home ws://127.0.0.1:22896
 $ eidos gate --state-dir /tmp/mg-b daemon &
-$ eidos gate --state-dir /tmp/mg-b relay &
+# Instance B — relay
+$ eidos relay init --dir /tmp/relay-b --mode paired --listen 127.0.0.1:22896
+$ eidos relay start --dir /tmp/relay-b &
 ```
 
-`--home` and `--listen` are independent flags. For local debug they
-typically point to the same `host:port`; in real deployments they
-diverge (relay binds `0.0.0.0:22895` while peers dial
-`wss://your.host`).
+`--home` (in gate) and `--listen` (in relay) are independent. For local debug
+they typically point to the same `host:port`; in real deployments they diverge
+(relay binds `0.0.0.0:22895` while peers dial `wss://your.host`).
 
 Start order does not matter: if the daemon starts before its relay is
 listening, it will retry the subscription with exponential backoff (1 s, 2 s,
@@ -361,10 +390,15 @@ the new relay URL becomes live without restarting the daemon.
 ## Changing settings after init
 
 ```
-$ eidos gate config get               # dump all scalar keys
-$ eidos gate config get relay.listen
+$ eidos gate config get               # dump all gate scalar keys
 $ eidos gate config set log_level debug
-$ eidos gate config set relay.mode public
+
+$ eidos relay config get                    # dump all relay scalar keys
+$ eidos relay config get relay.listen       # print one key
+$ eidos relay config set relay.mode public
 ```
 
-`config` writes `config.toml` directly; the daemon and relay must be restarted to pick up changes. Adding/removing relay entries in the SQLite `own_relays` table goes through `eidos gate relay-add` / `relay-remove` instead.
+`eidos gate config` and `eidos relay config` each write their respective
+`config.toml` directly; the daemon / relay must be restarted to pick up
+changes. Adding/removing relay entries in the SQLite `own_relays` table goes
+through `eidos gate relay-add` / `relay-remove` instead.

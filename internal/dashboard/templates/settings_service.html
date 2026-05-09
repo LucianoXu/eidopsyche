@@ -28,11 +28,6 @@
     <dt>State dir</dt>   <dd class="mono">{{.StateDir}}</dd>
     <dt>Dashboard</dt>   <dd class="mono">{{.DashboardURL}}</dd>
     <dt>IPC socket</dt>  <dd class="mono">{{.IPCSocket}}</dd>
-    <dt>Relay</dt>
-    <dd class="mono">
-      {{if .RelayEnabled}}enabled · mode={{.RelayMode}} · listen={{.RelayListen}}
-      {{else}}<span class="muted">disabled</span>{{end}}
-    </dd>
   </dl>
 
   <section class="service-actions" aria-label="Lifecycle actions">

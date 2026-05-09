@@ -213,11 +213,9 @@ func TestSettingsConfig_FragmentForHTMX(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		`class="config-pane"`,
-		`relay.mode`, // a known key from the registry
-		`relay.enabled`,
+		`dashboard.enabled`, // a known key from the registry
 		`log_level`,
-		`id="cfg-relay-mode"`, // slugified id (path with dots → dashes)
-		`id="cfg-relay-enabled"`,
+		`id="cfg-dashboard-enabled"`, // slugified id (path with dots → dashes)
 		`Restart required`,
 	} {
 		if !strings.Contains(body, want) {
@@ -233,7 +231,7 @@ func TestSettingsConfig_PostValidatesAndCalls(t *testing.T) {
 	srv := newTestServer(t, deps)
 
 	rec := httptest.NewRecorder()
-	form := strings.NewReader("path=relay.mode&value=public")
+	form := strings.NewReader("path=log_level&value=debug")
 	req := httptest.NewRequest("POST", "/settings/config", form)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	phase1Origin(req)
@@ -241,12 +239,12 @@ func TestSettingsConfig_PostValidatesAndCalls(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
-	if len(calls) != 1 || calls[0] != (configSetCall{Path: "relay.mode", Value: "public"}) {
+	if len(calls) != 1 || calls[0] != (configSetCall{Path: "log_level", Value: "debug"}) {
 		t.Fatalf("expected ConfigSet call, got %v", calls)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `id="cfg-relay-mode"`) {
-		t.Errorf("response should be the relay.mode row partial: %s", body)
+	if !strings.Contains(body, `id="cfg-log_level"`) {
+		t.Errorf("response should be the log_level row partial: %s", body)
 	}
 	if strings.Contains(body, `class="row-error"`) {
 		t.Errorf("success response should not include row-error: %s", body)
@@ -268,10 +266,10 @@ func TestSettingsConfig_PostUnknownKey(t *testing.T) {
 
 func TestSettingsConfig_DepsErrorIsRendered(t *testing.T) {
 	deps := newPhase1Deps()
-	deps.configSetErr = errStr("relay.mode must be \"paired\" or \"public\"")
+	deps.configSetErr = errStr("log_level must be one of debug|info|warn|error")
 	srv := newTestServer(t, deps)
 	rec := httptest.NewRecorder()
-	form := strings.NewReader("path=relay.mode&value=bogus")
+	form := strings.NewReader("path=log_level&value=bogus")
 	req := httptest.NewRequest("POST", "/settings/config", form)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	phase1Origin(req)
@@ -283,7 +281,7 @@ func TestSettingsConfig_DepsErrorIsRendered(t *testing.T) {
 	if !strings.Contains(body, `class="row-error"`) {
 		t.Errorf("expected row-error chip on validation failure: %s", body)
 	}
-	if !strings.Contains(body, "paired") {
+	if !strings.Contains(body, "debug") {
 		t.Errorf("error message should reach the row: %s", body)
 	}
 }

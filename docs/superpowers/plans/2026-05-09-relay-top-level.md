@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Lift the embedded Nostr relay from `eidos gate relay` to a top-level `eidos relay` subcommand with its own config dir, event persistence (sqlite), no publisher whitelist, and split service-unit installation — enabling clean relay-only deployments.
+**Goal:** Lift the embedded Nostr relay from `eidos gate relay` to a top-level `eidos relay` subcommand with its own config dir, event persistence (badger), no publisher whitelist, and split service-unit installation — enabling clean relay-only deployments.
 
-**Architecture:** A new `cmd/eidos/relay` cobra subtree replaces `cmd/eidos/gate/relay.go`. A new `internal/relaycfg` package owns relay config (no shared types with gate). `internal/relayd` gains a `fiatjaf/eventstore/sqlite3` backend and loses its whitelist source. `internal/service` splits into independent gate-only and relay-only install paths under separate unit names (`eidos-gate-daemon`, `eidos-relay`). Pre-1.0 breaking change — `eidos gate relay` and `[relay]` in gate config are removed in this release.
+**Architecture:** A new `cmd/eidos/relay` cobra subtree replaces `cmd/eidos/gate/relay.go`. A new `internal/relaycfg` package owns relay config (no shared types with gate). `internal/relayd` gains a `fiatjaf/eventstore/badger` backend and loses its whitelist source. `internal/service` splits into independent gate-only and relay-only install paths under separate unit names (`eidos-gate-daemon`, `eidos-relay`). Pre-1.0 breaking change — `eidos gate relay` and `[relay]` in gate config are removed in this release.
 
-**Tech Stack:** Go; `github.com/spf13/cobra`; `github.com/fiatjaf/khatru`; `github.com/fiatjaf/eventstore/sqlite3` (new dep); `github.com/BurntSushi/toml`; `github.com/nbd-wtf/go-nostr`.
+**Tech Stack:** Go; `github.com/spf13/cobra`; `github.com/fiatjaf/khatru`; `github.com/fiatjaf/eventstore/badger` (new dep, pure Go via dgraph-io/badger v4); `github.com/BurntSushi/toml`; `github.com/nbd-wtf/go-nostr`.
 
 **Spec:** `docs/superpowers/specs/2026-05-09-relay-top-level-design.md`
 
@@ -339,11 +339,11 @@ so init and start share one truth."
 - [ ] **Step 1: Add the eventstore dependency.**
 
 ```sh
-go get github.com/fiatjaf/eventstore/sqlite3@latest
+go get github.com/fiatjaf/eventstore/badger@latest
 go mod tidy
 ```
 
-Expected: `go.mod` gains `github.com/fiatjaf/eventstore vX.Y.Z` (and indirect deps).
+Expected: `go.mod` gains `github.com/fiatjaf/eventstore vX.Y.Z` and `github.com/dgraph-io/badger/v4` (and indirect deps). `mattn/go-sqlite3` must not appear.
 
 - [ ] **Step 2: Write `internal/relayd/store.go`.**
 
@@ -353,24 +353,25 @@ package relayd
 import (
 	"fmt"
 
-	"github.com/fiatjaf/eventstore/sqlite3"
+	"github.com/fiatjaf/eventstore/badger"
 )
 
-// OpenSQLiteStore creates and initializes a sqlite-backed eventstore at
-// path. The caller owns Close().
-func OpenSQLiteStore(path string) (*sqlite3.SQLite3Backend, error) {
-	if path == "" {
-		return nil, fmt.Errorf("OpenSQLiteStore: path is empty")
+// OpenEventStore creates and initializes a badger-backed eventstore at
+// dir (a directory; badger creates SST files inside). The caller owns
+// Close().
+func OpenEventStore(dir string) (*badger.BadgerBackend, error) {
+	if dir == "" {
+		return nil, fmt.Errorf("OpenEventStore: dir is empty")
 	}
-	b := &sqlite3.SQLite3Backend{DatabaseURL: path}
+	b := &badger.BadgerBackend{Path: dir}
 	if err := b.Init(); err != nil {
-		return nil, fmt.Errorf("eventstore sqlite3 init %s: %w", path, err)
+		return nil, fmt.Errorf("eventstore badger init %s: %w", dir, err)
 	}
 	return b, nil
 }
 ```
 
-(The concrete `*sqlite3.SQLite3Backend` is what's wired into khatru's handler slices; no abstract interface is needed at this stage.)
+(The concrete `*badger.BadgerBackend` is what's wired into khatru's handler slices; no abstract interface is needed at this stage.)
 
 - [ ] **Step 3: Modify `internal/relayd/relayd.go`** — add `EventStorePath` to `Config` and wire khatru handlers when set:
 
@@ -390,20 +391,20 @@ In `New()`, after the mode switch and before constructing `srv`:
 
 ```go
 if cfg.EventStorePath != "" {
-	store, err := OpenSQLiteStore(cfg.EventStorePath)
+	evStore, err := OpenEventStore(cfg.EventStorePath)
 	if err != nil {
 		return nil, err
 	}
-	r.StoreEvent   = append(r.StoreEvent,   store.SaveEvent)
-	r.QueryEvents  = append(r.QueryEvents,  store.QueryEvents)
-	r.CountEvents  = append(r.CountEvents,  store.CountEvents)
-	r.DeleteEvent  = append(r.DeleteEvent,  store.DeleteEvent)
-	r.ReplaceEvent = append(r.ReplaceEvent, store.ReplaceEvent)
+	r.StoreEvent   = append(r.StoreEvent,   evStore.SaveEvent)
+	r.QueryEvents  = append(r.QueryEvents,  evStore.QueryEvents)
+	r.CountEvents  = append(r.CountEvents,  evStore.CountEvents)
+	r.DeleteEvent  = append(r.DeleteEvent,  evStore.DeleteEvent)
+	r.ReplaceEvent = append(r.ReplaceEvent, evStore.ReplaceEvent)
 	// Closing the store on shutdown: store the handle on Server.
 }
 ```
 
-Add an `eventStore *sqlite3.SQLite3Backend` field on `Server`. Update `Server.Shutdown` and `Server.Close` to call `s.eventStore.Close()` after the http server drains.
+Add an `eventStore *badger.BadgerBackend` field on `Server`. Update `Server.Shutdown` and `Server.Close` to call `s.eventStore.Close()` after the http server drains.
 
 - [ ] **Step 4: Add a persistence test in `internal/relayd/relayd_test.go`.** Append after the existing tests:
 
@@ -430,7 +431,7 @@ func TestPersistenceAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	eventsPath := filepath.Join(dir, "events.db")
+	eventsPath := filepath.Join(dir, "events")   // badger uses a directory, not a single file
 	addr := freePort(t)
 
 	// First run: publish a kind:1059 event addressed to owner.
@@ -523,13 +524,14 @@ Expected: `ok` with the new test green.
 - [ ] **Step 6: Commit.**
 
 ```sh
-git add internal/relayd/ go.mod go.sum
-git commit -m "feat(relay): sqlite event persistence via fiatjaf/eventstore
+git add internal/relayd/ internal/relaycfg/config.go go.mod go.sum
+git commit -m "fix(relay): swap eventstore/sqlite3 -> eventstore/badger for pure Go
 
-Adds Config.EventStorePath. Empty = today's ephemeral behavior; non-
-empty wires khatru's Store/Query/Count/Delete/Replace handlers to a
-sqlite-backed eventstore. Persistence test publishes a gift-wrap,
-restarts the server, and confirms the event is served from disk."
+eventstore/sqlite3 pulls in mattn/go-sqlite3 which requires CGO; the
+release pipeline (.goreleaser.yml) builds with CGO_ENABLED=0 to
+support cross-compilation. eventstore/badger uses dgraph-io/badger/v4,
+pure Go, drop-in via the same Store interface. Events live in a
+directory (events/) instead of a sqlite file (events.db)."
 ```
 
 ---

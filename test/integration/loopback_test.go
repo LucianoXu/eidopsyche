@@ -99,22 +99,11 @@ func bringUp(t *testing.T, name string, modeOpt ...relayd.Mode) *instance {
 		t.Fatal(err)
 	}
 
-	// Start the paired relay (separate RO connection to the same SQLite file).
-	dbRO, err := store.Open(filepath.Join(dir, "state.db"), true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wl := relayd.NewWhitelistSource(dbRO, 100*time.Millisecond)
-	rctx, rcancel := context.WithCancel(context.Background())
-	go wl.Run(rctx)
-	if err := wl.RefreshNow(rctx); err != nil {
-		t.Fatal(err)
-	}
+	// Start the paired relay.
 	rsrv, err := relayd.New(relayd.Config{
-		Mode:      mode,
-		Listen:    addr,
-		OwnerHex:  k.PublicHex,
-		Whitelist: wl,
+		Mode:     mode,
+		Listen:   addr,
+		OwnerHex: k.PublicHex,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -138,9 +127,7 @@ func bringUp(t *testing.T, name string, modeOpt ...relayd.Mode) *instance {
 		relay:    rsrv,
 		cancel: func() {
 			dcancel()
-			rcancel()
 			rsrv.Shutdown(context.Background())
-			dbRO.Close()
 		},
 	}
 	t.Cleanup(in.cancel)

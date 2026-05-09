@@ -55,7 +55,8 @@ func (s *systemd) systemctl(ctx context.Context, args ...string) ([]byte, error)
 	return out, err
 }
 
-func (s *systemd) Install(ctx context.Context) error {
+// installOne writes a single unit file and triggers daemon-reload.
+func (s *systemd) installOne(ctx context.Context, unitName, unitContent string) error {
 	dir, err := s.unitDir()
 	if err != nil {
 		return err
@@ -63,13 +64,8 @@ func (s *systemd) Install(ctx context.Context) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create unit dir %s: %w", dir, err)
 	}
-	if err := writeUnitIfChanged(filepath.Join(dir, DaemonUnitName+".service"), s.daemonUnit()); err != nil {
+	if err := writeUnitIfChanged(filepath.Join(dir, unitName+".service"), unitContent); err != nil {
 		return err
-	}
-	if s.cfg.WithRelay {
-		if err := writeUnitIfChanged(filepath.Join(dir, RelayUnitName+".service"), s.relayUnit()); err != nil {
-			return err
-		}
 	}
 	if out, err := s.systemctl(ctx, "daemon-reload"); err != nil {
 		return fmt.Errorf("systemctl daemon-reload: %w (output: %s)", err, strings.TrimSpace(string(out)))
@@ -77,56 +73,87 @@ func (s *systemd) Install(ctx context.Context) error {
 	return nil
 }
 
-func (s *systemd) Start(ctx context.Context) error {
-	if err := s.Install(ctx); err != nil {
-		return err
-	}
-	units := []string{DaemonUnitName}
-	if s.cfg.WithRelay {
-		units = append(units, RelayUnitName)
-	}
-	args := append([]string{"enable", "--now"}, units...)
-	out, err := s.systemctl(ctx, args...)
-	if err != nil {
-		return fmt.Errorf("systemctl enable --now: %w (output: %s)", err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
-func (s *systemd) Stop(ctx context.Context) error {
-	out, err := s.systemctl(ctx, "stop", DaemonUnitName, RelayUnitName)
-	if err != nil {
-		// Non-existent units exit 5; treat as already-stopped.
-		if strings.Contains(string(out), "not loaded") || strings.Contains(string(out), "not found") {
-			return nil
-		}
-		return fmt.Errorf("systemctl stop: %w (output: %s)", err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
-func (s *systemd) Uninstall(ctx context.Context) error {
-	// Best-effort stop + disable. A clean teardown should never fail because
-	// units happen to be missing or already stopped.
-	_, _ = s.systemctl(ctx, "stop", DaemonUnitName, RelayUnitName)
-	_, _ = s.systemctl(ctx, "disable", DaemonUnitName, RelayUnitName)
+// uninstallOne stops, disables, removes the unit file, reloads, and
+// resets any failed state. Best-effort: already-absent units are not errors.
+func (s *systemd) uninstallOne(ctx context.Context, unitName string) error {
+	_, _ = s.systemctl(ctx, "stop", unitName)
+	_, _ = s.systemctl(ctx, "disable", unitName)
 
 	dir, err := s.unitDir()
 	if err != nil {
 		return err
 	}
-	for _, u := range []string{DaemonUnitName, RelayUnitName} {
-		path := filepath.Join(dir, u+".service")
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove %s: %w", path, err)
-		}
+	path := filepath.Join(dir, unitName+".service")
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove %s: %w", path, err)
 	}
 	if out, err := s.systemctl(ctx, "daemon-reload"); err != nil {
 		return fmt.Errorf("systemctl daemon-reload: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}
-	// reset-failed flushes failed-state for any runs that errored before this teardown.
-	_, _ = s.systemctl(ctx, "reset-failed", DaemonUnitName, RelayUnitName)
+	_, _ = s.systemctl(ctx, "reset-failed", unitName)
 	return nil
+}
+
+// enableNow enables and starts a single unit (install must have been called
+// first so the unit file is on disk).
+func (s *systemd) enableNow(ctx context.Context, unitName string) error {
+	out, err := s.systemctl(ctx, "enable", "--now", unitName)
+	if err != nil {
+		return fmt.Errorf("systemctl enable --now %s: %w (output: %s)",
+			unitName, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// stopOne stops a single unit. Non-existent units are treated as already-stopped.
+func (s *systemd) stopOne(ctx context.Context, unitName string) error {
+	out, err := s.systemctl(ctx, "stop", unitName)
+	if err != nil {
+		if strings.Contains(string(out), "not loaded") || strings.Contains(string(out), "not found") {
+			return nil
+		}
+		return fmt.Errorf("systemctl stop %s: %w (output: %s)",
+			unitName, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func (s *systemd) InstallDaemon(ctx context.Context) error {
+	return s.installOne(ctx, DaemonUnitName, s.daemonUnit())
+}
+
+func (s *systemd) InstallRelay(ctx context.Context, relayDir string) error {
+	return s.installOne(ctx, RelayUnitName, s.relayUnit(relayDir))
+}
+
+func (s *systemd) UninstallDaemon(ctx context.Context) error {
+	return s.uninstallOne(ctx, DaemonUnitName)
+}
+
+func (s *systemd) UninstallRelay(ctx context.Context) error {
+	return s.uninstallOne(ctx, RelayUnitName)
+}
+
+func (s *systemd) StartDaemon(ctx context.Context) error {
+	if err := s.InstallDaemon(ctx); err != nil {
+		return err
+	}
+	return s.enableNow(ctx, DaemonUnitName)
+}
+
+func (s *systemd) StartRelay(ctx context.Context, relayDir string) error {
+	if err := s.InstallRelay(ctx, relayDir); err != nil {
+		return err
+	}
+	return s.enableNow(ctx, RelayUnitName)
+}
+
+func (s *systemd) StopDaemon(ctx context.Context) error {
+	return s.stopOne(ctx, DaemonUnitName)
+}
+
+func (s *systemd) StopRelay(ctx context.Context) error {
+	return s.stopOne(ctx, RelayUnitName)
 }
 
 func (s *systemd) Status(ctx context.Context) ([]Status, error) {
@@ -176,19 +203,23 @@ WantedBy=default.target
 `
 }
 
-func (s *systemd) relayUnit() string {
-	envLine := ""
-	if s.cfg.StateDir != "" {
-		envLine = "Environment=EIDOS_GATE_HOME=" + s.cfg.StateDir + "\n"
+// relayUnit generates the systemd unit content for the relay service.
+// relayDir is the relay's working directory and is also passed as --dir.
+func (s *systemd) relayUnit(relayDir string) string {
+	wdLine := ""
+	dirFlag := ""
+	if relayDir != "" {
+		wdLine = "WorkingDirectory=" + relayDir + "\n"
+		dirFlag = " --dir " + relayDir
 	}
 	return `[Unit]
-Description=Eidopsyche gate relay
-After=` + DaemonUnitName + `.service
+Description=Eidopsyche relay
+After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=` + s.cfg.BinaryPath + ` gate relay
-` + envLine + `Restart=on-failure
+` + wdLine + `ExecStart=` + s.cfg.BinaryPath + ` relay start` + dirFlag + `
+Restart=on-failure
 RestartSec=2
 
 [Install]

@@ -288,9 +288,6 @@ func buildSettingsService(_ context.Context, deps DashboardDeps, logger *slog.Lo
 		StateDir:     st.StateDir,
 		DashboardURL: st.DashboardURL,
 		IPCSocket:    st.IPCSocket,
-		RelayEnabled: st.RelayEnabled,
-		RelayMode:    st.RelayMode,
-		RelayListen:  st.RelayListen,
 		OwnLabel:     ownLabelOf(deps, logger),
 	}
 	if st.ActiveJobID != "" {

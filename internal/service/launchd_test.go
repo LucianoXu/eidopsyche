@@ -48,8 +48,30 @@ func TestLaunchdPlistContent(t *testing.T) {
 	}
 }
 
+func TestLaunchdRelayPlistContent(t *testing.T) {
+	// Relay plist uses "eidos-relay" label and relay start --dir args.
+	got := launchdPlist(
+		"eidos-relay",
+		"/usr/local/bin/eidos",
+		"/Users/alice/.eidos/relay",
+		[]string{"relay", "start", "--dir", "/Users/alice/.eidos/relay"},
+	)
+
+	for _, want := range []string{
+		`<string>eidos-relay</string>`,
+		`<string>relay</string>`,
+		`<string>start</string>`,
+		`<string>--dir</string>`,
+		`<string>/Users/alice/.eidos/relay</string>`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("relay plist missing %q\nfull:\n%s", want, got)
+		}
+	}
+}
+
 func TestLaunchdPlistOmitsEnvWhenStateDirEmpty(t *testing.T) {
-	got := launchdPlist("eidos-gate-relay", "/eidos", "", []string{"gate", "relay"})
+	got := launchdPlist("eidos-relay", "/eidos", "", []string{"relay", "start"})
 	if strings.Contains(got, "EIDOS_GATE_HOME") {
 		t.Errorf("empty StateDir should not produce EIDOS_GATE_HOME entry:\n%s", got)
 	}
@@ -137,7 +159,7 @@ func TestParseLaunchctlPrintPID(t *testing.T) {
 			// after bootstrap, even though the process had already been
 			// allocated a PID. Trust the PID, not the state string.
 			name: "spawn_scheduled",
-			in: `gui/501/eidos-gate-relay = {
+			in: `gui/501/eidos-relay = {
     active count = 1
     state = spawn scheduled
     pid = 33297
@@ -184,7 +206,7 @@ func TestLaunchdLogPath(t *testing.T) {
 	// Empty state dir falls back to /tmp so unit content is still valid even
 	// in degenerate Configs (we expect callers to set StateDir, but a missing
 	// one must not produce a broken plist).
-	got = launchdLogPath("", "eidos-gate-relay")
+	got = launchdLogPath("", "eidos-relay")
 	if !strings.HasPrefix(got, "/tmp/") {
 		t.Errorf("empty stateDir should fall back under /tmp; got %q", got)
 	}

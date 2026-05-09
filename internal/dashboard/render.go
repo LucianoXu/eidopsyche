@@ -326,9 +326,6 @@ type settingsServiceData struct {
 	StateDir     string
 	DashboardURL string
 	IPCSocket    string
-	RelayEnabled bool
-	RelayMode    string
-	RelayListen  string
 	OwnLabel     string
 
 	// ActiveJob* fields are non-empty when a lifecycle job is in

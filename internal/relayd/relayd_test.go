@@ -19,8 +19,6 @@ import (
 	"time"
 
 	gnostr "github.com/nbd-wtf/go-nostr"
-
-	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
 func freePort(t *testing.T) string {
@@ -35,32 +33,15 @@ func freePort(t *testing.T) string {
 }
 
 func TestPairedModeRejection(t *testing.T) {
-	dir := t.TempDir()
-	db, err := store.Open(filepath.Join(dir, "state.db"), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
 	ctx := context.Background()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
 	owner := gnostr.GeneratePrivateKey()
 	ownerPK, _ := gnostr.GetPublicKey(owner)
-	if err := db.SetMeta(ctx, "owner_pubkey", ownerPK); err != nil {
-		t.Fatal(err)
-	}
-	wl := NewWhitelistSource(db, 100*time.Millisecond)
-	if err := wl.RefreshNow(ctx); err != nil {
-		t.Fatal(err)
-	}
 
 	addr := freePort(t)
 	srv, err := New(Config{
-		Mode:      ModePaired,
-		Listen:    addr,
-		OwnerHex:  ownerPK,
-		Whitelist: wl,
+		Mode:     ModePaired,
+		Listen:   addr,
+		OwnerHex: ownerPK,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -458,3 +439,88 @@ func TestRelayd_Auth_NotRequired_AcceptsUnauth(t *testing.T) {
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+func TestPersistenceAcrossRestart(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	owner := gnostr.GeneratePrivateKey()
+	ownerPK, _ := gnostr.GetPublicKey(owner)
+
+	eventsPath := filepath.Join(dir, "events")
+	addr := freePort(t)
+
+	// First run: publish a kind:1059 event addressed to owner.
+	srv1, err := New(Config{
+		Mode:           ModePaired,
+		Listen:         addr,
+		OwnerHex:       ownerPK,
+		EventStorePath: eventsPath,
+		Auth:           AuthConfig{Required: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv1.ListenAndServe()
+	time.Sleep(200 * time.Millisecond)
+
+	relay, err := gnostr.RelayConnect(ctx, "ws://"+addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender := gnostr.GeneratePrivateKey()
+	senderPK, _ := gnostr.GetPublicKey(sender)
+	ev := gnostr.Event{
+		Kind:      1059,
+		PubKey:    senderPK,
+		CreatedAt: gnostr.Now(),
+		Content:   "wrapped",
+		Tags:      gnostr.Tags{{"p", ownerPK}},
+	}
+	if err := ev.Sign(sender); err != nil {
+		t.Fatal(err)
+	}
+	if err := relay.Publish(ctx, ev); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	relay.Close()
+	if err := srv1.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second run: same eventsPath, fresh server, query. Expect 1 event.
+	srv2, err := New(Config{
+		Mode:           ModePaired,
+		Listen:         addr,
+		OwnerHex:       ownerPK,
+		EventStorePath: eventsPath,
+		Auth:           AuthConfig{Required: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv2.ListenAndServe()
+	defer srv2.Shutdown(ctx)
+	time.Sleep(200 * time.Millisecond)
+
+	relay2, err := gnostr.RelayConnect(ctx, "ws://"+addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer relay2.Close()
+
+	sub, err := relay2.Subscribe(ctx, gnostr.Filters{{
+		Kinds: []int{1059},
+		Tags:  gnostr.TagMap{"p": []string{ownerPK}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-sub.Events:
+		if got.ID != ev.ID {
+			t.Errorf("event id mismatch: got %s want %s", got.ID, ev.ID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no event received from persistent store")
+	}
+}

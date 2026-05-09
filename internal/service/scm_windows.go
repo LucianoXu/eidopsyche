@@ -67,89 +67,67 @@ type scmUnit struct {
 	name        string
 	displayName string
 	description string
-	// args, when expanded by argsFor, is the command line we hand to SCM.
-	// They become argv on service start and drive the cobra subcommand
-	// lookup in `eidos service-run`.
-	args func(stateDir string) []string
+	// args is the command line we hand to SCM on service start.
+	// They become argv and drive the cobra subcommand lookup in
+	// `eidos service-run`.
+	args []string
 }
 
-func (s *scm) units() []scmUnit {
-	return []scmUnit{
-		{
-			name:        DaemonUnitName,
-			displayName: "Eidopsyche Gate Daemon",
-			description: "Eidopsyche MindGate daemon — manages NIP-17 message ingest, contacts, inbox.",
-			args:        daemonArgs,
-		},
-		{
-			name:        RelayUnitName,
-			displayName: "Eidopsyche Gate Relay",
-			description: "Eidopsyche MindGate embedded Nostr relay (paired or public).",
-			args:        relayArgs,
-		},
-	}
-}
-
-func daemonArgs(stateDir string) []string {
+// daemonUnit returns the SCM unit definition for the gate daemon.
+func (s *scm) daemonUnit() scmUnit {
 	a := []string{"gate", "daemon"}
-	if stateDir != "" {
-		a = append(a, "--state-dir", stateDir)
+	if s.cfg.StateDir != "" {
+		a = append(a, "--state-dir", s.cfg.StateDir)
 	}
-	return a
+	return scmUnit{
+		name:        DaemonUnitName,
+		displayName: "Eidopsyche Gate Daemon",
+		description: "Eidopsyche MindGate daemon — manages NIP-17 message ingest, contacts, inbox.",
+		args:        a,
+	}
 }
 
-func relayArgs(stateDir string) []string {
-	a := []string{"gate", "relay"}
-	if stateDir != "" {
-		a = append(a, "--state-dir", stateDir)
+// relayUnit returns the SCM unit definition for the relay service.
+// relayDir is the working directory passed as --dir to `eidos relay start`.
+func (s *scm) relayUnit(relayDir string) scmUnit {
+	a := []string{"relay", "start"}
+	if relayDir != "" {
+		a = append(a, "--dir", relayDir)
 	}
-	return a
+	return scmUnit{
+		name:        RelayUnitName,
+		displayName: "Eidopsyche Relay",
+		description: "Eidopsyche embedded Nostr relay (paired or public).",
+		args:        a,
+	}
 }
 
-// installUnits returns the units Install / Start should manage, filtered by
-// cfg.WithRelay. Stop / Uninstall / Status iterate units() so they pick up
-// residual relay services even when WithRelay is false.
-func (s *scm) installUnits() []scmUnit {
-	all := s.units()
-	if s.cfg.WithRelay {
-		return all
-	}
-	out := make([]scmUnit, 0, 1)
-	for _, u := range all {
-		if u.name == RelayUnitName {
-			continue
-		}
-		out = append(out, u)
-	}
-	return out
+// units returns both managed units for Status / Stop / Uninstall so residuals
+// remain discoverable regardless of which caller installed them.
+func (s *scm) units() []scmUnit {
+	return []scmUnit{s.daemonUnit(), s.relayUnit("")}
 }
 
-func (s *scm) Install(ctx context.Context) error {
+func (s *scm) installScmUnit(u scmUnit) error {
 	m, err := mgr.Connect()
 	if err != nil {
 		return wrapSCMConnect(err)
 	}
 	defer m.Disconnect()
-
-	for _, u := range s.installUnits() {
-		if err := s.installOne(m, u); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.installOne(m, u)
 }
 
 func (s *scm) installOne(m *mgr.Mgr, u scmUnit) error {
 	if existing, err := m.OpenService(u.name); err == nil {
 		// Service exists — update its config to match the current binary
-		// and state-dir so a self-update or `eidos gate init` rewrite is
-		// reflected without requiring a manual reinstall.
+		// and args so a self-update or reinstall is reflected without
+		// requiring a manual reinstall.
 		defer existing.Close()
 		cfg, err := existing.Config()
 		if err != nil {
 			return fmt.Errorf("read service config %s: %w", u.name, err)
 		}
-		cfg.BinaryPathName = buildImagePath(s.cfg.BinaryPath, u.args(s.cfg.StateDir))
+		cfg.BinaryPathName = buildImagePath(s.cfg.BinaryPath, u.args)
 		cfg.DisplayName = u.displayName
 		cfg.Description = u.description
 		cfg.StartType = mgr.StartAutomatic
@@ -168,7 +146,7 @@ func (s *scm) installOne(m *mgr.Mgr, u scmUnit) error {
 		StartType:   mgr.StartAutomatic,
 		// ServiceStartName left empty → LocalSystem, the SCM default.
 	}
-	sv, err := m.CreateService(u.name, s.cfg.BinaryPath, cfg, u.args(s.cfg.StateDir)...)
+	sv, err := m.CreateService(u.name, s.cfg.BinaryPath, cfg, u.args...)
 	if err != nil {
 		return fmt.Errorf("create service %s: %w", u.name, wrapSCMOp(err))
 	}
@@ -197,8 +175,8 @@ func applyRecoveryActions(sv *mgr.Service, name string) error {
 	return nil
 }
 
-func (s *scm) Start(ctx context.Context) error {
-	if err := s.Install(ctx); err != nil {
+func (s *scm) startUnit(ctx context.Context, u scmUnit) error {
+	if err := s.installScmUnit(u); err != nil {
 		return err
 	}
 	m, err := mgr.Connect()
@@ -207,61 +185,51 @@ func (s *scm) Start(ctx context.Context) error {
 	}
 	defer m.Disconnect()
 
-	for _, u := range s.installUnits() {
-		sv, err := m.OpenService(u.name)
-		if err != nil {
-			return fmt.Errorf("open service %s: %w", u.name, err)
-		}
-		// Skip if the service is already running so Start is idempotent.
-		if st, qerr := sv.Query(); qerr == nil && st.State == svc.Running {
-			sv.Close()
-			continue
-		}
-		if err := sv.Start(); err != nil {
-			sv.Close()
-			// SCM returns ERROR_SERVICE_ALREADY_RUNNING when a parallel
-			// caller raced us — treat that as success.
-			if errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
-				continue
-			}
-			return fmt.Errorf("start service %s: %w", u.name, wrapSCMOp(err))
-		}
-		sv.Close()
+	sv, err := m.OpenService(u.name)
+	if err != nil {
+		return fmt.Errorf("open service %s: %w", u.name, err)
 	}
-	return s.waitFor(ctx, svc.Running, 10*time.Second, s.installUnits())
+	// Skip if the service is already running so Start is idempotent.
+	if st, qerr := sv.Query(); qerr == nil && st.State == svc.Running {
+		sv.Close()
+		return nil
+	}
+	if err := sv.Start(); err != nil {
+		sv.Close()
+		// SCM returns ERROR_SERVICE_ALREADY_RUNNING when a parallel
+		// caller raced us — treat that as success.
+		if errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
+			return nil
+		}
+		return fmt.Errorf("start service %s: %w", u.name, wrapSCMOp(err))
+	}
+	sv.Close()
+	return s.waitFor(ctx, svc.Running, 10*time.Second, []scmUnit{u})
 }
 
-func (s *scm) Stop(ctx context.Context) error {
+func (s *scm) stopUnit(ctx context.Context, u scmUnit) error {
 	m, err := mgr.Connect()
 	if err != nil {
 		return wrapSCMConnect(err)
 	}
 	defer m.Disconnect()
 
-	for _, u := range s.units() {
-		sv, err := m.OpenService(u.name)
-		if err != nil {
-			// Not installed → nothing to stop. Mirrors the systemd "not
-			// loaded" exit-5 swallow.
-			continue
-		}
-		_, ctlErr := sv.Control(svc.Stop)
-		sv.Close()
-		// "service has not been started" is benign: it means the service
-		// was already stopped. Anything else gets surfaced.
-		if ctlErr != nil && !errors.Is(ctlErr, windows.ERROR_SERVICE_NOT_ACTIVE) {
-			return fmt.Errorf("stop service %s: %w", u.name, wrapSCMOp(ctlErr))
-		}
+	sv, err := m.OpenService(u.name)
+	if err != nil {
+		// Not installed → nothing to stop.
+		return nil
 	}
-	return s.waitFor(ctx, svc.Stopped, 10*time.Second, s.units())
+	_, ctlErr := sv.Control(svc.Stop)
+	sv.Close()
+	// "service has not been started" is benign.
+	if ctlErr != nil && !errors.Is(ctlErr, windows.ERROR_SERVICE_NOT_ACTIVE) {
+		return fmt.Errorf("stop service %s: %w", u.name, wrapSCMOp(ctlErr))
+	}
+	return s.waitFor(ctx, svc.Stopped, 10*time.Second, []scmUnit{u})
 }
 
-func (s *scm) Uninstall(ctx context.Context) error {
-	// Best-effort stop first. If the service is running when we ask SCM
-	// to delete it, SCM marks it for deletion but doesn't actually free
-	// the entry until every handle closes AND the service stops; that
-	// half-state confuses re-installs.
-	_ = s.Stop(ctx)
+func (s *scm) uninstallUnit(ctx context.Context, u scmUnit) error {
+	_ = s.stopUnit(ctx, u)
 
 	m, err := mgr.Connect()
 	if err != nil {
@@ -269,23 +237,52 @@ func (s *scm) Uninstall(ctx context.Context) error {
 	}
 	defer m.Disconnect()
 
-	for _, u := range s.units() {
-		sv, err := m.OpenService(u.name)
-		if err != nil {
-			// Already gone.
-			continue
-		}
-		if err := sv.Delete(); err != nil {
-			sv.Close()
-			if errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
-				// SCM already accepted a prior delete request.
-				continue
-			}
-			return fmt.Errorf("delete service %s: %w", u.name, wrapSCMOp(err))
-		}
-		sv.Close()
+	sv, err := m.OpenService(u.name)
+	if err != nil {
+		// Already gone.
+		return nil
 	}
+	if err := sv.Delete(); err != nil {
+		sv.Close()
+		if errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
+			return nil
+		}
+		return fmt.Errorf("delete service %s: %w", u.name, wrapSCMOp(err))
+	}
+	sv.Close()
 	return nil
+}
+
+func (s *scm) InstallDaemon(ctx context.Context) error {
+	return s.installScmUnit(s.daemonUnit())
+}
+
+func (s *scm) InstallRelay(ctx context.Context, relayDir string) error {
+	return s.installScmUnit(s.relayUnit(relayDir))
+}
+
+func (s *scm) UninstallDaemon(ctx context.Context) error {
+	return s.uninstallUnit(ctx, s.daemonUnit())
+}
+
+func (s *scm) UninstallRelay(ctx context.Context) error {
+	return s.uninstallUnit(ctx, s.relayUnit(""))
+}
+
+func (s *scm) StartDaemon(ctx context.Context) error {
+	return s.startUnit(ctx, s.daemonUnit())
+}
+
+func (s *scm) StartRelay(ctx context.Context, relayDir string) error {
+	return s.startUnit(ctx, s.relayUnit(relayDir))
+}
+
+func (s *scm) StopDaemon(ctx context.Context) error {
+	return s.stopUnit(ctx, s.daemonUnit())
+}
+
+func (s *scm) StopRelay(ctx context.Context) error {
+	return s.stopUnit(ctx, s.relayUnit(""))
 }
 
 func (s *scm) Status(ctx context.Context) ([]Status, error) {
@@ -352,24 +349,13 @@ func openServiceForQuery(scmHandle windows.Handle, name string) (*mgr.Service, e
 
 // waitFor polls the given units until they all reach the target state or
 // timeout elapses. On timeout it returns an error naming the unit and the
-// last-observed state — `eidos gate start` should never claim success for
-// a service that crashed back to Stopped immediately after sv.Start().
-//
-// The caller chooses the unit set: Start passes installUnits() so that a
-// daemon-only install doesn't sit waiting for an absent relay; Stop passes
-// units() so a residual relay (left from a prior --with-local-relay run)
-// is also waited on.
+// last-observed state.
 func (s *scm) waitFor(ctx context.Context, target svc.State, timeout time.Duration, units []scmUnit) error {
 	deadline := time.Now().Add(timeout)
 	var last []namedState
 	for time.Now().Before(deadline) {
 		states, err := s.observeStates(units)
 		if err != nil {
-			// observeStates already classified ERROR_SERVICE_DOES_NOT_EXIST
-			// as `missing` rather than an error, so anything we see here
-			// is a real fault (access denied, SCM RPC failure, etc.).
-			// Retrying would just spin until timeout with the same lie;
-			// surface it instead.
 			return fmt.Errorf("observe service state: %w", err)
 		}
 		last = states
@@ -385,9 +371,7 @@ func (s *scm) waitFor(ctx context.Context, target svc.State, timeout time.Durati
 	return fmt.Errorf("services did not reach %s within %s: %s", stateName(target), timeout, formatStates(last))
 }
 
-// namedState pairs a unit with the state we last observed for it. Returned
-// from observeStates so the timeout error can name which units are still
-// not where we want them to be.
+// namedState pairs a unit with the state we last observed for it.
 type namedState struct {
 	name  string
 	state svc.State
@@ -411,11 +395,6 @@ func (s *scm) observeStates(units []scmUnit) ([]namedState, error) {
 				out = append(out, namedState{name: u.name, missing: true})
 				continue
 			}
-			// A real error (access denied, RPC failure, etc.) should
-			// surface to the caller — silently treating it as "missing"
-			// would let waitFor time out with a misleading
-			// "<unit>=missing" report when the actual cause is e.g. an
-			// SCM ACL change mid-test.
 			return nil, fmt.Errorf("query service %s: %w", u.name, err)
 		}
 		q, qerr := sv.Query()

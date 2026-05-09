@@ -28,41 +28,49 @@ func TestBuildImagePathQuotesSpaces(t *testing.T) {
 	}
 }
 
-// TestInstallUnitsFiltersRelay locks in the parity contract with the
-// systemd / launchd backends: WithRelay=false drops the relay unit from
-// Install / Start, but Stop / Uninstall / Status still iterate units().
-func TestInstallUnitsFiltersRelay(t *testing.T) {
-	withRelay := &scm{cfg: Config{BinaryPath: "x", WithRelay: true}}
-	if got := len(withRelay.installUnits()); got != 2 {
-		t.Errorf("WithRelay=true: installUnits len = %d, want 2", got)
+// TestDaemonUnitArgs verifies daemon args carry --state-dir.
+func TestDaemonUnitArgs(t *testing.T) {
+	s := &scm{cfg: Config{BinaryPath: "x", StateDir: `C:\Users\test\.eidos\gate`}}
+	u := s.daemonUnit()
+	if got, want := strings.Join(u.args, " "), `gate daemon --state-dir C:\Users\test\.eidos\gate`; got != want {
+		t.Errorf("daemonUnit args: got %q, want %q", got, want)
 	}
-
-	withoutRelay := &scm{cfg: Config{BinaryPath: "x", WithRelay: false}}
-	if got := len(withoutRelay.installUnits()); got != 1 {
-		t.Errorf("WithRelay=false: installUnits len = %d, want 1", got)
-	}
-	if name := withoutRelay.installUnits()[0].name; name != DaemonUnitName {
-		t.Errorf("WithRelay=false: only unit must be daemon, got %s", name)
-	}
-	if got := len(withoutRelay.units()); got != 2 {
-		t.Errorf("units() must always return both for cleanup paths; got %d", got)
+	// Empty state dir → no flag.
+	s2 := &scm{cfg: Config{BinaryPath: "x"}}
+	u2 := s2.daemonUnit()
+	if strings.Contains(strings.Join(u2.args, " "), "--state-dir") {
+		t.Errorf("daemonUnit with empty StateDir should not include --state-dir; got %v", u2.args)
 	}
 }
 
-// TestUnitArgsCarryStateDir verifies the daemon's --state-dir flag is woven
-// into the SCM ImagePath so that a service started by SCM finds the same
-// state directory the user passed at install time.
-func TestUnitArgsCarryStateDir(t *testing.T) {
-	args := daemonArgs(`C:\Users\test\.eidos\gate`)
-	if got, want := strings.Join(args, " "), `gate daemon --state-dir C:\Users\test\.eidos\gate`; got != want {
-		t.Errorf("daemonArgs: got %q, want %q", got, want)
+// TestRelayUnitArgs verifies relay args use "relay start --dir" (not "gate relay").
+func TestRelayUnitArgs(t *testing.T) {
+	s := &scm{cfg: Config{BinaryPath: "x"}}
+	u := s.relayUnit(`C:\Users\test\.eidos\relay`)
+	if got, want := strings.Join(u.args, " "), `relay start --dir C:\Users\test\.eidos\relay`; got != want {
+		t.Errorf("relayUnit args: got %q, want %q", got, want)
 	}
-	args = relayArgs(`C:\Users\test\.eidos\gate`)
-	if got, want := strings.Join(args, " "), `gate relay --state-dir C:\Users\test\.eidos\gate`; got != want {
-		t.Errorf("relayArgs: got %q, want %q", got, want)
+	if u.name != RelayUnitName {
+		t.Errorf("relayUnit name = %q, want %q", u.name, RelayUnitName)
 	}
-	// Empty state dir → no flag, so SCM falls back to the resolver default.
-	if got := daemonArgs(""); strings.Contains(strings.Join(got, " "), "--state-dir") {
-		t.Errorf("daemonArgs(\"\") should not include --state-dir; got %v", got)
+	// RelayUnitName must be "eidos-relay".
+	if RelayUnitName != "eidos-relay" {
+		t.Errorf("RelayUnitName = %q, want %q", RelayUnitName, "eidos-relay")
+	}
+}
+
+// TestUnitsAlwaysReturnsBothForStatus confirms units() (used by Status) always
+// returns both daemon and relay so residuals stay discoverable.
+func TestUnitsAlwaysReturnsBothForStatus(t *testing.T) {
+	s := &scm{cfg: Config{BinaryPath: "x"}}
+	got := s.units()
+	if len(got) != 2 {
+		t.Fatalf("units() returned %d entries, want 2", len(got))
+	}
+	if got[0].name != DaemonUnitName {
+		t.Errorf("units()[0].name = %q, want %q", got[0].name, DaemonUnitName)
+	}
+	if got[1].name != RelayUnitName {
+		t.Errorf("units()[1].name = %q, want %q", got[1].name, RelayUnitName)
 	}
 }

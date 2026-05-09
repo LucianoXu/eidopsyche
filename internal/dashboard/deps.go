@@ -162,9 +162,6 @@ type ServiceStatus struct {
 	StateDir      string
 	DashboardURL  string
 	IPCSocket     string
-	RelayEnabled  bool
-	RelayMode     string
-	RelayListen   string
 	ActiveJobID   string    // empty when no lifecycle job is in flight
 	ActiveJobArgs []string  // job's argv, e.g. ["gate","reconnect"]
 	ActiveJobAt   time.Time // when the in-flight job started

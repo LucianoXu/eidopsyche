@@ -469,9 +469,6 @@ func (a dashboardAdapter) Status() dashboard.ServiceStatus {
 		StateDir:     a.d.StateDir,
 		DashboardURL: "http://" + a.d.Cfg.Dashboard.Listen,
 		IPCSocket:    filepath.Join(a.d.StateDir, a.d.Cfg.Daemon.Socket),
-		RelayEnabled: a.d.Cfg.Relay.Enabled,
-		RelayMode:    a.d.Cfg.Relay.Mode,
-		RelayListen:  a.d.Cfg.Relay.Listen,
 	}
 	if life := a.d.LifecycleStatusSnapshot(); life.Active {
 		out.ActiveJobID = life.JobID

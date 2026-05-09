@@ -115,14 +115,14 @@ your identity:
 
 next steps:
   1) start daemon: eidos gate daemon
-  2) start relay:  eidos gate relay
-  3) share card:   eidos gate card
+  2) share card:   eidos gate card
+  (optional) set up local relay: eidos relay init --mode paired --listen 0.0.0.0:22895
 ```
 
-## Start the daemon and relay
+## Start the daemon
 
 ```sh
-eidos gate start    # installs OS service units and starts both
+eidos gate start    # installs OS service unit for the daemon and starts it
 eidos gate status   # show installed / enabled / active state per unit
 eidos gate stop     # stop without uninstalling
 ```
@@ -137,9 +137,17 @@ brings the service back automatically.
 
 | OS | Service manager | User-mode unit path | System-mode unit path |
 |---|---|---|---|
-| Linux | systemd | `~/.config/systemd/user/eidos-gate-{daemon,relay}.service` | `/etc/systemd/system/eidos-gate-{daemon,relay}.service` |
-| macOS | launchd | `~/Library/LaunchAgents/eidos-gate-{daemon,relay}.plist` | `/Library/LaunchDaemons/eidos-gate-{daemon,relay}.plist` |
-| Windows | SCM (`services.msc`) | `eidos-gate-{daemon,relay}` (host-wide; LocalSystem account) | same — SCM has no per-user database |
+| Linux | systemd | `~/.config/systemd/user/eidos-gate-daemon.service` | `/etc/systemd/system/eidos-gate-daemon.service` |
+| macOS | launchd | `~/Library/LaunchAgents/eidos-gate-daemon.plist` | `/Library/LaunchDaemons/eidos-gate-daemon.plist` |
+| Windows | SCM (`services.msc`) | `eidos-gate-daemon` (host-wide; LocalSystem account) | same — SCM has no per-user database |
+
+The relay service unit is installed separately via `eidos relay service install` and uses the unit name `eidos-relay`:
+
+| OS | Service manager | User-mode unit path | System-mode unit path |
+|---|---|---|---|
+| Linux | systemd | `~/.config/systemd/user/eidos-relay.service` | `/etc/systemd/system/eidos-relay.service` |
+| macOS | launchd | `~/Library/LaunchAgents/eidos-relay.plist` | `/Library/LaunchDaemons/eidos-relay.plist` |
+| Windows | SCM (`services.msc`) | `eidos-relay` (host-wide; LocalSystem account) | same |
 
 On Linux user-mode, services survive your shell exiting; for a full
 logout-survives experience on a headless host, run
@@ -157,34 +165,47 @@ want to run one on this host as well.
 
 ### Self-hosting the embedded relay
 
-Pass `--with-local-relay` at init to also install and start the
-`eidos-gate-relay` unit. `--listen` controls the bind address (default
-`0.0.0.0:22895` when `--with-local-relay` is set without `--listen`).
-The `--home` URL embedded in your card / invite is independent — for a
-public deployment, you typically:
+The relay is an independent subcommand (`eidos relay`), separate from the gate.
+Initialize it after initializing the gate:
+
+```sh
+eidos relay init --mode paired --listen 0.0.0.0:22895 --owner <npub>
+```
+
+`--listen` controls the bind address (default `0.0.0.0:22895`).
+The gate's `--home` URL embedded in your card / invite is independent —
+for a public deployment, you typically:
 
 1. Bind the relay to all interfaces (`--listen 0.0.0.0:22895`).
 2. Terminate TLS at a reverse proxy (Caddy / nginx / Cloudflare Tunnel)
    that forwards `wss://your.host` to the local plain-WS port.
-3. Pass `--home wss://your.host` so peers dial the public URL.
+3. Pass `--home wss://your.host` to `eidos gate init` so peers dial the
+   public URL.
 
-To toggle the local relay on or off after init:
+Install and start the relay service:
 
 ```sh
-eidos gate config set relay.enabled true|false
-eidos gate stop && eidos gate start
+eidos relay service install
+eidos relay service start
+eidos relay status
 ```
 
-`relay.enabled = false` makes `eidos gate start` skip installing /
-starting the relay unit; any residual unit on disk from a previous opt-in
-is left alone (manage it via `systemctl` / `launchctl` directly, or
-clean up with `eidos gate purge`).
+To stop or uninstall the relay service independently:
+
+```sh
+eidos relay service stop
+eidos relay service uninstall
+```
+
+Relay config lives at `~/.config/eidos/relay/config.toml` and is managed
+with `eidos relay config get/set`. Event data is persisted at
+`~/.config/eidos/relay/events/` (badger, pure Go — no CGO required).
 
 #### Native TLS (BYO certs)
 
 The relay can terminate TLS itself when you give it a cert + key — no
-reverse proxy needed for the simple "one MindGate relay, no other web
-services on this host" deployment. Set both paths in `config.toml`:
+reverse proxy needed for the simple "one relay, no other web services on
+this host" deployment. Set both paths in `~/.config/eidos/relay/config.toml`:
 
 ```toml
 [relay.tls]
@@ -202,24 +223,23 @@ relay binds 80/443 directly:
 
 ```sh
 sudo certbot certonly --standalone -d your.host \
-  --pre-hook  'eidos gate stop' \
-  --post-hook 'eidos gate start'
+  --pre-hook  'eidos relay service stop' \
+  --post-hook 'eidos relay service start'
 ```
 
 For a multi-service host where nginx / Caddy already owns 80/443,
-prefer the reverse-proxy posture above and leave `[relay.tls]` empty.
+prefer the reverse-proxy posture above and leave `[tls]` empty.
 
-After config changes, restart so the relay picks up the new cert
-files:
+After config changes, restart so the relay picks up the new cert files:
 
 ```sh
-eidos gate stop && eidos gate start
+eidos relay service stop && eidos relay service start
 ```
 
 NIP-42 AUTH on the relay is enabled by default per NIP-17
-§Recommendations (`relay.auth.required = true`); flip to `false` only
+§Recommendations (`auth.required = true`); flip to `false` only
 if you're knowingly running an open relay for experiments. The
-`service_url` override under `[relay.auth]` is for the reverse-proxy
+`service_url` override under `[auth]` is for the reverse-proxy
 case where the proxy-facing URL differs from the bind address:
 
 ```toml
@@ -228,50 +248,56 @@ case where the proxy-facing URL differs from the bind address:
   service_url = "wss://your.host"
 ```
 
-### Migrating from v0.4
+### Migrating from pre-relay-top-level versions
 
-v0.5 changes how the gate is initialized. Existing v0.4 state directories
-are detected by their absence of `[relay].enabled` in `config.toml` and
-rejected at command entry with a pointer to this section.
+Older versions embedded the relay inside `eidos gate`. If you are upgrading
+from a version that had `eidos gate relay` or `--with-local-relay`:
 
-**Path A — re-init from scratch** (loses contacts, invites, inbox):
+1. Stop and disable the old relay unit:
+   ```sh
+   systemctl --user stop eidos-gate-relay
+   systemctl --user disable eidos-gate-relay
+   ```
+   On macOS substitute `launchctl bootout`; on Windows substitute
+   `sc stop eidos-gate-relay` / `sc delete eidos-gate-relay`.
+
+2. Re-run gate's service installer to drop the old relay unit reference:
+   ```sh
+   eidos gate service install
+   ```
+
+3. Initialize the new relay config:
+   ```sh
+   eidos relay init --mode paired --listen <host:port> [--owner <npub>]
+   ```
+
+4. Install and start the renamed unit:
+   ```sh
+   eidos relay service install
+   eidos relay service start
+   ```
+
+5. Edit `~/.config/eidos/config.toml` and remove the `[relay]` section.
+   (Gate ignores it after upgrade and prints a one-line warning at start;
+   the cleanup is cosmetic but recommended.)
+
+**Re-init from scratch** (loses contacts, invites, inbox):
 
 ```sh
 eidos gate purge --yes
-eidos gate init --label <your-label> --home <url> [--with-local-relay]
-```
-
-**Path B — migrate in place** (keeps state):
-
-```sh
-eidos gate stop
-
-# Edit ~/.eidos/gate/config.toml — replace the [relay] block with:
-#
-#   [relay]
-#     enabled  = true                  # set to false for daemon-only
-#     listen   = "127.0.0.1:22895"     # whatever your previous bind was
-#     mode     = "paired"
-#     data_dir = "relay"
-#
-# (Daemon-only) optionally replace the home row in own_relays:
-
-sqlite3 ~/.eidos/gate/state.db <<'SQL'
-  DELETE FROM own_relays WHERE role='home';
-  INSERT INTO own_relays(relay_url, role, added_at)
-    VALUES('wss://your-relay.example.com', 'home', strftime('%s','now'));
-SQL
-
-eidos gate start
+eidos gate init --label <your-label> --home <url>
+eidos relay init --mode paired --listen 0.0.0.0:22895
 ```
 
 ### Logs
 
-- Linux: `journalctl --user -u eidos-gate-daemon` (and similarly for relay)
+- Linux: `journalctl --user -u eidos-gate-daemon` (gate daemon),
+  `journalctl --user -u eidos-relay` (relay)
   or `journalctl -u ...` for `--system`.
 - macOS: launchd does not aggregate logs the way journald does, so the
   plist redirects stdout / stderr to
-  `<state-dir>/logs/eidos-gate-{daemon,relay}.log`. Tail with
+  `<state-dir>/logs/eidos-gate-daemon.log` (gate daemon) and
+  `~/.config/eidos/relay/logs/eidos-relay.log` (relay). Tail with
   `tail -f ~/.eidos/gate/logs/eidos-gate-daemon.log`.
 - Windows: SCM captures the daemon's stdout/stderr only when explicitly
   redirected. Run `Get-EventLog -LogName Application -Source eidos-gate-daemon`
@@ -295,9 +321,11 @@ least-privilege.
 
 ### Foreground mode
 
-The original `eidos gate daemon` and `eidos gate relay` commands still
-work and run in the foreground — useful for debugging or on hosts without
-a service manager. They are exactly what `eidos gate start`'s units invoke.
+For debugging or on hosts without a service manager, use foreground commands:
+- `eidos gate daemon` — run the gate daemon in the foreground (exactly what
+  the `eidos-gate-daemon` unit invokes)
+- `eidos relay start` — run the relay in the foreground (exactly what the
+  `eidos-relay` unit invokes)
 On Windows, when the binary is launched by SCM (`svc.IsWindowsService()`
 returns true), the same subcommands transparently dispatch through
 `golang.org/x/sys/windows/svc` so SCM's Stop / Shutdown control messages
