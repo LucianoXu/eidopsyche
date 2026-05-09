@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 	"github.com/fsnotify/fsnotify"
@@ -22,18 +23,25 @@ func newRunCmd() *cobra.Command {
 		Use:   "run",
 		Short: "Run as PID 1: spawn crond + gate daemon, watch wake dir",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := cmd.Context()
-			children := processSpawner{}
-			startChildren(ctx, children)
+			ctx, cancel := context.WithCancel(cmd.Context())
+			defer cancel()
+			children := newProcessSpawner(cancel)
+			if err := startChildren(ctx, children); err != nil {
+				return err
+			}
 			return watchWakes(ctx)
 		},
 	}
 }
 
 // startChildren spawns long-running children (crond + gate daemon).
-func startChildren(ctx context.Context, sp ChildSpawner) {
-	_ = sp.Spawn(ctx, "crond", "-f", "-c", "/etc/crontabs")
-	_ = sp.Spawn(ctx, "eidos", "gate", "daemon", "--state-dir", gateDir)
+// Returns the first non-nil error so the caller can abort before entering
+// the wake loop.
+func startChildren(ctx context.Context, sp ChildSpawner) error {
+	if err := sp.Spawn(ctx, "crond", "-f", "-c", "/etc/crontabs"); err != nil {
+		return err
+	}
+	return sp.Spawn(ctx, "eidos", "gate", "daemon", "--state-dir", gateDir)
 }
 
 // SpawnAgent is invoked when the supervisor picks up a pending wake. The
@@ -62,7 +70,7 @@ func watchWakesIn(ctx context.Context, dir string, spawn SpawnAgent) error {
 		return err
 	}
 	// Drain any pre-existing pending.json.
-	if _, err := promoteAndSpawn(ctx, dir, spawn); err != nil {
+	if _, err := drainPending(ctx, dir, spawn); err != nil {
 		return err
 	}
 	for {
@@ -79,7 +87,7 @@ func watchWakesIn(ctx context.Context, dir string, spawn SpawnAgent) error {
 			if ev.Op&(fsnotify.Create|fsnotify.Rename|fsnotify.Write) == 0 {
 				continue
 			}
-			if _, err := promoteAndSpawn(ctx, dir, spawn); err != nil {
+			if _, err := drainPending(ctx, dir, spawn); err != nil {
 				return err
 			}
 		case err, ok := <-w.Errors:
@@ -91,40 +99,59 @@ func watchWakesIn(ctx context.Context, dir string, spawn SpawnAgent) error {
 	}
 }
 
-// promoteAndSpawn picks up pending.json (if any), promotes to active,
-// invokes spawn, then clears active. If more pending arrives during spawn,
-// it is processed recursively at the end (chained, not concurrent).
+// drainPending promotes and spawns all pending wake signals in an iterative
+// loop, processing one at a time until no pending.json remains. This replaces
+// the previous recursive promoteAndSpawn to avoid unbounded stack growth under
+// sustained producer pressure.
 //
-// If active.json already exists when called, this is a no-op (the previous
-// spawn is still in flight; the supervisor will pick up pending after).
-func promoteAndSpawn(ctx context.Context, dir string, spawn SpawnAgent) (*wake.Signal, error) {
-	if cur, _ := wake.ReadActive(dir); cur != nil {
-		return nil, nil
-	}
-	sig, err := wake.PromoteToActive(dir)
-	if err != nil || sig == nil {
-		return sig, err
-	}
-	if err := spawn(ctx, *sig); err != nil {
+// If active.json already exists, this is a no-op (the previous spawn is still
+// in flight; the supervisor will pick up pending after it completes).
+func drainPending(ctx context.Context, dir string, spawn SpawnAgent) (*wake.Signal, error) {
+	var last *wake.Signal
+	for {
+		if cur, _ := wake.ReadActive(dir); cur != nil {
+			return last, nil
+		}
+		sig, err := wake.PromoteToActive(dir)
+		if err != nil || sig == nil {
+			return last, err
+		}
+		if err := spawn(ctx, *sig); err != nil {
+			_ = wake.ClearActive(dir)
+			return sig, err
+		}
 		_ = wake.ClearActive(dir)
-		return sig, err
+		last = sig
+		// After clearing active, loop to check for more pending signals.
 	}
-	_ = wake.ClearActive(dir)
-	// After active clears, check if more pending arrived and process.
-	if _, err := promoteAndSpawn(ctx, dir, spawn); err != nil {
-		return sig, err
-	}
-	return sig, nil
 }
 
 // runAgentForWake is the production spawner: it runs `eidos supervisor
 // agent-runner --wake-file <active.json>` as a child process and waits.
+// The child is started in its own process group (Setpgid) so that on context
+// cancellation we can SIGTERM the entire group, including any grandchild
+// `claude` process started by agent-runner.
 func runAgentForWake(ctx context.Context, _ wake.Signal) error {
-	cmd := exec.CommandContext(ctx, "eidos", "supervisor", "agent-runner",
+	cmd := exec.Command("eidos", "supervisor", "agent-runner",
 		"--wake-file", filepath.Join(wakeDir, "active.json"),
 		"--ontology", "/eidos/ontology",
 	)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		if cmd.Process != nil {
+			// Negative pid targets the process group. Best-effort.
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		}
+		return <-done
+	}
 }

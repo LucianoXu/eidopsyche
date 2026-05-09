@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,24 +11,63 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 )
 
+// fakeChildren is a test double for ChildSpawner. It records how many children
+// were spawned and can be configured to return an error on a specific call.
+type fakeChildren struct {
+	started   int
+	failAfter int   // if > 0, return errFail on the failAfter-th Spawn call (1-indexed)
+	errFail   error // error to return when failAfter is triggered
+}
+
+// newFakeChildren creates a fakeChildren that succeeds for all spawns.
+func newFakeChildren() *fakeChildren {
+	return &fakeChildren{}
+}
+
+func (f *fakeChildren) Spawn(_ context.Context, _ string, _ ...string) error {
+	f.started++
+	if f.failAfter > 0 && f.started == f.failAfter {
+		return f.errFail
+	}
+	return nil
+}
+
+func (f *fakeChildren) Started() int { return f.started }
+
 func TestStartChildrenLaunchesBoth(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tracker := &fakeChildren{}
-	go startChildren(ctx, tracker)
-	time.Sleep(50 * time.Millisecond)
+	tracker := newFakeChildren()
+	if err := startChildren(ctx, tracker); err != nil {
+		t.Fatalf("startChildren returned unexpected error: %v", err)
+	}
 	if got := tracker.Started(); got != 2 {
 		t.Errorf("started %d children, want 2 (crond + gate daemon)", got)
 	}
 }
 
-type fakeChildren struct{ started int }
+func TestStartChildrenPropagatesFirstError(t *testing.T) {
+	ctx := context.Background()
+	sentinel := errors.New("spawn failed")
 
-func (f *fakeChildren) Spawn(_ context.Context, _ string, _ ...string) error {
-	f.started++
-	return nil
+	// Fail on first spawn (crond).
+	fc := &fakeChildren{failAfter: 1, errFail: sentinel}
+	if err := startChildren(ctx, fc); !errors.Is(err, sentinel) {
+		t.Errorf("expected sentinel error, got: %v", err)
+	}
+	if fc.Started() != 1 {
+		t.Errorf("expected exactly 1 spawn attempt, got %d", fc.Started())
+	}
+
+	// Fail on second spawn (gate daemon).
+	fc2 := &fakeChildren{failAfter: 2, errFail: sentinel}
+	if err := startChildren(ctx, fc2); !errors.Is(err, sentinel) {
+		t.Errorf("expected sentinel error on second spawn, got: %v", err)
+	}
+	if fc2.Started() != 2 {
+		t.Errorf("expected exactly 2 spawn attempts, got %d", fc2.Started())
+	}
 }
-func (f *fakeChildren) Started() int { return f.started }
 
 func TestWatchPromotesPendingAndSpawns(t *testing.T) {
 	dir := t.TempDir()
