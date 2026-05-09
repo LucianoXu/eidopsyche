@@ -305,9 +305,15 @@ func (s *scm) Status(ctx context.Context) ([]Status, error) {
 		st := Status{Name: u.name}
 		sv, err := openServiceForQuery(scHandle, u.name)
 		if err != nil {
-			// ERROR_SERVICE_DOES_NOT_EXIST → not installed.
-			out = append(out, st)
-			continue
+			if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+				// Service genuinely not installed — Installed=false.
+				out = append(out, st)
+				continue
+			}
+			// Anything else (access denied, RPC failure, etc.) is a
+			// real error the caller should see; pretending the service
+			// is "not installed" would lie about real state.
+			return nil, fmt.Errorf("query service %s: %w", u.name, err)
 		}
 		st.Installed = true
 		// SCM has no separate "enabled" toggle distinct from StartType.
@@ -358,11 +364,17 @@ func (s *scm) waitFor(ctx context.Context, target svc.State, timeout time.Durati
 	var last []namedState
 	for time.Now().Before(deadline) {
 		states, err := s.observeStates(units)
-		if err == nil {
-			last = states
-			if statesAllAt(states, target) {
-				return nil
-			}
+		if err != nil {
+			// observeStates already classified ERROR_SERVICE_DOES_NOT_EXIST
+			// as `missing` rather than an error, so anything we see here
+			// is a real fault (access denied, SCM RPC failure, etc.).
+			// Retrying would just spin until timeout with the same lie;
+			// surface it instead.
+			return fmt.Errorf("observe service state: %w", err)
+		}
+		last = states
+		if statesAllAt(states, target) {
+			return nil
 		}
 		select {
 		case <-ctx.Done():
@@ -395,14 +407,21 @@ func (s *scm) observeStates(units []scmUnit) ([]namedState, error) {
 	for _, u := range units {
 		sv, err := openServiceForQuery(scHandle, u.name)
 		if err != nil {
-			out = append(out, namedState{name: u.name, missing: true})
-			continue
+			if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+				out = append(out, namedState{name: u.name, missing: true})
+				continue
+			}
+			// A real error (access denied, RPC failure, etc.) should
+			// surface to the caller — silently treating it as "missing"
+			// would let waitFor time out with a misleading
+			// "<unit>=missing" report when the actual cause is e.g. an
+			// SCM ACL change mid-test.
+			return nil, fmt.Errorf("query service %s: %w", u.name, err)
 		}
 		q, qerr := sv.Query()
 		sv.Close()
 		if qerr != nil {
-			out = append(out, namedState{name: u.name, missing: true})
-			continue
+			return nil, fmt.Errorf("query state of %s: %w", u.name, qerr)
 		}
 		out = append(out, namedState{name: u.name, state: q.State})
 	}

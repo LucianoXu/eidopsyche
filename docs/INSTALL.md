@@ -130,9 +130,10 @@ eidos gate stop     # stop without uninstalling
 `start` writes the appropriate unit files for your OS and asks the OS
 service manager to enable + start them. Both units restart on non-zero
 exit (`Restart=on-failure` on systemd; `KeepAlive`+`SuccessfulExit=false`
-on launchd; SCM's default service-failure recovery on Windows) so a
-clean `eidos gate stop` actually stops, while a crash brings the
-service back automatically.
+on launchd; an explicit SCM recovery ladder of restart-after-1s, 2s, 5s
+with a 60s reset window on Windows — Windows' own default would be "take
+no action") so a clean `eidos gate stop` actually stops, while a crash
+brings the service back automatically.
 
 | OS | Service manager | User-mode unit path | System-mode unit path |
 |---|---|---|---|

@@ -4,9 +4,19 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"golang.org/x/sys/windows/svc"
 )
+
+// scmStopWaitHint is the time we promise SCM the daemon will take to
+// finish shutting down after a Stop / Shutdown control. SCM uses the
+// hint to decide when to consider the service hung — too short and a
+// daemon doing a clean inbox flush gets killed; too long and the
+// service-stop UX feels sluggish. Five seconds matches the relay's
+// graceful shutdown timeout (cmd/eidos/gate/relay.go) and gives the
+// daemon plenty of headroom to drain its goroutines.
+const scmStopWaitHint = 5 * time.Second
 
 // RunSupervised lets a long-running command (gate daemon, gate relay)
 // participate in the host's service supervisor when one is in charge of
@@ -70,12 +80,23 @@ func (h *scmHandler) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 			case svc.Interrogate:
 				changes <- c.CurrentStatus
 			case svc.Stop, svc.Shutdown:
+				// Tell SCM we acknowledged the stop *before* waiting for
+				// the runner to drain. SCM treats a service that doesn't
+				// move out of Running within a few seconds of receiving
+				// Stop as hung; reporting StopPending with a WaitHint
+				// keeps SCM patient through a graceful shutdown.
+				changes <- svc.Status{
+					State:    svc.StopPending,
+					WaitHint: uint32(scmStopWaitHint / time.Millisecond),
+				}
 				cancel()
 				h.runErr = <-errc
-				changes <- svc.Status{State: svc.StopPending}
 				return false, 0
 			}
 		case err := <-errc:
+			// Runner returned on its own (fatal startup error or clean
+			// exit). Report StopPending so SCM transitions us cleanly
+			// into Stopped.
 			h.runErr = err
 			changes <- svc.Status{State: svc.StopPending}
 			if err != nil {

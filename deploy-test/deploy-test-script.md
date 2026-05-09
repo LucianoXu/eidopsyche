@@ -51,7 +51,7 @@ codenames) live under `~/cns/`.
      creates and starts SCM services running as LocalSystem.
 6. **Establish trust** via invite. Two ways:
    - **CLI (works on every platform):** for each pair `(A, B)` in
-     `{selene↔mbp, selene↔mbp, mbp↔msi}` — on issuer
+     `{selene↔mbp, selene↔msi, mbp↔msi}` — on issuer
      `eidos gate invite create --redeemer-label <peer>`; on redeemer
      `eidos gate redeem '<URI>'`.
    - **Webui (Phase 3, recommended for selene↔mbp):** skip the CLI for
