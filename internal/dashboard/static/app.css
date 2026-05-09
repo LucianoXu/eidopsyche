@@ -1651,8 +1651,6 @@ footer.relays-strip::after {
   color: var(--fg);
 }
 
-.strip-row .role-pill { vertical-align: 0; }
-
 .strip-url {
   font-family: var(--mono);
   font-size: 12px;

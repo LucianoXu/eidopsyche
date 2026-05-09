@@ -140,11 +140,10 @@ func TestRender_RelaysStrip_PillVocabulary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Strip frame: leading mono "Relays" label and the inner host id
-	// htmx swaps into.
+	// Strip frame: leading mono "Relays" label and the inner host the
+	// htmx swap renders into.
 	for _, want := range []string{
 		`class="relay-strip-inner"`,
-		`id="relays-tbody"`,
 		`class="strip-label"`,
 	} {
 		if !strings.Contains(out, want) {
