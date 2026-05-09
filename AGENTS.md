@@ -86,6 +86,23 @@ eidopsyche/
 - Cross-subcommand contracts (wake signal format, IPC messages, ontology layout) live in `internal/`. Do not duplicate types between subcommand packages under `cmd/eidos/` — import from the shared package.
 - Commit messages follow Conventional Commits: `<type>(<scope>): <subject>` with type ∈ `feat | fix | perf | security | refactor | chore | test | docs | build | ci` and scope optional but encouraged (`forge`, `gate`, `supervisor`, `core`). Only `feat` / `fix` / `perf` / `security` enter the user-facing changelog. Breaking changes use `feat!:` or a `BREAKING CHANGE:` footer.
 
+## Single Call Path
+
+Every operator action — sending a message, adding a contact, setting a config key, creating an invite, running a lifecycle job — has exactly **one** code path. CLI, dashboard webui, and future agent MCP / NIP-46 thin-client surfaces all funnel through the same daemon method table.
+
+Concretely:
+- The daemon (`internal/daemon`) owns a `methodTable` keyed by method name (e.g. `send`, `contact.add`, `config.set`). Each handler validates its JSON params, performs the action, and returns a typed error code from `internal/ipc/protocol.go`.
+- The CLI (`cmd/eidos/gate/*.go`) opens the IPC unix socket, packs args into the method's JSON params, calls, and renders the result.
+- The dashboard adapter (`internal/daemon/dashboard_adapter.go`) packs args into the **same** JSON params and calls the **same** method through an in-process dispatch helper (no socket round-trip; same handler function). It does **not** reach into `*Daemon` internals to reimplement actions.
+- The future MCP server is the same shape: MCP tool → JSON params → same dispatcher → MCP response.
+
+**Add a new operation? It lands as an IPC method first.** Surfaces (CLI command, dashboard handler, MCP tool) wrap that method; they never reimplement the action.
+
+The only sanctioned exception is bootstrap or diagnostic commands that operate on local files when the daemon is *guaranteed* to be down (e.g. first-time `eidos gate init`). Such exceptions must be justified in the implementation comment.
+
+This rule is the structural answer to a class of bugs we hit in 2026-05: the dashboard's `Send` had silently forked from the IPC `send` handler — skipping the contact-existence check, the npub→hex resolution, and the two-phase outbox persistence. `config set` was a three-way fork (CLI direct-file-write, dashboard direct-file-write under a daemon mutex, no IPC method) racing on `config.toml`. See `docs/superpowers/specs/2026-05-09-unified-call-path-design.md` for the migration plan.
+
+
 ## Commit & Pull Request Guidelines
 
 **Follow this pipeline for actual code change:**
