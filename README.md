@@ -91,6 +91,12 @@ install script (single source of truth for upgrade logic). Pass `--force`
 to reinstall the current version (useful for repairing a corrupted binary
 or pinning via `EIDOS_VERSION=...`).
 
+After the new binary is in place the install script runs
+`eidos gate restart --if-running` so a managed daemon picks up the new
+code automatically. Pass `--no-restart` (or export `EIDOS_NO_RESTART=1`)
+to suppress the auto-restart; you can run `eidos gate restart` yourself
+later to apply the upgrade.
+
 On Windows, `eidos self-update` is not yet wired to `install.ps1`; rerun
 the install one-liner above to upgrade.
 

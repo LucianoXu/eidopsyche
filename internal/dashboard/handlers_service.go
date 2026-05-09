@@ -241,8 +241,8 @@ func renderServiceConfirmModal(w http.ResponseWriter, r *renderer, logger *slog.
 		ackText = "I have backed up state.db (or accept losing it)"
 	case "self-update":
 		title = "Self-update binary"
-		body = fmt.Sprintf("Re-runs the install script to fetch the latest release. The running daemon keeps the OLD binary mapped in memory until restart. Type the running version (%s) to confirm.", status.Version)
-		warning = "After the install completes, restart the daemon manually to pick up the new code: `eidos gate stop && eidos gate start`."
+		body = fmt.Sprintf("Re-runs the install script to fetch the latest release. After the install completes the install script runs `eidos gate restart --if-running` automatically so the daemon picks up the new binary. Type the running version (%s) to confirm.", status.Version)
+		warning = "The dashboard's SSE connection drops while the daemon restarts and reconnects on its own once the new binary is up. Set EIDOS_NO_RESTART=1 in the daemon's environment if you would rather restart manually."
 		label = status.Version
 		confirmLabel = "Run self-update"
 	default:

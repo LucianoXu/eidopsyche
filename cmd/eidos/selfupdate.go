@@ -26,8 +26,9 @@ const installScriptURL = "https://raw.githubusercontent.com/LucianoXu/eidopsyche
 const selfUpdateFetchTimeout = 5 * time.Second
 
 var (
-	selfUpdatePrefix string
-	selfUpdateForce  bool
+	selfUpdatePrefix    string
+	selfUpdateForce     bool
+	selfUpdateNoRestart bool
 )
 
 var selfUpdateCmd = &cobra.Command{
@@ -39,6 +40,13 @@ release, self-update is a no-op. Otherwise it re-executes the canonical
 install script (` + installScriptURL + `) which downloads the new archive,
 verifies SHA256 against checksums.txt, and atomically replaces the eidos
 binary at the same prefix this binary lives at.
+
+After the new binary is in place, the install script runs
+'eidos gate restart --if-running' so a managed gate daemon (systemd /
+launchd) picks up the new code automatically. Pass --no-restart (or
+export EIDOS_NO_RESTART=1) to suppress the restart step — the install
+completes, but a running daemon stays on the old binary until you
+restart it manually.
 
 Refuses to run from a developer (Version=="dev") build — use 'make build'
 for local development.
@@ -102,14 +110,43 @@ func runSelfUpdate(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("self-update: prefix=%s\n", prefix)
 	fmt.Printf("self-update: fetching %s\n", installScriptURL)
+	if selfUpdateNoRestart {
+		fmt.Println("self-update: --no-restart set; gate daemon will NOT be auto-restarted")
+	}
 
 	// Hand off the process via syscall.Exec — the install script replaces us
-	// completely.
+	// completely. EIDOS_NO_RESTART=1 in the env tells install.sh to skip the
+	// post-install `gate restart --if-running` step.
 	pipeline := fmt.Sprintf("%s -fsSL %q | PREFIX=%q sh", curl, installScriptURL, prefix)
-	return syscall.Exec(shell, []string{"sh", "-c", pipeline}, os.Environ())
+	env := selfUpdateChildEnv(os.Environ(), selfUpdateNoRestart)
+	return syscall.Exec(shell, []string{"sh", "-c", pipeline}, env)
+}
+
+// selfUpdateChildEnv returns the env to hand to the install-script
+// subprocess. When no-restart is requested it forces EIDOS_NO_RESTART=1
+// (overriding whatever the parent had); otherwise it passes the parent
+// environment through unchanged.
+//
+// Split out as a pure function so the env-shaping logic is unit-testable
+// — the syscall.Exec branch above is otherwise unreachable from a test.
+func selfUpdateChildEnv(parent []string, noRestart bool) []string {
+	if !noRestart {
+		return parent
+	}
+	const key = "EIDOS_NO_RESTART"
+	out := make([]string, 0, len(parent)+1)
+	for _, kv := range parent {
+		if len(kv) >= len(key)+1 && kv[:len(key)] == key && kv[len(key)] == '=' {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, key+"=1")
 }
 
 func init() {
 	selfUpdateCmd.Flags().StringVar(&selfUpdatePrefix, "prefix", "", "install prefix (default: derived from running binary path)")
 	selfUpdateCmd.Flags().BoolVar(&selfUpdateForce, "force", false, "skip the version check and reinstall unconditionally")
+	selfUpdateCmd.Flags().BoolVar(&selfUpdateNoRestart, "no-restart", false,
+		"do not auto-restart the gate daemon after the new binary is installed (sets EIDOS_NO_RESTART=1 for the install script)")
 }

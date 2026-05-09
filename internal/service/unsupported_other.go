@@ -25,4 +25,5 @@ func (unsupported) StartDaemon(_ context.Context) error            { return ErrU
 func (unsupported) StartRelay(_ context.Context, _ string) error   { return ErrUnsupported }
 func (unsupported) StopDaemon(_ context.Context) error             { return ErrUnsupported }
 func (unsupported) StopRelay(_ context.Context) error              { return ErrUnsupported }
+func (unsupported) RestartDaemon(_ context.Context) error          { return ErrUnsupported }
 func (unsupported) Status(_ context.Context) ([]Status, error)     { return nil, ErrUnsupported }

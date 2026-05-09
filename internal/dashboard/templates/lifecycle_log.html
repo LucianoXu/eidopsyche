@@ -16,8 +16,8 @@
       Daemon will exit. Connection will drop when {{.Kind}} completes; reload after restart.
       {{if eq .Kind "purge"}}State directory will be removed; run <code class="inline-code">eidos gate init</code> to start over.{{end}}
     {{else if eq .Kind "self-update"}}
-      Binary update in progress. The running daemon stays on the OLD binary until restart —
-      <code class="inline-code">eidos gate stop &amp;&amp; eidos gate start</code> to pick it up.
+      Binary update in progress. The install script runs <code class="inline-code">eidos gate restart --if-running</code>
+      automatically once the new binary is in place; the dashboard will reconnect after the restart.
     {{else}}
       Reconnect re-enters the daemon over IPC and recomputes the relay set. Existing
       subscriptions are torn down and reattached.
