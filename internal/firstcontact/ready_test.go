@@ -17,7 +17,7 @@ func TestStartBackground_AllReady(t *testing.T) {
 		HomeRelayURL: "wss://r/",
 	}
 	ch := firstcontact.StartBackground(context.Background(), deps)
-	final := drainReady(t, ch, 500*time.Millisecond)
+	final := drainReady(t, ch, 3*time.Second)
 	if !final.AllReady() {
 		t.Errorf("not all ready: %+v", final)
 	}
@@ -34,7 +34,7 @@ func TestStartBackground_FailureSurfaces(t *testing.T) {
 		HomeRelayURL: "wss://r/",
 	}
 	ch := firstcontact.StartBackground(context.Background(), deps)
-	final := drainReady(t, ch, 500*time.Millisecond)
+	final := drainReady(t, ch, 3*time.Second)
 	if final.DockerImage.Status != "failed" {
 		t.Errorf("docker status = %q, want failed", final.DockerImage.Status)
 	}

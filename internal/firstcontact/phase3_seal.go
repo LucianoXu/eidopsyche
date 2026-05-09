@@ -183,7 +183,28 @@ func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	}
 
 	st2 := r.Status(stringFor(s.Lang, "phase3_response_wait"))
-	body, err := d.ResponseWait(ctx, s.Slug, "ontology/journal/0000-response.md", 90*time.Second)
+	// Live elapsed-time tick so the operator sees the wait is alive.
+	// Boot-wake is multi-step (read book + words; rewrite identity + master;
+	// generate secret; write response; stamp born_at) and can take ~70-150s
+	// on cold-cache claude — without this, the wizard looks frozen.
+	waitCtx, cancelTick := context.WithCancel(ctx)
+	go func() {
+		t := time.NewTicker(5 * time.Second)
+		defer t.Stop()
+		started := time.Now()
+		for {
+			select {
+			case <-waitCtx.Done():
+				return
+			case <-t.C:
+				st2.Update(fmt.Sprintf("%s (%ds)",
+					stringFor(s.Lang, "phase3_response_wait"),
+					int(time.Since(started).Seconds())))
+			}
+		}
+	}()
+	body, err := d.ResponseWait(ctx, s.Slug, "ontology/journal/0000-response.md", 240*time.Second)
+	cancelTick()
 	st2.Stop()
 	if err != nil {
 		purge()
