@@ -52,6 +52,12 @@ func computeStatus(ctx context.Context, c forgectl.Client, name string) (string,
 		} else {
 			sb.WriteString(string(res.Stdout))
 		}
+		// Plans + dreams summary. Best-effort; older mind-form images
+		// without status-detail return non-zero — silently omit.
+		dres, derr := c.ContainerExec(ctx, cont, []string{"eidos", "forge", "status-detail"})
+		if derr == nil && dres.ExitCode == 0 {
+			sb.Write(dres.Stdout)
+		}
 	}
 	return sb.String(), nil
 }

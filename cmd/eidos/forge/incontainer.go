@@ -41,5 +41,6 @@ func registerInContainer(root *cobra.Command) {
 		newInitVolumeCmd(),
 		newPlanInContainerCmd(),
 		newDreamCmd(),
+		newStatusDetailCmd(),
 	)
 }
