@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/fiatjaf/eventstore/badger"
 	"github.com/fiatjaf/khatru"
@@ -44,10 +45,11 @@ type TLSConfig struct {
 }
 
 type Server struct {
-	cfg        Config
-	r          *khatru.Relay
-	http       *http.Server
-	eventStore *badger.BadgerBackend
+	cfg            Config
+	r              *khatru.Relay
+	http           *http.Server
+	eventStore     *badger.BadgerBackend
+	closeStoreOnce sync.Once
 }
 
 func New(cfg Config) (*Server, error) {
@@ -163,10 +165,20 @@ func (s *Server) ListenAndServe() error {
 	}
 	return s.http.ListenAndServe()
 }
+
+// Shutdown gracefully drains HTTP connections and then force-closes any
+// remaining hijacked WebSocket connections before releasing the badger
+// handle. http.Server.Shutdown does not terminate hijacked connections, so
+// without the follow-up Close() an in-flight QueryEvents / SaveEvent call
+// could race against eventStore.Close(). A sync.Once guards the store close
+// so calling both Shutdown and Close is safe.
 func (s *Server) Shutdown(ctx context.Context) error {
 	err := s.http.Shutdown(ctx)
+	// Force-close any connections (including hijacked WebSockets) that
+	// Shutdown left open, before we release the badger handle.
+	_ = s.http.Close()
 	if s.eventStore != nil {
-		s.eventStore.Close()
+		s.closeStoreOnce.Do(s.eventStore.Close)
 	}
 	return err
 }
@@ -178,7 +190,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) Close() error {
 	err := s.http.Close()
 	if s.eventStore != nil {
-		s.eventStore.Close()
+		s.closeStoreOnce.Do(s.eventStore.Close)
 	}
 	return err
 }

@@ -114,8 +114,13 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  npub: %s\n", k.Npub)
 	fmt.Printf("  hex:  %s\n", k.PublicHex)
 	fmt.Println("\nnext steps:")
-	fmt.Println("  1) start gate:     eidos gate start")
-	fmt.Println("  2) start relay:    eidos relay init && eidos relay service install && eidos relay service start")
-	fmt.Println("  3) share card:     eidos gate card")
+	fmt.Println("  eidos gate service install     # run daemon as a system service")
+	fmt.Println("  eidos gate service start")
+	fmt.Println("  eidos gate card                # show your identity card")
+	fmt.Println("\noptional — run a self-hosted relay on this host:")
+	fmt.Println("  eidos relay init --mode public --listen 0.0.0.0:7777")
+	fmt.Println("  # or: eidos relay init --mode paired --owner <npub> --listen 0.0.0.0:7777")
+	fmt.Println("  eidos relay service install")
+	fmt.Println("  eidos relay service start")
 	return nil
 }

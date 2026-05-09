@@ -12,6 +12,7 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/internal/relaycfg"
 	"github.com/LucianoXu/eidopsyche/internal/relayd"
+	"github.com/LucianoXu/eidopsyche/internal/service"
 )
 
 var startDir string
@@ -49,16 +50,22 @@ var startCmd = &cobra.Command{
 		defer cancel()
 
 		fmt.Fprintf(os.Stderr, "eidos-relay listening on %s mode=%s\n", cfg.Relay.Listen, cfg.Relay.Mode)
-		errc := make(chan error, 1)
-		go func() { errc <- srv.ListenAndServe() }()
-		select {
-		case err := <-errc:
-			return err
-		case <-ctx.Done():
-			shutdown, scancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer scancel()
-			return srv.Shutdown(shutdown)
-		}
+		// On Windows, when launched by SCM, RunSupervised dispatches via
+		// golang.org/x/sys/windows/svc and translates SERVICE_CONTROL_STOP
+		// into a context cancellation. Elsewhere it is a pass-through that
+		// just runs the closure with the signal-driven context above.
+		return service.RunSupervised(ctx, service.RelayUnitName, func(ctx context.Context) error {
+			errc := make(chan error, 1)
+			go func() { errc <- srv.ListenAndServe() }()
+			select {
+			case err := <-errc:
+				return err
+			case <-ctx.Done():
+				shutdown, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer scancel()
+				return srv.Shutdown(shutdown)
+			}
+		})
 	},
 }
 

@@ -8,7 +8,7 @@ import (
 )
 
 func platformNew(cfg Config) (Manager, error) {
-	return nil, fmt.Errorf("eidos gate start/stop/status/purge needs systemd (Linux), launchd (macOS), or SCM (Windows); this OS is unsupported: %w", ErrUnsupported)
+	return nil, fmt.Errorf("service management is not supported on this platform; run `eidos gate daemon` and `eidos relay start` directly: %w", ErrUnsupported)
 }
 
 // unsupported is a no-op Manager returned when platformNew is not available.

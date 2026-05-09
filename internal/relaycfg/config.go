@@ -6,6 +6,7 @@ package relaycfg
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,6 +108,9 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.Relay.Listen) == "" {
 		return fmt.Errorf("relay.listen must be set (host:port)")
+	}
+	if _, _, err := net.SplitHostPort(c.Relay.Listen); err != nil {
+		return fmt.Errorf("relay.listen %q must be host:port: %w", c.Relay.Listen, err)
 	}
 	if (c.Relay.TLS.CertFile == "") != (c.Relay.TLS.KeyFile == "") {
 		return fmt.Errorf("relay.tls: cert_file and key_file must both be set or both empty")

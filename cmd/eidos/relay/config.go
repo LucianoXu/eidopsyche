@@ -17,10 +17,23 @@ var configCmd = &cobra.Command{
 	Short: "Get or set relay config keys",
 }
 
+// allKeys lists every config key in a stable order so that the no-args form
+// of `eidos relay config get` prints a consistent table.
+var allKeys = []string{
+	"log_level",
+	"relay.mode",
+	"relay.listen",
+	"relay.owner_pubkey",
+	"relay.tls.cert_file",
+	"relay.tls.key_file",
+	"relay.auth.required",
+	"relay.auth.service_url",
+}
+
 var configGetCmd = &cobra.Command{
-	Use:   "get <key>",
-	Short: "Print the current value of a relay config key",
-	Args:  cobra.ExactArgs(1),
+	Use:   "get [<key>]",
+	Short: "Print one or all relay config settings",
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir, err := resolveConfigDir(configDir)
 		if err != nil {
@@ -30,11 +43,19 @@ var configGetCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		v, err := getKey(cfg, args[0])
-		if err != nil {
-			return err
+		if len(args) == 1 {
+			v, err := getKey(cfg, args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), v)
+			return nil
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), v)
+		// No argument: print every known key.
+		for _, k := range allKeys {
+			v, _ := getKey(cfg, k)
+			fmt.Fprintf(cmd.OutOrStdout(), "%s = %s\n", k, v)
+		}
 		return nil
 	},
 }

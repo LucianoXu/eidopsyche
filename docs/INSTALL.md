@@ -208,7 +208,7 @@ reverse proxy needed for the simple "one relay, no other web services on
 this host" deployment. Set both paths in `~/.config/eidos/relay/config.toml`:
 
 ```toml
-[tls]
+[relay.tls]
   cert_file = "/etc/letsencrypt/live/your.host/fullchain.pem"
   key_file  = "/etc/letsencrypt/live/your.host/privkey.pem"
 ```
@@ -243,7 +243,7 @@ if you're knowingly running an open relay for experiments. The
 case where the proxy-facing URL differs from the bind address:
 
 ```toml
-[auth]
+[relay.auth]
   required    = true
   service_url = "wss://your.host"
 ```

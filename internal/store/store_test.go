@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -109,8 +111,12 @@ func TestSchemaV3DropsRelayWhitelistView(t *testing.T) {
 	err = db.QueryRowContext(ctx,
 		`SELECT name FROM sqlite_master WHERE type='view' AND name='relay_whitelist'`,
 	).Scan(&name)
-	if err == nil {
+	switch {
+	case err == nil:
 		t.Errorf("relay_whitelist view still exists after Migrate; got %q", name)
+	case errors.Is(err, sql.ErrNoRows):
+		// expected — the view must not exist
+	default:
+		t.Fatalf("unexpected error querying sqlite_master: %v", err)
 	}
-	// sql.ErrNoRows is the expected outcome — the view must not exist.
 }

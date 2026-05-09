@@ -393,9 +393,9 @@ the new relay URL becomes live without restarting the daemon.
 $ eidos gate config get               # dump all gate scalar keys
 $ eidos gate config set log_level debug
 
-$ eidos relay config get              # dump all relay scalar keys
-$ eidos relay config get listen
-$ eidos relay config set mode public
+$ eidos relay config get                    # dump all relay scalar keys
+$ eidos relay config get relay.listen       # print one key
+$ eidos relay config set relay.mode public
 ```
 
 `eidos gate config` and `eidos relay config` each write their respective

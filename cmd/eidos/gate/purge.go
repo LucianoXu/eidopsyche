@@ -23,10 +23,11 @@ var purgeCmd = &cobra.Command{
   2) deregisters it from the host service manager
      (systemd unit file on Linux, launchd plist on macOS, SCM
      service entry on Windows)
-  3) deletes the gate state directory (key, state.db, config.toml, relay/)
+  3) deletes the gate state directory (key, state.db, config.toml)
 
 Removes the gate daemon unit only. Run 'eidos relay service uninstall'
-to remove the relay unit.
+separately to remove the relay unit; the relay's config dir at
+~/.config/eidos/relay/ is left alone.
 
 Useful for tearing down test deployments and starting from a clean slate.
 
