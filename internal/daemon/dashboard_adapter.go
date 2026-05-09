@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,7 +15,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
 	"github.com/LucianoXu/eidopsyche/internal/invitedb"
-	"github.com/LucianoXu/eidopsyche/internal/version"
+	"github.com/LucianoXu/eidopsyche/internal/ipc"
 )
 
 // dashboardAdapter wraps *Daemon to satisfy dashboard.DashboardDeps.
@@ -306,25 +305,11 @@ func (a dashboardAdapter) RedeemInvite(ctx context.Context, token string) (dashb
 }
 
 func (a dashboardAdapter) ScanCard(ctx context.Context, cardURI string) (dashboard.ScanPreview, error) {
-	c, err := card.Parse(strings.TrimSpace(cardURI))
-	if err != nil {
-		return dashboard.ScanPreview{}, fmt.Errorf("parse card: %w", err)
+	var preview dashboard.ScanPreview
+	if err := a.d.Call(ctx, "card.scan", map[string]string{"uri": cardURI}, &preview); err != nil {
+		return dashboard.ScanPreview{}, err
 	}
-	pubHex, err := identity.DecodeNpub(c.Npub)
-	if err != nil {
-		return dashboard.ScanPreview{}, fmt.Errorf("decode npub: %w", err)
-	}
-	already := false
-	if existing, err := a.d.Repo.Get(ctx, pubHex); err == nil && existing != nil {
-		already = true
-	}
-	return dashboard.ScanPreview{
-		Pubkey:         pubHex,
-		Npub:           c.Npub,
-		Label:          c.Label,
-		Relay:          c.Relay,
-		AlreadyContact: already,
-	}, nil
+	return preview, nil
 }
 
 // ── phase 4: own relays ────────────────────────────────────────────
@@ -377,27 +362,27 @@ func (a dashboardAdapter) RemoveOwnRelay(ctx context.Context, rawURL string) err
 // ── phase 5: service control ───────────────────────────────────────
 
 func (a dashboardAdapter) Status() dashboard.ServiceStatus {
-	out := dashboard.ServiceStatus{
-		Version:      version.Version,
-		Commit:       version.Commit,
-		BuildDate:    version.BuildDate,
-		StartedAt:    a.d.startedAt,
-		StateDir:     a.d.StateDir,
-		DashboardURL: "http://" + a.d.Cfg.Dashboard.Listen,
-		IPCSocket:    filepath.Join(a.d.StateDir, a.d.Cfg.Daemon.Socket),
-	}
-	if life := a.d.LifecycleStatusSnapshot(); life.Active {
-		out.ActiveJobID = life.JobID
-		out.ActiveJobArgs = life.Args
-		out.ActiveJobAt = life.Started
-	}
-	return out
+	var st dashboard.ServiceStatus
+	// Status() has no error return on the dashboard interface, so a
+	// JSON / handler failure surfaces as a zero-value snapshot rather
+	// than crashing the request. Daemons in any callable state can
+	// always satisfy service.status (it reads only in-memory fields),
+	// so this fallback is essentially defensive.
+	_ = a.d.Call(context.Background(), "service.status", nil, &st)
+	return st
 }
 
 func (a dashboardAdapter) LifecycleRun(args []string) (string, error) {
-	id, err := a.d.LifecycleRun(args)
-	if errors.Is(err, ErrLifecycleBusy) {
-		return "", dashboard.ErrLifecycleBusy
+	var out struct {
+		JobID string `json:"job_id"`
 	}
-	return id, err
+	err := a.d.Call(context.Background(), "lifecycle.run", LifecycleRunParams{Args: args}, &out)
+	if err != nil {
+		var ipcErr *ipc.Error
+		if errors.As(err, &ipcErr) && ipcErr.Code == ipc.ErrLifecycleBusy {
+			return "", dashboard.ErrLifecycleBusy
+		}
+		return "", err
+	}
+	return out.JobID, nil
 }

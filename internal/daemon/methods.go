@@ -19,6 +19,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/invitedb"
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
 	"github.com/LucianoXu/eidopsyche/internal/nostr"
+	"github.com/LucianoXu/eidopsyche/internal/version"
 )
 
 func init() {
@@ -48,6 +49,10 @@ func init() {
 	register("config.set", configSet)
 	register("contact.get", contactGet)
 	register("contact.set-tier", contactSetTier)
+	register("card.scan", cardScan)
+	register("service.status", serviceStatus)
+	register("lifecycle.run", lifecycleRunMethod)
+	register("lifecycle.status", lifecycleStatusMethod)
 }
 
 // ConfigSetParams is the JSON-stable parameter shape for the "config.set"
@@ -289,6 +294,90 @@ func contactSetTier(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.Raw
 	}
 	d.emitDashEvent(dashboard.Event{Kind: "contact.tier-changed"})
 	return map[string]string{"pubkey": pk, "tier": p.Tier}, nil
+}
+
+// cardScan parses a mindgate:// card URI and reports whether the
+// embedded npub is already in the contacts list. Strict superset of
+// card.parse — that older method stays for callers that don't need the
+// AlreadyContact field; new callers should prefer card.scan.
+func cardScan(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p struct{ URI string }
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	c, err := card.Parse(strings.TrimSpace(p.URI))
+	if err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrCardInvalid, Message: err.Error()}
+	}
+	pk, err := identity.DecodeNpub(c.Npub)
+	if err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidNpub, Message: err.Error()}
+	}
+	already := false
+	if existing, err := d.Repo.Get(ctx, pk); err == nil && existing != nil {
+		already = true
+	}
+	return dashboard.ScanPreview{
+		Pubkey:         pk,
+		Npub:           c.Npub,
+		Label:          c.Label,
+		Relay:          c.Relay,
+		AlreadyContact: already,
+	}, nil
+}
+
+// serviceStatus returns daemon process metadata + the current
+// lifecycle-job snapshot. Surfaces (dashboard Service tab,
+// `eidos gate status --json`) read this method without poking at
+// individual *Daemon fields.
+func serviceStatus(_ context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
+	out := dashboard.ServiceStatus{
+		Version:      version.Version,
+		Commit:       version.Commit,
+		BuildDate:    version.BuildDate,
+		StartedAt:    d.startedAt,
+		StateDir:     d.StateDir,
+		DashboardURL: "http://" + d.Cfg.Dashboard.Listen,
+		IPCSocket:    filepath.Join(d.StateDir, d.Cfg.Daemon.Socket),
+	}
+	if life := d.LifecycleStatusSnapshot(); life.Active {
+		out.ActiveJobID = life.JobID
+		out.ActiveJobArgs = life.Args
+		out.ActiveJobAt = life.Started
+	}
+	return out, nil
+}
+
+// LifecycleRunParams is the JSON-stable parameter shape for
+// "lifecycle.run". Args is the eidos sub-command argv as it would be
+// passed on the command line (e.g. ["gate","reconnect"]).
+type LifecycleRunParams struct {
+	Args []string `json:"args"`
+}
+
+// lifecycleRunMethod kicks off a lifecycle subprocess and returns the
+// job id. The streaming SSE channel keeps the line pump; this method is
+// unary RPC. Concurrent calls return LIFECYCLE_BUSY (mapped by the
+// dashboard handler to HTTP 409).
+func lifecycleRunMethod(_ context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p LifecycleRunParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	id, err := d.LifecycleRun(p.Args)
+	if err != nil {
+		if errors.Is(err, ErrLifecycleBusy) {
+			return nil, &ipc.Error{Code: ipc.ErrLifecycleBusy, Message: err.Error()}
+		}
+		return nil, internalErr(err)
+	}
+	return map[string]string{"job_id": id}, nil
+}
+
+// lifecycleStatusMethod returns the current lifecycle snapshot. Useful
+// for poll callers; SSE subscribers prefer the push channel.
+func lifecycleStatusMethod(_ context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
+	return d.LifecycleStatusSnapshot(), nil
 }
 
 // contactRemove removes a contact by npub, hex pubkey, or label.

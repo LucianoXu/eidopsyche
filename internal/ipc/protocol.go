@@ -50,4 +50,6 @@ const (
 	ErrInviteRevoked         = "INVITE_REVOKED"
 	ErrInviteAlreadyRedeemed = "INVITE_ALREADY_REDEEMED"
 	ErrInvitePrefixAmbiguous = "INVITE_PREFIX_AMBIGUOUS"
+	ErrLifecycleBusy         = "LIFECYCLE_BUSY"
+	ErrCardInvalid           = "CARD_INVALID"
 )
