@@ -34,7 +34,7 @@ var configGetCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Println(v)
+		fmt.Fprintln(cmd.OutOrStdout(), v)
 		return nil
 	},
 }
