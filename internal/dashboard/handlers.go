@@ -437,8 +437,15 @@ func msgToBubble(m inbox.Message) bubbleData {
 
 func sentToBubble(s inbox.Sent) bubbleData {
 	text := s.Content
-	if env, err := envelope.Decode(s.Content); err == nil {
+	if env, err := envelope.Decode(s.Content); err == nil && env.Type == envelope.TypeChat {
 		text = env.Text
+	}
+	status := ""
+	switch {
+	case s.AckedAt != 0:
+		status = "delivered"
+	case len(s.AcceptedBy) > 0:
+		status = "sent"
 	}
 	return bubbleData{
 		Self:    true,
@@ -446,6 +453,7 @@ func sentToBubble(s inbox.Sent) bubbleData {
 		Text:    text,
 		At:      time.Unix(s.SentAt, 0),
 		EventID: s.EventID,
+		Status:  status,
 	}
 }
 

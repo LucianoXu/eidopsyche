@@ -106,6 +106,10 @@ type bubbleData struct {
 	Malformed    bool
 	RejectReason string
 	EventID      string
+	// Status is one of "" / "sent" / "delivered". Only meaningful when Self
+	// is true; renders as ✓ for sent (relay accepted) and ✓✓ for delivered
+	// (peer-confirmed receipt via tier-2 ack).
+	Status string
 }
 
 type messagesData struct {

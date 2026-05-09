@@ -359,6 +359,8 @@ func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	if err := d.Box.AppendOutbox(pre); err != nil {
 		return nil, internalErr(err)
 	}
+	preCopy := pre
+	d.emitDashEvent(dashboard.Event{Kind: "outbox.message", Sent: &preCopy})
 
 	urls := d.publishTargets(ctx, c.Relays)
 
@@ -382,6 +384,8 @@ func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	final.AcceptedBy = accepted
 	final.Final = true
 	_ = d.Box.AppendOutbox(final)
+	finalCopy := final
+	d.emitDashEvent(dashboard.Event{Kind: "outbox.message", Sent: &finalCopy})
 
 	return SendResult{
 		EventID:    wrapBob.ID,

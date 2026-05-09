@@ -63,6 +63,54 @@ func TestRender_Bubble_Malformed(t *testing.T) {
 	}
 }
 
+func TestRender_Bubble_StatusSent(t *testing.T) {
+	r, err := newRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := r.Render("bubble", bubbleData{Self: true, From: "you", Text: "hi", At: time.Now(), Status: "sent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "✓") {
+		t.Errorf("sent bubble missing ✓: %s", out)
+	}
+	if strings.Contains(out, "✓✓") {
+		t.Errorf("sent bubble should not have ✓✓: %s", out)
+	}
+}
+
+func TestRender_Bubble_StatusDelivered(t *testing.T) {
+	r, err := newRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := r.Render("bubble", bubbleData{Self: true, From: "you", Text: "hi", At: time.Now(), Status: "delivered"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "✓✓") {
+		t.Errorf("delivered bubble missing ✓✓: %s", out)
+	}
+	if strings.Contains(out, "✓✓✓") {
+		t.Errorf("delivered bubble has triple check: %s", out)
+	}
+}
+
+func TestRender_Bubble_StatusEmpty_NoMarker(t *testing.T) {
+	r, err := newRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := r.Render("bubble", bubbleData{Self: true, From: "you", Text: "hi", At: time.Now(), Status: ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "✓") {
+		t.Errorf("empty-status bubble should not render ✓: %s", out)
+	}
+}
+
 func TestRender_Sidebar_RendersContacts(t *testing.T) {
 	r, err := newRenderer()
 	if err != nil {
