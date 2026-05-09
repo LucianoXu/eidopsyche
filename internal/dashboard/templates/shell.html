@@ -45,7 +45,12 @@
   (function () {
     var ERR_LIFETIME_MS  = 8000;
     var INFO_LIFETIME_MS = 4000;
-    var BUSY_PATH_RE     = /\/(events|relays|topbar|sidebar\/)/;
+    // Anchor at the path start so /settings/relays* user-initiated
+    // submits don't get swallowed alongside the /relays background poll.
+    // See PR #14 review — the unanchored form re-introduced the very
+    // silent-drop class this PR exists to fix, in the relay-management
+    // surface.
+    var BUSY_PATH_RE     = /^\/(events|relays|topbar|sidebar\/)/;
     function toastMessage(xhr) {
       var t = (xhr && xhr.responseText) || "";
       // The body is usually a small HTML fragment or plain text; strip

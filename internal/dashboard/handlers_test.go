@@ -57,6 +57,28 @@ func TestHandler_Shell_OK(t *testing.T) {
 	}
 }
 
+// TestHandler_Shell_BusyPathRegexAnchored guards against regressing
+// the PR #14 review finding: an unanchored alternation made
+// /settings/relays* user submits silently dropped alongside the
+// background /relays poll. The literal regex shipped to the browser
+// must contain the anchor.
+//
+// We assert on the served literal (string match) — running the regex
+// inside an in-process JS engine is overkill for a one-line guard.
+func TestHandler_Shell_BusyPathRegexAnchored(t *testing.T) {
+	deps := fakeDeps{pubkey: "abc123def456ghi789", label: "alice"}
+	srv := newTestServer(t, deps)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	srv.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	const want = `var BUSY_PATH_RE     = /^\/(events|relays|topbar|sidebar\/)/;`
+	if !strings.Contains(body, want) {
+		t.Errorf("BUSY_PATH_RE must be path-start anchored to avoid swallowing "+
+			"user-initiated /settings/relays* errors; expected literal %q in shell", want)
+	}
+}
+
 func TestHandler_Sidebar_RendersContacts(t *testing.T) {
 	deps := fakeDeps{
 		contactsL: []*contacts.Contact{
