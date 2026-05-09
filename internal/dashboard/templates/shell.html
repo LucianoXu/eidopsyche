@@ -25,10 +25,10 @@
     {{.Main}}
   </section>
 </main>
-<aside class="relays-panel" id="relays-panel"
-       hx-get="/relays"
-       hx-trigger="load, sse:relay.state from:body"
-       hx-swap="innerHTML"></aside>
+<footer class="relays-strip" id="relays-strip"
+        hx-get="/relays"
+        hx-trigger="load, sse:relay.state from:body"
+        hx-swap="innerHTML"></footer>
 <div id="modal"></div>
 <!--
   Toast region. The inline script below catches every htmx request that
