@@ -61,13 +61,38 @@ func (c *Claude) Call(ctx context.Context, prompt string, schema any) error {
 		if err != nil {
 			return err
 		}
-		if jerr := json.Unmarshal([]byte(raw), schema); jerr == nil {
+		// Tolerate markdown code-fence wrapping. Despite "return ONLY the
+		// JSON object" in the prompt, claude often emits ```json ... ```;
+		// the model is unreliable about this so it must be the parser's
+		// job, not the prompt's.
+		stripped := stripCodeFence(raw)
+		if jerr := json.Unmarshal([]byte(stripped), schema); jerr == nil {
 			return nil
 		} else if attempt == 1 {
 			return fmt.Errorf("claude returned non-JSON result after retry: %w (got %q)", jerr, truncate(raw, 200))
 		}
 	}
 	return errors.New("unreachable")
+}
+
+// stripCodeFence removes a leading ```lang and trailing ``` if the input
+// is wrapped in a markdown code fence. Tolerates surrounding whitespace
+// and a missing language tag (`+\n`).
+func stripCodeFence(s string) string {
+	t := strings.TrimSpace(s)
+	if !strings.HasPrefix(t, "```") {
+		return s
+	}
+	// Skip the opening fence line ("```json", "```", etc.) up to the first newline.
+	if i := strings.IndexByte(t, '\n'); i >= 0 {
+		t = t[i+1:]
+	} else {
+		// No newline — just a "```" with no body. Nothing to strip.
+		return s
+	}
+	t = strings.TrimRight(t, " \t\r\n")
+	t = strings.TrimSuffix(t, "```")
+	return strings.TrimSpace(t)
 }
 
 // CallText runs claude and returns the result string verbatim. Used for

@@ -130,3 +130,35 @@ func TestClaude_RunErrorBubbled(t *testing.T) {
 		t.Errorf("expected runner error to surface")
 	}
 }
+
+// TestClaude_CallStripsMarkdownFence pins the fix for the bug observed
+// during manual smoke: claude wraps JSON in ```json ... ``` despite the
+// prompt asking for raw JSON. The parser must tolerate this.
+func TestClaude_CallStripsMarkdownFence(t *testing.T) {
+	wrapped := "```json\n" +
+		`{"archetype":"sage","temperament":"still"}` + "\n```"
+	r := &fakeClaudeRunner{queue: []string{envelope(wrapped)}}
+	c := &firstcontact.Claude{Run: r.Run}
+	var p firstcontact.CharacterProfile
+	if err := c.Call(context.Background(), "test", &p); err != nil {
+		t.Fatalf("Call should tolerate fence: %v", err)
+	}
+	if p.Archetype != "sage" {
+		t.Errorf("Archetype = %q, want sage", p.Archetype)
+	}
+}
+
+// TestClaude_CallStripsBareTripleBacktick covers the same fix without a
+// language tag (just ``` ... ```).
+func TestClaude_CallStripsBareTripleBacktick(t *testing.T) {
+	wrapped := "```\n" + `{"archetype":"sage"}` + "\n```\n"
+	r := &fakeClaudeRunner{queue: []string{envelope(wrapped)}}
+	c := &firstcontact.Claude{Run: r.Run}
+	var p firstcontact.CharacterProfile
+	if err := c.Call(context.Background(), "test", &p); err != nil {
+		t.Fatalf("Call should tolerate bare fence: %v", err)
+	}
+	if p.Archetype != "sage" {
+		t.Errorf("Archetype = %q", p.Archetype)
+	}
+}
