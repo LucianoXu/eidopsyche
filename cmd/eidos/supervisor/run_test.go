@@ -36,7 +36,17 @@ func (f *fakeChildren) Spawn(_ context.Context, _ string, _ ...string) error {
 
 func (f *fakeChildren) Started() int { return f.started }
 
+// withFakeCrontabInstaller swaps crontabInstaller to a no-op for the
+// duration of a test so tests don't actually try to sudo.
+func withFakeCrontabInstaller(t *testing.T) {
+	t.Helper()
+	prev := crontabInstaller
+	crontabInstaller = func(_ context.Context, _ string) error { return nil }
+	t.Cleanup(func() { crontabInstaller = prev })
+}
+
 func TestStartChildrenLaunchesBoth(t *testing.T) {
+	withFakeCrontabInstaller(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tracker := newFakeChildren()
@@ -49,6 +59,7 @@ func TestStartChildrenLaunchesBoth(t *testing.T) {
 }
 
 func TestStartChildrenPropagatesFirstError(t *testing.T) {
+	withFakeCrontabInstaller(t)
 	ctx := context.Background()
 	sentinel := errors.New("spawn failed")
 

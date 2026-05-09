@@ -4,13 +4,16 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
@@ -38,10 +41,36 @@ func newRunCmd() *cobra.Command {
 	}
 }
 
-// startChildren spawns long-running children (crond + gate daemon).
+// startChildren renders the crontab from config, spawns long-running
+// children (crond + gate daemon), and starts the planner goroutine that
+// fires due plans.
+//
 // Returns the first non-nil error so the caller can abort before entering
 // the wake loop.
 func startChildren(ctx context.Context, sp ChildSpawner) error {
+	// Render and install the crontab from per-mindform config. A bad
+	// config falls back to the default 4h cadence with a logged warning
+	// rather than leaving the mind-form silent — heartbeat is rhythm,
+	// not authority.
+	cfg, err := config.Load(filepath.Join(gateDir, "config.toml"))
+	if err != nil {
+		log.Printf("supervisor: config load: %v (continuing with defaults)", err)
+		cfg = config.Defaults()
+	}
+	if err := config.ValidateMindFormConfig(cfg); err != nil {
+		log.Printf("supervisor: config validation: %v (continuing with defaults where possible)", err)
+	}
+	body, rerr := renderCrontab(cfg)
+	if rerr != nil {
+		log.Printf("supervisor: crontab render: %v (using default 4h)", rerr)
+	}
+	// installCrontab requires root because /var/spool/cron/crontabs is
+	// root-owned. The supervisor runs as eidos, so we shell out to sudo.
+	// Tests substitute crontabInstaller to skip the real sudo invocation.
+	if err := crontabInstaller(ctx, body); err != nil {
+		return fmt.Errorf("install crontab: %w", err)
+	}
+
 	// busybox crond requires its user crontab files to be root-owned
 	// (it silently ignores user-owned spool entries, presumably to
 	// prevent privilege escalation by tampering with the spool) AND
@@ -53,7 +82,44 @@ func startChildren(ctx context.Context, sp ChildSpawner) error {
 	if err := sp.Spawn(ctx, "sudo", "-n", "crond", "-f", "-c", "/var/spool/cron/crontabs"); err != nil {
 		return err
 	}
-	return sp.Spawn(ctx, "eidos", "gate", "daemon", "--state-dir", gateDir)
+	if err := sp.Spawn(ctx, "eidos", "gate", "daemon", "--state-dir", gateDir); err != nil {
+		return err
+	}
+
+	// Start the planner goroutine. Errors are logged inside; cancellation
+	// of ctx is the only way out.
+	go func() {
+		if err := plannerLoop(ctx, supervisorPlansDir, PlanScanInterval, wake.Submit); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("planner exited: %v", err)
+		}
+	}()
+	return nil
+}
+
+// crontabInstaller is the function startChildren calls to write the
+// crontab file. Tests swap this to a no-op; production points at
+// installCrontabAsRoot which uses sudo.
+var crontabInstaller = installCrontabAsRoot
+
+// installCrontabAsRoot writes body to crontabPath via sudo because the
+// crontab spool is root-owned. Mirrors the sudo pattern used by crond
+// itself (see startChildren).
+func installCrontabAsRoot(ctx context.Context, body string) error {
+	cmd := exec.CommandContext(ctx, "sudo", "-n", "tee", crontabPath)
+	cmd.Stdin = strings.NewReader(body)
+	cmd.Stdout = nil // discard tee's echo
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	// Ownership/perms also need to be root-owned 0600 per busybox crond's
+	// expectations. Keep the chmod best-effort; tee's umask usually leaves
+	// 0644 which still works, but 0600 is the documented requirement.
+	chmod := exec.CommandContext(ctx, "sudo", "-n", "chmod", "0600", crontabPath)
+	chmod.Stdout = nil
+	chmod.Stderr = os.Stderr
+	_ = chmod.Run()
+	return nil
 }
 
 // SpawnAgent is invoked when the supervisor picks up a pending wake. The

@@ -11,8 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 	"github.com/spf13/cobra"
 )
@@ -21,6 +23,11 @@ import (
 // Hard-coded because the supervisor runs only inside the mind-form
 // container; the host's gate config never reaches this code path.
 const gateConfigPath = "/eidos/gate/config.toml"
+
+// dreamStateRuntimePath is the in-container dream-state.json path.
+// agent-runner reads it before invoking claude so the wake context can
+// surface dream-eligibility hints.
+const dreamStateRuntimePath = "/eidos/run/dream-state.json"
 
 // EXIT_AUTH_REQUIRED is the exit code agent-runner uses when Claude's
 // /login token is expired or missing. The supervisor surfaces this state
@@ -62,12 +69,24 @@ func runAgent(wakeFile, ontologyDir string) error {
 	}
 	defer releaseAgentLock(lock)
 
+	cfg, _ := config.Load(gateConfigPath)
+	ds, _ := dreamstate.Read(dreamStateRuntimePath)
+	sig.Context = computeContext(sig, cfg, ds, time.Now())
+
 	identity, _ := os.ReadFile(filepath.Join(ontologyDir, "self/identity.md"))
 	msg := buildWakeMessage(wakePromptInput{
-		Reason:               string(sig.Reason),
-		Hint:                 sig.Hint,
-		InboxUnread:          sig.Context.InboxUnread,
-		SinceLastWakeSeconds: sig.Context.SinceLastWakeSeconds,
+		Reason:                string(sig.Reason),
+		Hint:                  sig.Hint,
+		InboxUnread:           sig.Context.InboxUnread,
+		SinceLastWakeSeconds:  sig.Context.SinceLastWakeSeconds,
+		MasterLikelyAsleep:    sig.Context.MasterLikelyAsleep,
+		QuietStart:            cfg.MindForm.QuietStart,
+		QuietEnd:              cfg.MindForm.QuietEnd,
+		TZ:                    cfg.MindForm.TZ,
+		SinceLastDreamSeconds: sig.Context.SinceLastDreamSeconds,
+		DreamEligible:         sig.Context.DreamEligible,
+		LastDreamNote:         ds.LastDreamNote,
+		PlanID:                sig.Context.PlanID,
 	})
 
 	// The container is the trust boundary; --dangerously-skip-permissions
@@ -89,11 +108,51 @@ func runAgent(wakeFile, ontologyDir string) error {
 	return nil
 }
 
+// computeContext folds quiet-hours, dream-state, and plan-id into the
+// signal's Context. Pure function so it's testable without IO.
+func computeContext(sig wake.Signal, cfg config.Config, ds dreamstate.State, now time.Time) wake.Context {
+	ctx := sig.Context
+
+	if cfg.MindForm.QuietStart != "" && cfg.MindForm.QuietEnd != "" {
+		tz := time.UTC
+		if cfg.MindForm.TZ != "" {
+			if loc, err := time.LoadLocation(cfg.MindForm.TZ); err == nil {
+				tz = loc
+			}
+		}
+		ctx.MasterLikelyAsleep = config.InQuietHours(now, cfg.MindForm.QuietStart, cfg.MindForm.QuietEnd, tz)
+	}
+
+	if ds.LastDreamFinishedAt > 0 {
+		ctx.SinceLastDreamSeconds = now.Unix() - ds.LastDreamFinishedAt
+		floor := config.DefaultDreamMinInterval
+		if s := cfg.MindForm.DreamMinInterval; s != "" {
+			if d, err := time.ParseDuration(s); err == nil {
+				floor = d
+			}
+		}
+		ctx.DreamEligible = ctx.SinceLastDreamSeconds >= int64(floor.Seconds())
+	} else {
+		ctx.DreamEligible = true
+	}
+
+	// PlanID flows through unchanged from the wake signal.
+	return ctx
+}
+
 type wakePromptInput struct {
-	Reason               string
-	Hint                 string
-	InboxUnread          int
-	SinceLastWakeSeconds int64
+	Reason                string
+	Hint                  string
+	InboxUnread           int
+	SinceLastWakeSeconds  int64
+	MasterLikelyAsleep    bool
+	QuietStart            string
+	QuietEnd              string
+	TZ                    string
+	SinceLastDreamSeconds int64
+	DreamEligible         bool
+	LastDreamNote         string
+	PlanID                string
 }
 
 func buildWakeMessage(in wakePromptInput) string {
@@ -106,7 +165,31 @@ func buildWakeMessage(in wakePromptInput) string {
 	if in.SinceLastWakeSeconds > 0 {
 		fmt.Fprintf(&sb, " %ds since last wake.", in.SinceLastWakeSeconds)
 	}
+	if in.MasterLikelyAsleep && in.QuietStart != "" {
+		fmt.Fprintf(&sb, " Master is likely asleep (quiet hours %s–%s%s).",
+			in.QuietStart, in.QuietEnd, tzSuffix(in.TZ))
+	}
+	if in.SinceLastDreamSeconds > 0 {
+		hours := in.SinceLastDreamSeconds / 3600
+		fmt.Fprintf(&sb, " %dh since your last dream.", hours)
+	}
+	if in.DreamEligible && in.SinceLastDreamSeconds > 0 {
+		fmt.Fprintf(&sb, " You are eligible to dream now.")
+	}
+	if in.LastDreamNote != "" {
+		fmt.Fprintf(&sb, " Last dream: %q.", in.LastDreamNote)
+	}
+	if in.PlanID != "" {
+		fmt.Fprintf(&sb, " (Planned wake; plan id %s.)", in.PlanID)
+	}
 	return sb.String()
+}
+
+func tzSuffix(tz string) string {
+	if tz == "" {
+		return ""
+	}
+	return ", " + tz
 }
 
 func acquireAgentLock(path string) (*os.File, error) {
