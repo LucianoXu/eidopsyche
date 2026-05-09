@@ -211,3 +211,82 @@ func TestCreateImagePullErrorsBubbled(t *testing.T) {
 		t.Errorf("expected wrapped pull error, got %v", err)
 	}
 }
+
+// TestCreateInitContainerRunsAsRoot pins the requirement that init-volume
+// runs as User: "0:0" so it can extract / chown the volume regardless of
+// the image's USER directive.
+func TestCreateInitContainerRunsAsRoot(t *testing.T) {
+	f := &fakeClient{}
+	err := orchestrate(context.Background(), f, "alice", createOpts{
+		owner: "npub1ownertest", relay: "wss://r", label: "alice", noLogin: true, image: "img:dev",
+	})
+	if err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	if len(f.inits) != 1 {
+		t.Fatalf("init runs = %d, want 1", len(f.inits))
+	}
+	if f.inits[0].User != "0:0" {
+		t.Errorf("init User = %q, want %q", f.inits[0].User, "0:0")
+	}
+}
+
+// TestCreateModelEnvPlumbing pins that --model is plumbed through to
+// init-volume's env as EIDOS_FORGE_MODEL.
+func TestCreateModelEnvPlumbing(t *testing.T) {
+	f := &fakeClient{}
+	err := orchestrate(context.Background(), f, "alice", createOpts{
+		owner: "npub1ownertest", relay: "wss://r", label: "alice",
+		noLogin: true, image: "img:dev", model: "claude-sonnet-4-7",
+	})
+	if err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	if len(f.inits) != 1 {
+		t.Fatalf("init runs = %d, want 1", len(f.inits))
+	}
+	want := "EIDOS_FORGE_MODEL=claude-sonnet-4-7"
+	found := false
+	for _, e := range f.inits[0].Env {
+		if e == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("init env missing %q; got %v", want, f.inits[0].Env)
+	}
+}
+
+// TestCreateModelFlagValidation checks the create command rejects bad
+// --model values at the cobra layer before any docker work.
+func TestCreateModelFlagValidation(t *testing.T) {
+	cmd := Command()
+	cmd.SetArgs([]string{
+		"create", "alice",
+		"--owner", "npub1ownertest",
+		"--relay", "wss://r",
+		"--model", "garbage",
+	})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("garbage --model should be rejected")
+	}
+	if !strings.Contains(err.Error(), "model") {
+		t.Errorf("error should mention model: %v", err)
+	}
+}
+
+func TestValidateModel_Helper(t *testing.T) {
+	if err := validateModel(""); err != nil {
+		t.Errorf("empty should pass: %v", err)
+	}
+	if err := validateModel("claude-sonnet-4-7"); err != nil {
+		t.Errorf("valid should pass: %v", err)
+	}
+	if err := validateModel("garbage"); err == nil {
+		t.Error("garbage should fail validation")
+	}
+}
