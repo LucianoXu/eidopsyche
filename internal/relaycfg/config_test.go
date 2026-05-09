@@ -8,6 +8,9 @@ import (
 
 func TestDefaults(t *testing.T) {
 	d := Defaults()
+	if d.LogLevel != "info" {
+		t.Errorf("log_level = %q, want %q", d.LogLevel, "info")
+	}
 	if d.Relay.Mode != "paired" {
 		t.Errorf("mode = %q, want %q", d.Relay.Mode, "paired")
 	}
