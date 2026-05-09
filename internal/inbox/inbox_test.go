@@ -93,3 +93,73 @@ func TestMessage_LegacyRowReadsAsZero(t *testing.T) {
 		t.Fatalf("legacy row got non-zero new fields: %+v", got[0])
 	}
 }
+
+func TestListOutboxMergesAckDelta(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+
+	now := time.Now().Unix()
+	pre := Sent{V: 1, EventID: "ev1", InnerID: "rumor1", To: "bob", SentAt: now}
+	final := Sent{V: 1, EventID: "ev1", InnerID: "rumor1", To: "bob", SentAt: now,
+		AcceptedBy: []string{"wss://r"}, Final: true}
+	ackDelta := Sent{V: 1, EventID: "ev1", SentAt: now,
+		AckedAt: now + 5, AckEventID: "ackwrap1"}
+
+	if err := s.AppendOutbox(pre); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendOutbox(final); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendOutbox(ackDelta); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := s.ListOutbox(nil, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows=%d, want 1", len(rows))
+	}
+	got := rows[0]
+	if !got.Final || len(got.AcceptedBy) != 1 {
+		t.Errorf("non-ack fields not preserved: %+v", got)
+	}
+	if got.AckedAt != now+5 || got.AckEventID != "ackwrap1" {
+		t.Errorf("ack fields not merged: %+v", got)
+	}
+}
+
+func TestListOutboxAckBeforeFinal(t *testing.T) {
+	// Ack delta arriving BEFORE the publish-finalization row must still
+	// survive into the merged result (defends against the regression
+	// where Final=true row would clobber the ack fields).
+	dir := t.TempDir()
+	s := New(dir)
+	now := time.Now().Unix()
+
+	_ = s.AppendOutbox(Sent{V: 1, EventID: "ev1", InnerID: "rumor1", To: "bob", SentAt: now})
+	_ = s.AppendOutbox(Sent{V: 1, EventID: "ev1", SentAt: now, AckedAt: now + 1, AckEventID: "ack-early"})
+	_ = s.AppendOutbox(Sent{V: 1, EventID: "ev1", InnerID: "rumor1", To: "bob", SentAt: now,
+		AcceptedBy: []string{"wss://r"}, Final: true})
+
+	rows, _ := s.ListOutbox(nil, "", 0)
+	if len(rows) != 1 || rows[0].AckedAt == 0 || !rows[0].Final {
+		t.Errorf("merge lost data: %+v", rows)
+	}
+}
+
+func TestListOutboxAckFirstWins(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+	now := time.Now().Unix()
+	_ = s.AppendOutbox(Sent{V: 1, EventID: "ev1", InnerID: "rumor1", To: "bob", SentAt: now})
+	_ = s.AppendOutbox(Sent{V: 1, EventID: "ev1", SentAt: now, AckedAt: now + 1, AckEventID: "ack-first"})
+	_ = s.AppendOutbox(Sent{V: 1, EventID: "ev1", SentAt: now, AckedAt: now + 9, AckEventID: "ack-second"})
+
+	rows, _ := s.ListOutbox(nil, "", 0)
+	if len(rows) != 1 || rows[0].AckEventID != "ack-first" {
+		t.Errorf("first-ack-wins violated: %+v", rows)
+	}
+}

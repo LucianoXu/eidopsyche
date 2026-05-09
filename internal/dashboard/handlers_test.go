@@ -269,6 +269,53 @@ func TestGuard_OriginNull_Rejected(t *testing.T) {
 	}
 }
 
+// TestThread_FullPageOnDirectNav guards the refresh / deep-link case:
+// a GET /thread/<pk> without HX-Request must wrap the thread fragment
+// in the full shell (topbar + sidebar + CSS link) so the browser
+// renders a usable layout. Without the wrapper the bare thread
+// fragment is shown without flex layout, the thread-body grows to fit
+// every bubble, and the page becomes a single tall scroll.
+func TestThread_FullPageOnDirectNav(t *testing.T) {
+	deps := fakeDeps{pubkey: "selfpubkey"}
+	srv := newTestServer(t, deps)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/thread/peer-pubkey-hex", nil)
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, marker := range []string{
+		"<!DOCTYPE html>",
+		`<link rel="stylesheet" href="/static/app.css">`,
+		`class="sidebar"`,
+		`id="thread-body"`,
+	} {
+		if !strings.Contains(body, marker) {
+			t.Errorf("direct nav response missing %q", marker)
+		}
+	}
+}
+
+func TestThread_FragmentOnHxRequest(t *testing.T) {
+	deps := fakeDeps{pubkey: "selfpubkey"}
+	srv := newTestServer(t, deps)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/thread/peer-pubkey-hex", nil)
+	req.Header.Set("HX-Request", "true")
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "<!DOCTYPE html>") {
+		t.Errorf("HX-Request should produce a fragment, not a full document: %s", body[:200])
+	}
+	if !strings.Contains(body, `id="thread-body"`) {
+		t.Errorf("fragment missing thread-body: %s", body[:200])
+	}
+}
+
 func TestSendRoute_GET_Rejected(t *testing.T) {
 	deps := fakeDeps{pubkey: "selfpubkey"}
 	srv := newTestServer(t, deps)

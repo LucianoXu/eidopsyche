@@ -162,7 +162,7 @@ func threadHandler(deps DashboardDeps, r *renderer, logger *slog.Logger) http.Ha
 			counterpart = sidebarContact{Pubkey: pk, Label: shortenPubkey(pk), Tier: contacts.TierAcquaintance}
 		}
 		bubbles := buildBubbles(deps, pk)
-		out, err := r.Render("thread", threadData{
+		threadHTML, err := r.Render("thread", threadData{
 			Counterpart: counterpart,
 			Bubbles:     bubbles,
 			OwnPubkey:   deps.OwnPubkey(),
@@ -172,8 +172,34 @@ func threadHandler(deps DashboardDeps, r *renderer, logger *slog.Logger) http.Ha
 			http.Error(w, "render failed", 500)
 			return
 		}
+
+		// Direct navigation (refresh, deep link, no HX-Request header):
+		// wrap the thread fragment in the full shell so CSS, sidebar,
+		// and topbar render. Without this, refreshing a thread page
+		// returns just the inner thread template — the browser shows
+		// it as a bare HTML fragment with no flex layout, causing the
+		// thread-body to grow to fit all bubbles instead of scrolling.
+		if req.Header.Get("HX-Request") == "" {
+			label, _ := deps.OwnLabel(ctx)
+			side := buildSidebar(ctx, deps, pk, false)
+			out, rerr := r.Render("shell", shellData{
+				OwnLabel: label,
+				OwnNpub:  deps.OwnPubkey(),
+				Sidebar:  side,
+				Main:     template.HTML(threadHTML), //nolint:gosec // trusted internal template output
+			})
+			if rerr != nil {
+				logger.Error("render shell", "err", rerr)
+				http.Error(w, "render failed", 500)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(out))
+			return
+		}
+
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(out))
+		_, _ = w.Write([]byte(threadHTML))
 	}
 }
 
@@ -266,12 +292,17 @@ func sendChat(w http.ResponseWriter, req *http.Request, deps DashboardDeps, r *r
 		return
 	}
 
+	// deps.Send only returns nil when at least one relay accepted the
+	// publish (otherwise it returns ErrNoRelaysReachable), so we can
+	// safely render the initial bubble at tier-1 (✓). Tier-2 (✓✓) is
+	// applied later by the SSE OOB-swap path when the peer's ack arrives.
 	out, rerr := r.Render("bubble", bubbleData{
 		Self:    true,
 		From:    "you",
 		Text:    text,
 		At:      time.Now(),
 		EventID: eventID,
+		Status:  "sent",
 	})
 	if rerr != nil {
 		logger.Error("render bubble", "err", rerr)
@@ -437,8 +468,15 @@ func msgToBubble(m inbox.Message) bubbleData {
 
 func sentToBubble(s inbox.Sent) bubbleData {
 	text := s.Content
-	if env, err := envelope.Decode(s.Content); err == nil {
+	if env, err := envelope.Decode(s.Content); err == nil && env.Type == envelope.TypeChat {
 		text = env.Text
+	}
+	status := ""
+	switch {
+	case s.AckedAt != 0:
+		status = "delivered"
+	case len(s.AcceptedBy) > 0:
+		status = "sent"
 	}
 	return bubbleData{
 		Self:    true,
@@ -446,6 +484,7 @@ func sentToBubble(s inbox.Sent) bubbleData {
 		Text:    text,
 		At:      time.Unix(s.SentAt, 0),
 		EventID: s.EventID,
+		Status:  status,
 	}
 }
 

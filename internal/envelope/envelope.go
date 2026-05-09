@@ -12,6 +12,7 @@ type Type string
 const (
 	TypeChat    Type = "chat"
 	TypeCommand Type = "command"
+	TypeAck     Type = "ack"
 )
 
 const SchemaVersion = 1
@@ -21,6 +22,7 @@ type Envelope struct {
 	Type    Type     `json:"type"`
 	Text    string   `json:"text,omitempty"`
 	Command *Command `json:"command,omitempty"`
+	Ref     string   `json:"ref,omitempty"`
 	Client  *Client  `json:"client,omitempty"`
 }
 
@@ -63,6 +65,13 @@ func Validate(e Envelope) error {
 			return ErrSchemaViolation
 		}
 		if e.Command.Args == nil {
+			return ErrSchemaViolation
+		}
+	case TypeAck:
+		if e.Text != "" || e.Command != nil {
+			return ErrSchemaViolation
+		}
+		if !isLowerHex64(e.Ref) {
 			return ErrSchemaViolation
 		}
 	default:
@@ -126,4 +135,19 @@ func Decode(content string) (Envelope, error) {
 		return Envelope{}, err
 	}
 	return e, nil
+}
+
+func isLowerHex64(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9':
+		case r >= 'a' && r <= 'f':
+		default:
+			return false
+		}
+	}
+	return true
 }

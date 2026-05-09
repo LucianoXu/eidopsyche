@@ -14,8 +14,19 @@
       hx-post="/thread/{{.Counterpart.Pubkey}}/send"
       hx-target="#thread-body"
       hx-swap="beforeend"
-      hx-on::after-request="if(event.detail.successful){this.reset()}">
+      hx-on::after-request="if(event.detail.successful){this.reset(); var tb=document.getElementById('thread-body'); if(tb) tb.scrollTop = tb.scrollHeight;}">
   <input type="text" name="text" placeholder="Reply to {{.Counterpart.Label}}…" required autofocus>
   <button type="submit">Send</button>
 </form>
+<script>
+  // Scroll the thread to the latest (bottom) message on open. Runs both
+  // when the fragment is swapped in by htmx (clicking a sidebar contact)
+  // and on full-page load (refresh / deep link). Wrapped in setTimeout
+  // so it runs after the browser has laid the bubbles out.
+  (function () {
+    var tb = document.getElementById('thread-body');
+    if (!tb) return;
+    setTimeout(function () { tb.scrollTop = tb.scrollHeight; }, 0);
+  })();
+</script>
 {{end}}

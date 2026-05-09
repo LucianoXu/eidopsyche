@@ -18,7 +18,10 @@ func (s *Store) AppendOutbox(o Sent) error {
 }
 
 // ListOutbox collapses rows by EventID; later rows override earlier ones; rows
-// with Final=true take precedence. Returns newest-first.
+// with Final=true take precedence. Ack fields (AckedAt / AckEventID) are
+// merged independently with first-ack-wins semantics so they survive
+// regardless of row ordering relative to the Final-true publish-finalization
+// row. Returns newest-first.
 func (s *Store) ListOutbox(since *time.Time, to string, limit int) ([]Sent, error) {
 	files, err := s.daysDescending(s.outboxDir())
 	if err != nil {
@@ -26,6 +29,7 @@ func (s *Store) ListOutbox(since *time.Time, to string, limit int) ([]Sent, erro
 	}
 	collapsed := make(map[string]Sent)
 	order := make([]string, 0)
+	acks := make(map[string]Sent) // EventID → row carrying ack fields; first-ack-wins
 	for i := len(files) - 1; i >= 0; i-- {
 		f := files[i]
 		fp, err := os.Open(f)
@@ -44,16 +48,26 @@ func (s *Store) ListOutbox(since *time.Time, to string, limit int) ([]Sent, erro
 			if !seen {
 				order = append(order, o.EventID)
 				collapsed[o.EventID] = o
-				continue
-			}
-			if o.Final || !prev.Final {
+			} else if o.Final || !prev.Final {
 				collapsed[o.EventID] = o
+			}
+			// Ack overlay: first-ack-wins, independent of Final stickiness.
+			if o.AckedAt != 0 {
+				if _, taken := acks[o.EventID]; !taken {
+					acks[o.EventID] = o
+				}
 			}
 		}
 		fp.Close()
 		if err := sc.Err(); err != nil {
 			return nil, err
 		}
+	}
+	for eid, a := range acks {
+		row := collapsed[eid]
+		row.AckedAt = a.AckedAt
+		row.AckEventID = a.AckEventID
+		collapsed[eid] = row
 	}
 	out := make([]Sent, 0, len(order))
 	for _, id := range order {

@@ -643,27 +643,16 @@ func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	if err := d.Box.AppendOutbox(pre); err != nil {
 		return nil, internalErr(err)
 	}
+	// Note: we deliberately do NOT emit `outbox.message` here. The
+	// dashboard's POST /thread/{pubkey}/send response delivers the
+	// initial bubble inline (htmx swaps it `beforeend`). Emitting via
+	// SSE would produce a duplicate bubble in the same thread view.
+	// Tier-2 status updates (✓ → ✓✓) are delivered via OOB swap from
+	// handleInboundAck; see internal/dashboard/sse.go.
 
-	targets := map[string]struct{}{}
-	rows, err := d.DB.QueryContext(ctx, `SELECT relay_url FROM own_relays`)
+	urls, err := d.publishTargets(ctx, c.Relays)
 	if err != nil {
 		return nil, internalErr(err)
-	}
-	for rows.Next() {
-		var u string
-		_ = rows.Scan(&u)
-		targets[u] = struct{}{}
-	}
-	rows.Close()
-	for _, u := range c.Relays {
-		targets[u] = struct{}{}
-	}
-	for _, u := range d.Cfg.Publish.FallbackRelays {
-		targets[u] = struct{}{}
-	}
-	urls := make([]string, 0, len(targets))
-	for u := range targets {
-		urls = append(urls, u)
 	}
 
 	publishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -686,6 +675,9 @@ func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	final.AcceptedBy = accepted
 	final.Final = true
 	_ = d.Box.AppendOutbox(final)
+	// No SSE emit here either — the POST /send response already rendered
+	// the ✓ bubble (deps.Send only returns nil when at least one relay
+	// accepted, so the dashboard handler can safely set Status="sent").
 
 	return SendResult{
 		EventID:    wrapBob.ID,

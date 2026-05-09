@@ -91,6 +91,78 @@
     // to surface its own success / info message.
     window.eidosToast = showToast;
   })();
+
+  // OOB swap shim for htmx-ext-sse.
+  //
+  // htmx-ext-sse (v2.2.2) calls htmx's low-level swap which does process
+  // `hx-swap-oob` — but only for elements that already exist in the
+  // document. For tier-2 acks the SSE event commonly arrives BEFORE the
+  // POST /thread/{pubkey}/send response has inserted the initial bubble
+  // (the daemon emits the ack-update before the HTTP handler returns the
+  // bubble HTML to the browser). The OOB target therefore doesn't exist
+  // yet, htmx drops the element, and the bubble never flips ✓ → ✓✓.
+  //
+  // Fix: intercept `htmx:sseBeforeMessage`, identify single-root OOB
+  // bubbles, and queue them by id. Try to apply now; otherwise replay
+  // after the next htmx swap finishes (which is when the POST response
+  // bubble lands in the DOM). Always preventDefault so the queued OOB
+  // never gets duplicated by the default beforeend swap.
+  //
+  // Note: htmx-ext-sse passes the raw SSE Event as `evt.detail` (see
+  // its `triggerEvent(elt, 'htmx:sseBeforeMessage', event)` call), so
+  // the data lives at `evt.detail.data` — not `evt.detail.event.data`.
+  (function () {
+    var pending = new Map(); // id → bubble HTML waiting for its target
+
+    function applyOOB(id) {
+      var html = pending.get(id);
+      if (!html) return false;
+      var existing = document.getElementById(id);
+      if (!existing) return false;
+      var tmpl = document.createElement("template");
+      tmpl.innerHTML = html.trim();
+      var root = tmpl.content.firstElementChild;
+      if (!root) {
+        pending.delete(id);
+        return false;
+      }
+      existing.replaceWith(root);
+      pending.delete(id);
+      return true;
+    }
+
+    function flushPending() {
+      if (pending.size === 0) return;
+      // Iterate over a snapshot so deletions during iteration are safe.
+      var ids = Array.from(pending.keys());
+      for (var i = 0; i < ids.length; i++) {
+        applyOOB(ids[i]);
+      }
+    }
+
+    document.body.addEventListener("htmx:sseBeforeMessage", function (evt) {
+      var data = evt.detail && evt.detail.data;
+      if (typeof data !== "string" || data.length === 0) return;
+      var tmpl = document.createElement("template");
+      tmpl.innerHTML = data.trim();
+      var root = tmpl.content.firstElementChild;
+      if (!root || tmpl.content.children.length !== 1) return;
+      if (!root.hasAttribute("hx-swap-oob")) return;
+      var id = root.getAttribute("id");
+      if (!id) return;
+      // Suppress the default sse-swap so the OOB element isn't appended;
+      // we own the swap from this point.
+      evt.preventDefault();
+      pending.set(id, data);
+      applyOOB(id);
+    });
+
+    // Re-try pending OOB swaps after each htmx swap. The POST /send
+    // response is delivered through the standard htmx swap pipeline, so
+    // its `htmx:afterSwap` is exactly when the matching bubble appears
+    // in the DOM.
+    document.body.addEventListener("htmx:afterSwap", flushPending);
+  })();
 </script>
 </body>
 </html>{{end}}

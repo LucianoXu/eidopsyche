@@ -85,7 +85,16 @@ func renderEvent(r *renderer, ev Event, logger *slog.Logger) (string, string) {
 		if ev.Sent == nil {
 			return "", ""
 		}
-		out, err := r.Render("bubble", sentToBubble(*ev.Sent))
+		// Wrap as an htmx OOB swap so we REPLACE the bubble that the
+		// POST /thread/{pubkey}/send form-submit response already placed
+		// in the thread. Without OOB, the regular sse-swap="beforeend"
+		// would append a duplicate. CLI / MCP-originated sends produce
+		// no existing bubble, so the OOB swap is silently discarded —
+		// dashboard users see the row only after a page refresh, which
+		// matches the behavior before tier-2 acks landed.
+		data := sentToBubble(*ev.Sent)
+		data.OOB = true
+		out, err := r.Render("bubble", data)
 		if err != nil {
 			logger.Warn("render outbox bubble for SSE", "err", err)
 			return "", ""

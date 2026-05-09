@@ -26,4 +26,6 @@ type Sent struct {
 	SentAt      int64    `json:"sent_at"`
 	AcceptedBy  []string `json:"accepted_by"`
 	Final       bool     `json:"final,omitempty"`
+	AckedAt     int64    `json:"acked_at,omitempty"`
+	AckEventID  string   `json:"ack_event_id,omitempty"`
 }

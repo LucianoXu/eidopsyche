@@ -32,9 +32,10 @@ NIP-17 `kind:14` rumor `.content` MUST be a JSON object matching:
 ```json
 {
   "v": 1,
-  "type": "chat" | "command",
+  "type": "chat" | "command" | "ack",
   "text": "string",
   "command": { "name": "string", "args": object },
+  "ref": "string",
   "client": { "name": "string", "ver": "string" }
 }
 ```
@@ -44,9 +45,10 @@ Field semantics:
 | Field | Required | Notes |
 |---|---|---|
 | `v` | yes | Schema version. v1 ships `v: 1`. Integer. |
-| `type` | yes | Discriminator. v1 enum: `chat`, `command`. Unknown values → soft-reject (`schema_violation`). |
+| `type` | yes | Discriminator. v1 enum: `chat`, `command`, `ack`. Unknown values → soft-reject (`schema_violation`). |
 | `text` | conditional | Required when `type=chat`. RECOMMENDED when `type=command` (operator audit trail in inbox display, e.g., `"/status"`). Free-form UTF-8 string. |
-| `command` | conditional | Required when `type=command`; MUST be absent when `type=chat`. Object with `name` (non-empty string) and `args` (object; MUST be present, MAY be empty `{}`). |
+| `command` | conditional | Required when `type=command`; MUST be absent when `type=chat` or `type=ack`. Object with `name` (non-empty string) and `args` (object; MUST be present, MAY be empty `{}`). |
+| `ref` | conditional | Required when `type=ack`; MUST be absent (or empty) for other types. The 64-character lowercase-hex inner rumor id of the message being acknowledged. See `2026-05-09-message-delivery-status-design.md` for the tier-2 delivery acknowledgement design. |
 | `client` | optional but recommended | Sender identification. Object with `name` (string, e.g., `"eidos"`) and `ver` (string, e.g., `"0.3.0"`). No capability field in v1. |
 
 The `.content` string is the canonical JSON serialization of this object. Field order is not significant. Whitespace within strings is preserved; whitespace between tokens is not.
@@ -58,14 +60,18 @@ A receiver's envelope decoder MUST reject (return error) when any of these hold:
 - `.content` does not parse as a JSON object → `ErrNotEnvelope`
 - Object lacks `v` or `type` → `ErrNotEnvelope` (treated as "not envelope-shaped" rather than "malformed envelope" — distinguishes random JSON from intentional but broken envelopes)
 - `v` is not the integer `1` → `ErrUnsupportedVersion`
-- `type` is not in `{chat, command}` → `ErrSchemaViolation`
+- `type` is not in `{chat, command, ack}` → `ErrSchemaViolation`
 - `type=chat` and `text` is missing, not a string, or empty → `ErrSchemaViolation`
 - `type=chat` and `command` is present → `ErrSchemaViolation`
 - `type=command` and `command` is missing, or its `name` is not a non-empty string, or `args` is missing or not an object → `ErrSchemaViolation`
 - `type=command` and `command.name` is unknown to the dispatcher → handled at dispatch (§5.4), **not** a decode-time error
+- `type=ack` and `ref` is missing or not a 64-character lowercase-hex string → `ErrSchemaViolation`
+- `type=ack` and `text` is non-empty, or `command` is present → `ErrSchemaViolation`
 - `client` is present but not `{name: string, ver: string}` → `ErrSchemaViolation`
 
 Unknown additional fields at the envelope top level → MUST be ignored (forward-compatibility for additive changes within v1, e.g., a future minor that adds an optional field; readers should still validate).
+
+**Schema evolution.** New non-breaking types may land additively within a major version (`v` unchanged). Old peers running an older v1 that doesn't know the new type will hit the existing `default: return ErrSchemaViolation` branch and soft-reject the message — graceful degradation requires no code change on their side. Only breaking changes — field-semantics shifts on existing types, validation tightening, removed types — require bumping `v`. `type=ack` (added 2026-05-09) is the first additive type; see `2026-05-09-message-delivery-status-design.md`.
 
 ## 4. type=chat
 
@@ -270,7 +276,7 @@ Existing `nostr.Wrap` / `nostr.Unwrap` are unchanged — they operate on rumor o
 
 ## 10. Known limitations / v2 candidates
 
-These are intentionally out of v1. Each has a recorded trigger condition that would justify adding it.
+The items below are candidates that **would** coincide with the next version bump because they require breaking changes — new mandatory fields, modified semantics on existing types, or fields whose absence in a v1 peer would corrupt user-visible behavior. Strictly additive types and optional fields can land within v1 directly via the schema-evolution clause in §3.1.
 
 - **Machine-readable command results.** v1 `status` reply is text-only. When the first **machine consumer** appears (peer mind-form RPC, MCP server exposure, programmatic dashboard widget), v2 will introduce either an optional top-level `data: any` field or a `command_result` type with `in_reply_to` correlation. The choice will be made when the consumer's needs are concrete.
 - **Attachments.** Image / audio / file references via NIP-94 + blossom-style upload. Requires a separate spec for the upload pipeline.
@@ -279,6 +285,10 @@ These are intentionally out of v1. Each has a recorded trigger condition that wo
 - **Capability negotiation (`client.caps`).** Per-receiver behavior switching. Trigger: more than one client implementation.
 - **Reactions, edits, deletes.** Standard chat affordances.
 - **Migration of historical inbox data.** v1 leaves pre-envelope rows alone; if a future export tool needs uniform shape, a one-shot migrator can synthesize legacy envelopes.
+
+### Resolved in v1 additively
+
+- **`type=ack`** — tier-2 delivery acknowledgement. See `2026-05-09-message-delivery-status-design.md`. Added without bumping `v` because old peers gracefully soft-reject the new type via the existing `default: ErrSchemaViolation` branch.
 
 ## 11. Future direction (recorded for context, not in v1 scope)
 

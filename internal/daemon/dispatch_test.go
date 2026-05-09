@@ -2,6 +2,10 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +15,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/dashboard"
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
+	"github.com/LucianoXu/eidopsyche/internal/inbox"
 )
 
 // makeRumor builds a minimal rumor (kind:14) with the given pubkey & content,
@@ -145,6 +150,10 @@ func TestDashboardHub_FanOutOnInbox(t *testing.T) {
 	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ev-hub"}, makeRumor(from, content))
 
 	for i, ch := range []<-chan dashboard.Event{ch1, ch2} {
+		// Each subscriber may receive both an inbox.message (from
+		// broadcastInbox) and an outbox.message (from emitAck's ack
+		// publish — but only if Pool.Publish reaches a real relay; in
+		// this unit test, no Pool is wired, so just take the first).
 		select {
 		case ev := <-ch:
 			if ev.Kind != "inbox.message" {
@@ -155,6 +164,254 @@ func TestDashboardHub_FanOutOnInbox(t *testing.T) {
 			}
 		case <-time.After(500 * time.Millisecond):
 			t.Errorf("subscriber %d did not receive event", i)
+		}
+	}
+}
+
+func TestDispatch_ChatFromContact_EmitsAck(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	from := "bob-pubkey-hex"
+	if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: from, Tier: contacts.TierFriend}); err != nil {
+		t.Fatal(err)
+	}
+
+	var (
+		ackTo  string
+		ackRef string
+		called int
+	)
+	d.testEmitAck = func(_ context.Context, to, ref string) {
+		called++
+		ackTo, ackRef = to, ref
+	}
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeChat, Text: "hi"}
+	content, _ := envelope.Encode(env)
+	rumor := makeRumor(from, content)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ev"}, rumor)
+
+	if called != 1 || ackTo != from || ackRef != rumor.ID {
+		t.Errorf("ack call: count=%d to=%q ref=%q; want 1, %q, %q", called, ackTo, ackRef, from, rumor.ID)
+	}
+}
+
+func TestDispatch_SelfCopy_NoAck(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+
+	called := 0
+	d.testEmitAck = func(context.Context, string, string) { called++ }
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeChat, Text: "self-note"}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ev-self"}, makeRumor(d.Key.PublicHex, content))
+
+	if called != 0 {
+		t.Errorf("ack emitted for self-copy: count=%d", called)
+	}
+}
+
+func TestDispatch_BlockedSender_NoAck(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	from := "mallory-pubkey-hex"
+	if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: from, Tier: contacts.TierBlocked}); err != nil {
+		t.Fatal(err)
+	}
+
+	called := 0
+	d.testEmitAck = func(context.Context, string, string) { called++ }
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeChat, Text: "rude"}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ev-blk"}, makeRumor(from, content))
+
+	if called != 0 {
+		t.Errorf("ack emitted for blocked sender: count=%d", called)
+	}
+}
+
+const ackTestRumorRef = "00000000000000000000000000000000000000000000000000000000aaaaaaaa"
+
+func TestDispatch_InboundAck_MutatesOutbox(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	to := "bob-pubkey-hex"
+	if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: to, Tier: contacts.TierFriend}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Box.AppendOutbox(inbox.Sent{V: 1, EventID: "evW", InnerID: ackTestRumorRef, To: to, SentAt: 100}); err != nil {
+		t.Fatal(err)
+	}
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeAck, Ref: ackTestRumorRef}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ackwrap1"}, makeRumor(to, content))
+
+	rows, _ := d.Box.ListOutbox(nil, "", 0)
+	if len(rows) != 1 || rows[0].AckedAt == 0 || rows[0].AckEventID != "ackwrap1" {
+		t.Errorf("ack not recorded: %+v", rows)
+	}
+}
+
+func TestDispatch_InboundAck_UnknownRef_Drops(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	to := "bob-pubkey-hex"
+	if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: to, Tier: contacts.TierFriend}); err != nil {
+		t.Fatal(err)
+	}
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeAck, Ref: strings.Repeat("a", 64)}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ackwrap-orphan"}, makeRumor(to, content))
+
+	rows, _ := d.Box.ListOutbox(nil, "", 0)
+	if len(rows) != 0 {
+		t.Errorf("orphan ack created rows: %+v", rows)
+	}
+}
+
+func TestDispatch_InboundAck_WrongSender_Rejects(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	bob := "bob-pubkey-hex"
+	carol := "carol-pubkey-hex"
+	for _, p := range []string{bob, carol} {
+		if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: p, Tier: contacts.TierFriend}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = d.Box.AppendOutbox(inbox.Sent{V: 1, EventID: "evW", InnerID: ackTestRumorRef, To: bob, SentAt: 100})
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeAck, Ref: ackTestRumorRef}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ackwrap"}, makeRumor(carol, content))
+
+	rows, _ := d.Box.ListOutbox(nil, "", 0)
+	if len(rows) != 1 || rows[0].AckedAt != 0 {
+		t.Errorf("ack from wrong sender was accepted: %+v", rows)
+	}
+}
+
+func TestDispatch_InboundAck_FirstAckWins(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	to := "bob-pubkey-hex"
+	if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: to, Tier: contacts.TierFriend}); err != nil {
+		t.Fatal(err)
+	}
+	_ = d.Box.AppendOutbox(inbox.Sent{V: 1, EventID: "evW", InnerID: ackTestRumorRef, To: to, SentAt: 100,
+		AckedAt: 999, AckEventID: "ackwrap-original"})
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeAck, Ref: ackTestRumorRef}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ackwrap-second"}, makeRumor(to, content))
+
+	rows, _ := d.Box.ListOutbox(nil, "", 0)
+	if rows[0].AckEventID != "ackwrap-original" {
+		t.Errorf("first-ack-wins violated: got %s", rows[0].AckEventID)
+	}
+}
+
+// TestDispatch_InboundAck_ConcurrentDuplicates_AppendsOneDelta asserts the
+// CAS guard inside handleInboundAck: two concurrent inbound ack envelopes
+// for the same Sent must produce exactly one ack-delta row on disk, not
+// one per goroutine. ListOutbox would still render first-ack-wins, but
+// duplicate disk rows would slowly bloat the outbox with control-plane
+// noise.
+func TestDispatch_InboundAck_ConcurrentDuplicates_AppendsOneDelta(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	to := "bob-pubkey-hex"
+	if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: to, Tier: contacts.TierFriend}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Box.AppendOutbox(inbox.Sent{V: 1, EventID: "evW", InnerID: ackTestRumorRef, To: to, SentAt: 100}); err != nil {
+		t.Fatal(err)
+	}
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeAck, Ref: ackTestRumorRef}
+	content, _ := envelope.Encode(env)
+
+	const concurrency = 8
+	start := make(chan struct{})
+	done := make(chan struct{}, concurrency)
+	for i := 0; i < concurrency; i++ {
+		i := i
+		go func() {
+			<-start
+			d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ackwrap-" + strconv.Itoa(i)}, makeRumor(to, content))
+			done <- struct{}{}
+		}()
+	}
+	close(start)
+	for i := 0; i < concurrency; i++ {
+		<-done
+	}
+
+	// Count raw ack-delta rows directly on disk: any line whose AckedAt > 0
+	// is an ack delta. We expect exactly one despite the N concurrent dispatch
+	// calls.
+	deltaCount := 0
+	files, _ := filepath.Glob(filepath.Join(d.StateDir, "outbox", "*", "*", "*.jsonl"))
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			if line == "" {
+				continue
+			}
+			var s inbox.Sent
+			if err := json.Unmarshal([]byte(line), &s); err != nil {
+				t.Fatal(err)
+			}
+			if s.AckedAt != 0 {
+				deltaCount++
+			}
+		}
+	}
+	if deltaCount != 1 {
+		t.Errorf("concurrent acks produced %d delta rows on disk, want 1", deltaCount)
+	}
+}
+
+// TestDispatch_InboundAck_NoInboxNoWake guards against regressions of the
+// "ack must not surface as an inbox row and must not trigger a wake" rule.
+// Failure here would mean acks become user-visible chat or fire wake signals,
+// either of which would defeat the daemon-control nature of tier-2.
+func TestDispatch_InboundAck_NoInboxNoWake(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	to := "bob-pubkey-hex"
+	if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: to, Tier: contacts.TierFriend}); err != nil {
+		t.Fatal(err)
+	}
+	_ = d.Box.AppendOutbox(inbox.Sent{V: 1, EventID: "evW", InnerID: ackTestRumorRef, To: to, SentAt: 100})
+
+	wakeDir := t.TempDir()
+	d.wakeDir = wakeDir
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeAck, Ref: ackTestRumorRef}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ackwrap1"}, makeRumor(to, content))
+
+	// No inbox row should appear for the ack envelope.
+	msgs, _ := d.Box.ListInbox(nil, "", 0)
+	for _, m := range msgs {
+		if m.From == to {
+			t.Errorf("ack created inbox row: %+v", m)
+		}
+	}
+
+	// No wake-pending file should have been written.
+	entries, _ := os.ReadDir(wakeDir)
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".discarded") {
+			t.Errorf("ack triggered wake file: %s", e.Name())
 		}
 	}
 }

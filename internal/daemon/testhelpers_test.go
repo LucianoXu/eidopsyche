@@ -33,18 +33,23 @@ func newTestDaemon(t *testing.T) *Daemon {
 	}
 	t.Cleanup(func() { db.Close() })
 	return &Daemon{
-		StateDir:    dir,
-		Key:         k,
-		DB:          db,
-		Repo:        contacts.New(db),
-		Invites:     invitedb.New(db),
-		Box:         inbox.New(dir),
-		Pool:        nostr.NewPool(),
-		Log:         slog.New(slog.NewJSONHandler(testWriter{t}, nil)),
-		startedAt:   time.Now(),
-		kick:        make(chan struct{}, 1),
-		dedupe:      map[string]struct{}{},
-		selfWrapIDs: map[string]struct{}{},
+		StateDir:      dir,
+		Key:           k,
+		DB:            db,
+		Repo:          contacts.New(db),
+		Invites:       invitedb.New(db),
+		Box:           inbox.New(dir),
+		Pool:          nostr.NewPool(),
+		Log:           slog.New(slog.NewJSONHandler(testWriter{t}, nil)),
+		startedAt:     time.Now(),
+		kick:          make(chan struct{}, 1),
+		dedupe:        map[string]struct{}{},
+		selfWrapIDs:   map[string]struct{}{},
+		ackedInnerIDs: map[string]struct{}{},
+		// Default ack-emit to a silent no-op so unit tests don't try to
+		// publish over a nil/empty Pool with synthetic rumor IDs that
+		// fail envelope validation. Tests asserting ack behavior override.
+		testEmitAck: func(context.Context, string, string) {},
 	}
 }
 

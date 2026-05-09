@@ -1,7 +1,9 @@
-{{define "bubble"}}<div class="bubble{{if .Self}} self{{end}}{{if .Malformed}} malformed{{end}}" data-event-id="{{.EventID}}">
+{{define "bubble"}}<div class="bubble{{if .Self}} self{{end}}{{if .Malformed}} malformed{{end}}" id="bubble-{{.EventID}}" data-event-id="{{.EventID}}"{{if .OOB}} hx-swap-oob="true"{{end}}>
   <div class="meta">
     {{.From}} · <span title="{{.At.Format "2006-01-02 15:04:05"}}">{{reltime .At}}</span>
     {{if .Malformed}}<span class="reject-chip">{{.RejectReason}}</span>{{end}}
+    {{if and .Self (eq .Status "sent")}}<span class="status status-sent" title="accepted by relay">✓</span>{{end}}
+    {{if and .Self (eq .Status "delivered")}}<span class="status status-delivered" title="delivered to peer">✓✓</span>{{end}}
   </div>
   <div>{{.Text}}</div>
 </div>{{end}}

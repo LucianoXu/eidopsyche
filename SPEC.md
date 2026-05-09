@@ -178,6 +178,12 @@ MindGate 是一个抽象接口，描述一个网络节点对外的通信能力�
   - 异步消息（文本、文件元数据）通过 Nostr event 传输，使用 NIP-17 (gift wrap) 实现端到端加密。
   - 实时多模态（音频、视频）通过 WebRTC P2P 直连，Nostr 仅承担信令交换（NIP-100）。
   - 同一公钥身份下，两类通道并存。
+- **投递状态分层**。MindGate 区分两层投递语义，UI 不混淆。
+  - **Tier 1 — relay 接受**。本地事实：N 个 relay 在发布时返回 OK，记录于 `Sent.AcceptedBy`。CLI/dashboard 渲染为 `✓`。无协议承诺。
+  - **Tier 2 — 对端回执**。envelope-v1 中的 `type=ack` 消息：对端 daemon 在成功解开 gift wrap、校验 envelope、持久化到 inbox 后，向原发件方发出 `{v:1, type:"ack", ref:<inner_id>}`。命中后 `Sent.AckedAt` / `Sent.AckEventID` 写入，UI 渲染为 `✓✓`。
+  - **不替代项**。NIP-65 / kind:10050 "对方有订阅 inbox" 不等价于"已投递"，不应作为 tier 2 的代理出现在状态界面。
+  - **优雅降级**。未升级的旧 daemon 收到 ack 会按 envelope 软拒绝（`schema_violation`），发件方的 `✓✓` 不会出现，仅显示 `✓`。
+  - 设计 trace: [#21](https://github.com/LucianoXu/eidopsyche/issues/21)。
 - **以点对点（1:1）为基础**。多方通信的语义复杂度高，初期不实现。未来扩展时可考虑基于订阅的 feed 模式或加密群组协议（如 MLS）。
 - **MindGate daemon 独立于 Agent runtime**。MindGate 需要常驻进程以接收推送消息，但 MindForge 心智体采用单例 + 间歇运行模型。因此 MindGate daemon 是独立的守护进程：它不受 MindForge 单例锁约束；接收到入站消息时通过 wake 信号唤醒心智体；在心智体未运行时仍可接收消息并缓存到 inbox。
 - **MindGate 可以是 thin 客户端形态**。手机、Web 等客户端可以不持有私钥、不订阅 relay，而通过 NIP-46（Nostr Connect）等协议连接到主 MindGate daemon 委托签名与读写。私钥与社交状态保持单一来源。这是项目第三部分（人类工具实现）的主要形态之一。

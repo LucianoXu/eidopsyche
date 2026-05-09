@@ -46,7 +46,14 @@ type Daemon struct {
 	dashSubs    []*dashSub
 	dedupe      map[string]struct{}
 	selfWrapIDs map[string]struct{}
-	relayHealth *relayHealthStore
+	// ackedInnerIDs tracks rumor IDs (Sent.InnerID == ack.Ref) for which
+	// we have already begun appending an ack delta in this process run.
+	// Without it, two concurrent inbound acks for the same message could
+	// both observe AckedAt==0 from ListOutbox and both append delta rows.
+	// In-memory only — after restart the persisted AckedAt on the Sent
+	// row provides the same guard via the existing match.AckedAt!=0 check.
+	ackedInnerIDs map[string]struct{}
+	relayHealth   *relayHealthStore
 
 	// configMu serialises read-modify-write of config.toml so two
 	// concurrent dashboard ConfigSet calls cannot lose updates by
@@ -76,6 +83,10 @@ type Daemon struct {
 	// testSendChatReply, if non-nil, replaces sendChatReply during tests
 	// to avoid actual NIP-17 publish over the network.
 	testSendChatReply func(ctx context.Context, toPubkey string, text string) error
+
+	// testEmitAck, if non-nil, replaces emitAck during tests to avoid
+	// actual NIP-17 publish over the network.
+	testEmitAck func(ctx context.Context, toPubkey string, ref string)
 }
 
 // Start loads state from stateDir and initialises the daemon without yet
@@ -99,21 +110,22 @@ func Start(stateDir string) (*Daemon, error) {
 		return nil, err
 	}
 	d := &Daemon{
-		StateDir:    stateDir,
-		Cfg:         cfg,
-		Key:         k,
-		DB:          db,
-		Repo:        contacts.New(db),
-		Invites:     invitedb.New(db),
-		Box:         inbox.New(stateDir),
-		Pool:        nostr.NewPoolWithSigner(keypairSigner{k: k}),
-		Log:         slog.New(slog.NewJSONHandler(os.Stderr, nil)),
-		startedAt:   time.Now(),
-		kick:        make(chan struct{}, 1),
-		dedupe:      make(map[string]struct{}, 1024),
-		selfWrapIDs: make(map[string]struct{}, 1024),
-		relayHealth: newRelayHealthStore(),
-		wakeDir:     cfg.Wake.Dir,
+		StateDir:      stateDir,
+		Cfg:           cfg,
+		Key:           k,
+		DB:            db,
+		Repo:          contacts.New(db),
+		Invites:       invitedb.New(db),
+		Box:           inbox.New(stateDir),
+		Pool:          nostr.NewPoolWithSigner(keypairSigner{k: k}),
+		Log:           slog.New(slog.NewJSONHandler(os.Stderr, nil)),
+		startedAt:     time.Now(),
+		kick:          make(chan struct{}, 1),
+		dedupe:        make(map[string]struct{}, 1024),
+		selfWrapIDs:   make(map[string]struct{}, 1024),
+		ackedInnerIDs: make(map[string]struct{}, 1024),
+		relayHealth:   newRelayHealthStore(),
+		wakeDir:       cfg.Wake.Dir,
 	}
 	// Wire Pool's per-URL state hook so transitions surface in d.relayHealth
 	// AND in the dashboard SSE hub. The hook runs from inside the Pool's
@@ -403,12 +415,14 @@ func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *
 	case envelope.TypeChat:
 		// Chats from self (e.g., command replies, self-notes) bypass the
 		// contact filter — self is always trusted.
+		var senderContact *contacts.Contact
 		if rumor.PubKey != d.Key.PublicHex {
 			c, err := d.Repo.Get(ctx, rumor.PubKey)
 			if err != nil || c.Tier == contacts.TierBlocked {
 				d.Log.Debug("dropped non-contact / blocked", "from", rumor.PubKey)
 				return
 			}
+			senderContact = c
 		}
 		msg := inbox.Message{
 			EventID:    ev.ID,
@@ -429,6 +443,15 @@ func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *
 			}
 		}
 		d.broadcastInbox(msg)
+		// Tier-2: emit ack to non-self whitelisted senders. senderContact is
+		// nil only for self-copies (rumor.PubKey == self), which we skip.
+		if senderContact != nil {
+			d.emitAck(ctx, rumor.PubKey, senderContact.Relays, rumor.ID)
+		}
+
+	case envelope.TypeAck:
+		d.handleInboundAck(ctx, ev, rumor, env)
+		return
 
 	case envelope.TypeCommand:
 		if rumor.PubKey != d.Key.PublicHex {
@@ -541,6 +564,157 @@ func (d *Daemon) ownRelayURLs(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("iterate own_relays: %w", err)
 	}
 	return urls, nil
+}
+
+// publishTargets returns the union of own_relays, the recipient's known
+// relays, and configured fallback relays, deduplicated. The DB error is
+// returned so callers can choose: sendMessage propagates it (operator
+// must see infrastructure failures), emitAck logs and falls back to the
+// non-DB inputs (tier-2 ack is best-effort).
+func (d *Daemon) publishTargets(ctx context.Context, recipientRelays []string) ([]string, error) {
+	targets := map[string]struct{}{}
+	rows, err := d.DB.QueryContext(ctx, `SELECT relay_url FROM own_relays`)
+	if err != nil {
+		return nil, fmt.Errorf("query own_relays: %w", err)
+	}
+	for rows.Next() {
+		var u string
+		if scanErr := rows.Scan(&u); scanErr != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan own_relays: %w", scanErr)
+		}
+		targets[u] = struct{}{}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate own_relays: %w", err)
+	}
+	for _, u := range recipientRelays {
+		targets[u] = struct{}{}
+	}
+	for _, u := range d.Cfg.Publish.FallbackRelays {
+		targets[u] = struct{}{}
+	}
+	urls := make([]string, 0, len(targets))
+	for u := range targets {
+		urls = append(urls, u)
+	}
+	return urls, nil
+}
+
+// handleInboundAck consumes a successfully-decoded type=ack envelope.
+// Looks up the matching Sent by InnerID == env.Ref, appends a delta row
+// with AckedAt/AckEventID populated. First-ack-wins (idempotent on
+// re-receipt). Mismatched / unknown refs are dropped with debug-log.
+// Never writes to inbox.jsonl, never triggers a wake.
+//
+// Concurrent duplicate acks: the in-memory ackedInnerIDs map provides a
+// compare-and-set guard so the read-check-append sequence below cannot
+// race two ack envelopes for the same Sent into appending two delta
+// rows. After daemon restart the persisted AckedAt on the matching Sent
+// row carries the same idempotency.
+func (d *Daemon) handleInboundAck(ctx context.Context, ev *gnostr.Event, rumor *gnostr.Event, env envelope.Envelope) {
+	// We never emit acks to ourselves, so a self-rumor here is anomalous.
+	if rumor.PubKey == d.Key.PublicHex {
+		return
+	}
+	c, err := d.Repo.Get(ctx, rumor.PubKey)
+	if err != nil || c.Tier == contacts.TierBlocked {
+		d.Log.Debug("dropped ack from non-contact / blocked", "from", rumor.PubKey)
+		return
+	}
+
+	rows, err := d.Box.ListOutbox(nil, "", 0)
+	if err != nil {
+		d.Log.Warn("handleInboundAck: list outbox", "err", err)
+		return
+	}
+	var match *inbox.Sent
+	for i := range rows {
+		if rows[i].InnerID == env.Ref {
+			match = &rows[i]
+			break
+		}
+	}
+	if match == nil {
+		d.Log.Debug("ack ref not found in outbox", "ref", env.Ref, "from", rumor.PubKey)
+		return
+	}
+	if match.To != rumor.PubKey {
+		d.Log.Warn("ack from non-recipient", "ref", env.Ref, "expected", match.To, "actual", rumor.PubKey)
+		return
+	}
+	if match.AckedAt != 0 {
+		// First-ack-wins: idempotent on duplicate ack arriving after
+		// the previous one was already persisted.
+		return
+	}
+
+	// Compare-and-set: claim this InnerID before writing the delta.
+	// If a concurrent goroutine already claimed it, drop silently.
+	d.mu.Lock()
+	if _, claimed := d.ackedInnerIDs[env.Ref]; claimed {
+		d.mu.Unlock()
+		return
+	}
+	d.ackedInnerIDs[env.Ref] = struct{}{}
+	d.mu.Unlock()
+
+	delta := inbox.Sent{
+		V:          1,
+		EventID:    match.EventID,
+		SentAt:     match.SentAt,
+		AckedAt:    time.Now().Unix(),
+		AckEventID: ev.ID,
+	}
+	if err := d.Box.AppendOutbox(delta); err != nil {
+		d.Log.Error("append ack delta", "err", err)
+		return
+	}
+
+	// Push a fresh Sent snapshot to the dashboard so the bubble flips ✓ → ✓✓.
+	merged := *match
+	merged.AckedAt = delta.AckedAt
+	merged.AckEventID = delta.AckEventID
+	d.emitDashEvent(dashboard.Event{Kind: "outbox.message", Sent: &merged})
+}
+
+// emitAck builds an envelope-v1 type=ack and publishes it as a NIP-17 wrap
+// to the original sender. Best-effort: no retry, no self-copy, no Sent row.
+// In tests, d.testEmitAck takes precedence to avoid network I/O.
+func (d *Daemon) emitAck(ctx context.Context, toPubkey string, recipientRelays []string, ref string) {
+	if d.testEmitAck != nil {
+		d.testEmitAck(ctx, toPubkey, ref)
+		return
+	}
+	env := envelope.Envelope{
+		V:    envelope.SchemaVersion,
+		Type: envelope.TypeAck,
+		Ref:  ref,
+	}
+	content, err := envelope.Encode(env)
+	if err != nil {
+		d.Log.Warn("encode ack envelope", "err", err, "ref", ref)
+		return
+	}
+	wrap, _, err := nostr.Wrap(d.Key.PrivateHex, toPubkey, content)
+	if err != nil {
+		d.Log.Warn("wrap ack envelope", "err", err, "ref", ref)
+		return
+	}
+	urls, err := d.publishTargets(ctx, recipientRelays)
+	if err != nil {
+		// Best-effort: log and keep going — but with no targets, abort.
+		d.Log.Warn("emit ack: publishTargets", "err", err, "to", toPubkey)
+		return
+	}
+	if len(urls) == 0 {
+		d.Log.Debug("emit ack: no relay targets", "to", toPubkey)
+		return
+	}
+	pubCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	_ = d.Pool.Publish(pubCtx, urls, wrap)
 }
 
 // handleInviteRedemption processes an incoming kind:25001 invite-redemption rumor.

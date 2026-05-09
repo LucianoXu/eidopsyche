@@ -163,3 +163,40 @@ func TestEnvelope_FutureVersionSoftRejects(t *testing.T) {
 		t.Fatalf("expected unsupported_version soft-reject, got %+v", row)
 	}
 }
+
+func TestEnvelope_AckRoundTrip(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	alice := bringUp(t, "alice")
+	bob := bringUp(t, "bob")
+	addContact(t, alice, bob)
+	addContact(t, bob, alice)
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeChat, Text: "ping"}
+	sendEnvelopeIPC(t, alice, bob.daemon.Key.PublicHex, env)
+
+	// Wait for bob's inbox row first (so we know bob unwrapped + persisted),
+	// then poll alice's outbox for AckedAt.
+	row := waitForInboxFrom(t, bob, alice.daemon.Key.PublicHex, 5*time.Second)
+	if row.Malformed {
+		t.Fatalf("bob's row malformed: %+v", row)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		rows, err := alice.daemon.Box.ListOutbox(nil, "", 0)
+		if err == nil {
+			for _, r := range rows {
+				if r.To == bob.daemon.Key.PublicHex && r.AckedAt != 0 {
+					if r.AckEventID == "" {
+						t.Errorf("AckEventID empty: %+v", r)
+					}
+					return
+				}
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("alice's outbox never received ack from bob within 5s")
+}
