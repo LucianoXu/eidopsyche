@@ -34,10 +34,25 @@ var outboxCmd = &cobra.Command{
 		}
 		for _, m := range resp {
 			ts := time.Unix(int64(m["sent_at"].(float64)), 0)
-			fmt.Printf("%s  -> %.16s  %s\n", ts.Format("2006-01-02 15:04:05"), m["to"], m["content"])
+			fmt.Printf("%s  %s  -> %.16s  %s\n",
+				ts.Format("2006-01-02 15:04:05"), outboxStatus(m), m["to"], m["content"])
 		}
 		return nil
 	},
+}
+
+// outboxStatus returns a fixed-width column indicating delivery state.
+// "✓✓" = peer ack received (tier 2); "✓ " = at least one relay accepted
+// the publish (tier 1); "  " = neither (unexpected — send returns an
+// error before persisting if no relay accepts, but kept for safety).
+func outboxStatus(m map[string]any) string {
+	if v, ok := m["acked_at"].(float64); ok && v != 0 {
+		return "✓✓"
+	}
+	if accepted, ok := m["accepted_by"].([]any); ok && len(accepted) > 0 {
+		return "✓ "
+	}
+	return "  "
 }
 
 func init() {
