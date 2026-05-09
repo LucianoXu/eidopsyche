@@ -141,6 +141,19 @@ func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 		_ = forgectl.PurgeForFailedSummon(cleanCtx, d.DockerClient, s.Slug)
 	}
 
+	// Auto-login claude into the new mind-form's volume so the supervisor's
+	// birth-wake handler can actually invoke claude. Without this, the
+	// in-container claude exits "Not logged in · Please run /login", the
+	// birth handler returns an error every iteration, and the wizard
+	// times out waiting for journal/0000-response.md. Equivalent to
+	// `eidos forge login <slug> --from-host` running between create and
+	// start. Failure is fatal — we tear down the volume so the next
+	// summon starts cleanly.
+	if err := forge.InstallLoginFromHost(s.Slug, d.Image); err != nil {
+		purge()
+		return nil, fmt.Errorf("install claude credentials: %w", err)
+	}
+
 	// Calling-words.
 	st := r.Status(stringFor(s.Lang, "phase3_words_status"))
 	words, err := c.CallText(ctx, buildCallingWordsPrompt(book, s.Lang))

@@ -92,6 +92,17 @@ func newLoginCmd() *cobra.Command {
 	return cmd
 }
 
+// InstallLoginFromHost is the wizard-callable shim around the unexported
+// installFromHost. It copies the host's existing ~/.claude.json (and
+// ~/.claude/.credentials.json if present) into the new mind-form's
+// volume so the in-container claude is logged in before the supervisor
+// runs the birth-wake handler. Used by internal/firstcontact/phase3.
+//
+// Equivalent to running `eidos forge login <name> --from-host`.
+func InstallLoginFromHost(name, image string) error {
+	return installFromHost(name, image, false)
+}
+
 // installFromHost drives the host's claude (optionally running
 // setup-token first) and copies the resulting credentials into the
 // mind-form's volume.
