@@ -19,8 +19,6 @@ import (
 	"time"
 
 	gnostr "github.com/nbd-wtf/go-nostr"
-
-	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
 func freePort(t *testing.T) string {
@@ -35,32 +33,15 @@ func freePort(t *testing.T) string {
 }
 
 func TestPairedModeRejection(t *testing.T) {
-	dir := t.TempDir()
-	db, err := store.Open(filepath.Join(dir, "state.db"), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
 	ctx := context.Background()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
 	owner := gnostr.GeneratePrivateKey()
 	ownerPK, _ := gnostr.GetPublicKey(owner)
-	if err := db.SetMeta(ctx, "owner_pubkey", ownerPK); err != nil {
-		t.Fatal(err)
-	}
-	wl := NewWhitelistSource(db, 100*time.Millisecond)
-	if err := wl.RefreshNow(ctx); err != nil {
-		t.Fatal(err)
-	}
 
 	addr := freePort(t)
 	srv, err := New(Config{
-		Mode:      ModePaired,
-		Listen:    addr,
-		OwnerHex:  ownerPK,
-		Whitelist: wl,
+		Mode:     ModePaired,
+		Listen:   addr,
+		OwnerHex: ownerPK,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -461,25 +442,9 @@ func contains(s, sub string) bool { return strings.Contains(s, sub) }
 
 func TestPersistenceAcrossRestart(t *testing.T) {
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "state.db")
-	db, err := store.Open(dbPath, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
 	ctx := context.Background()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
 	owner := gnostr.GeneratePrivateKey()
 	ownerPK, _ := gnostr.GetPublicKey(owner)
-	if err := db.SetMeta(ctx, "owner_pubkey", ownerPK); err != nil {
-		t.Fatal(err)
-	}
-	wl := NewWhitelistSource(db, 100*time.Millisecond)
-	if err := wl.RefreshNow(ctx); err != nil {
-		t.Fatal(err)
-	}
 
 	eventsPath := filepath.Join(dir, "events")
 	addr := freePort(t)
@@ -489,7 +454,6 @@ func TestPersistenceAcrossRestart(t *testing.T) {
 		Mode:           ModePaired,
 		Listen:         addr,
 		OwnerHex:       ownerPK,
-		Whitelist:      wl,
 		EventStorePath: eventsPath,
 		Auth:           AuthConfig{Required: false},
 	})
@@ -528,7 +492,6 @@ func TestPersistenceAcrossRestart(t *testing.T) {
 		Mode:           ModePaired,
 		Listen:         addr,
 		OwnerHex:       ownerPK,
-		Whitelist:      wl,
 		EventStorePath: eventsPath,
 		Auth:           AuthConfig{Required: false},
 	})

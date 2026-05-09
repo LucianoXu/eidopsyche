@@ -50,15 +50,12 @@ to enable: eidos gate config set relay.enabled true && eidos gate config set rel
 		if err != nil {
 			return err
 		}
-		wl := relayd.NewWhitelistSource(db, time.Second)
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
-		go wl.Run(ctx)
 		srv, err := relayd.New(relayd.Config{
-			Mode:      relayd.Mode(mode),
-			Listen:    listen,
-			OwnerHex:  owner,
-			Whitelist: wl,
+			Mode:     relayd.Mode(mode),
+			Listen:   listen,
+			OwnerHex: owner,
 		})
 		if err != nil {
 			return err

@@ -21,7 +21,6 @@ type Config struct {
 	Mode           Mode
 	Listen         string
 	OwnerHex       string
-	Whitelist      *WhitelistSource
 	TLS            TLSConfig
 	Auth           AuthConfig
 	EventStorePath string // Empty = ephemeral (default); non-empty enables badger persistence.
@@ -61,9 +60,6 @@ func New(cfg Config) (*Server, error) {
 	case ModePaired:
 		if cfg.OwnerHex == "" {
 			return nil, fmt.Errorf("paired mode requires OwnerHex")
-		}
-		if cfg.Whitelist == nil {
-			return nil, fmt.Errorf("paired mode requires Whitelist")
 		}
 		r.RejectEvent = append(r.RejectEvent,
 			func(ctx context.Context, event *gnostr.Event) (bool, string) {
