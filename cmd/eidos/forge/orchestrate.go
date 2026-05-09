@@ -36,8 +36,19 @@ func orchestrate(ctx context.Context, c forgectl.Client, name string, o createOp
 	if image == "" {
 		image = DefaultImage
 	}
-	if err := c.ImagePull(ctx, image, os.Stderr); err != nil {
-		return fmt.Errorf("pull %s: %w", image, err)
+	// Skip the pull when the image is already present locally. This is the
+	// common case for dev / staging where `make image` produced a tag the
+	// registry doesn't yet host (the worktree branch isn't published, the
+	// CI hasn't pushed, etc.). When the image is missing we still attempt
+	// the pull and surface its error.
+	exists, err := c.ImageExists(ctx, image)
+	if err != nil {
+		return fmt.Errorf("inspect image %s: %w", image, err)
+	}
+	if !exists {
+		if err := c.ImagePull(ctx, image, os.Stderr); err != nil {
+			return fmt.Errorf("pull %s: %w", image, err)
+		}
 	}
 
 	if err := c.VolumeCreate(ctx, vol); err != nil {

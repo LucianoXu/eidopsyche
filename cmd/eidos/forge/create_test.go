@@ -40,6 +40,11 @@ func (f *fakeClient) ContainerCreate(_ context.Context, _ forgectl.CreateOpts) e
 func (f *fakeClient) ContainerStart(_ context.Context, _ string) error               { return nil }
 func (f *fakeClient) ContainerStop(_ context.Context, _ string, _ int) error         { return nil }
 func (f *fakeClient) ContainerRemove(_ context.Context, _ string) error              { return nil }
+func (f *fakeClient) ImageExists(_ context.Context, _ string) (bool, error) {
+	// Default: image absent → orchestrator falls through to ImagePull,
+	// preserving the existing test's pull-was-called assertions.
+	return false, nil
+}
 func (f *fakeClient) ImagePull(_ context.Context, ref string, _ io.Writer) error {
 	f.pulled = append(f.pulled, ref)
 	return nil
@@ -135,6 +140,34 @@ func TestCreateRefusesIfVolumeExists(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("want exists error, got %v", err)
 	}
+}
+
+// TestCreateSkipsPullWhenImagePresentLocally covers the path that fixed
+// the ghcr.io denied error: when ImageExists reports the image is already
+// in the local store, orchestrate must not call ImagePull. (Without this,
+// `forge create` against a locally-built dev image fails because Docker
+// tries to authenticate against a private registry that does not host
+// the tag.)
+func TestCreateSkipsPullWhenImagePresentLocally(t *testing.T) {
+	f := &fakeClientLocalImage{}
+	err := orchestrate(context.Background(), f, "alice", createOpts{
+		owner: "npub1ownertest", relay: "wss://r", label: "alice", noLogin: true, image: "img:dev",
+	})
+	if err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	if len(f.pulled) != 0 {
+		t.Errorf("pulled = %v; expected no pull when image exists locally", f.pulled)
+	}
+	if len(f.inits) != 1 {
+		t.Errorf("init container runs = %d, want 1", len(f.inits))
+	}
+}
+
+type fakeClientLocalImage struct{ fakeClient }
+
+func (f *fakeClientLocalImage) ImageExists(_ context.Context, _ string) (bool, error) {
+	return true, nil
 }
 
 func TestCreateOrchestratesAllSteps(t *testing.T) {

@@ -39,6 +39,12 @@ type Client interface {
 	// combined output and exit code.
 	ContainerExec(ctx context.Context, name string, cmd []string) (ExecResult, error)
 
+	// ImageExists reports whether ref is present in the local Docker image
+	// store. forge create uses this to skip the pull when the operator has
+	// already built the image locally (the common case for dev / staging
+	// where the registry tag may not exist yet).
+	ImageExists(ctx context.Context, ref string) (bool, error)
+
 	ImagePull(ctx context.Context, ref string, w io.Writer) error
 
 	// VolumeList returns the names of all volumes whose names start with
@@ -182,6 +188,16 @@ func (r *realClient) ContainerStop(ctx context.Context, name string, grace int) 
 
 func (r *realClient) ContainerRemove(ctx context.Context, name string) error {
 	return r.c.ContainerRemove(ctx, name, container.RemoveOptions{Force: true})
+}
+
+func (r *realClient) ImageExists(ctx context.Context, ref string) (bool, error) {
+	if _, _, err := r.c.ImageInspectWithRaw(ctx, ref); err != nil {
+		if client.IsErrNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func (r *realClient) ImagePull(ctx context.Context, ref string, w io.Writer) error {
