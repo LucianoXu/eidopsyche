@@ -40,7 +40,7 @@ and 'eidos gate init' requires --home <url>.
 Choose one:
   (A) Re-init from scratch (loses contacts, invites, inbox history):
         eidos gate purge --yes
-        eidos gate init --label <your-label> --home <url> [--with-local-relay]
+        eidos gate init --label <your-label> --home <url>
 
   (B) Migrate in place (keeps state):
         See docs/INSTALL.md#migrating-from-v04 for the SQL + config recipe.

@@ -20,7 +20,7 @@ import (
 
 // bringUpDaemonOnly creates a state dir + identity + daemon that points
 // at someone else's relay URL — the v0.5 daemon-only topology. No local
-// relay process is started; cfg.Relay.Enabled stays false.
+// relay process is started.
 func bringUpDaemonOnly(t *testing.T, name, homeRelayURL string) *instance {
 	t.Helper()
 	dir := t.TempDir()
@@ -57,7 +57,6 @@ func bringUpDaemonOnly(t *testing.T, name, homeRelayURL string) *instance {
 	}
 
 	cfg := config.Defaults()
-	cfg.Relay.Enabled = false
 	if err := config.Save(filepath.Join(dir, "config.toml"), cfg); err != nil {
 		t.Fatal(err)
 	}

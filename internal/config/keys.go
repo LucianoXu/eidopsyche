@@ -103,62 +103,6 @@ func init() {
 		},
 	})
 	register(Key{
-		Path:        "relay.enabled",
-		Description: "Run the embedded MindGate relay alongside the daemon.",
-		Get: func(c *Config) string {
-			if c.Relay.Enabled {
-				return "true"
-			}
-			return "false"
-		},
-		Set: func(c *Config, v string) error {
-			switch strings.ToLower(strings.TrimSpace(v)) {
-			case "true", "1", "yes", "on":
-				c.Relay.Enabled = true
-			case "false", "0", "no", "off":
-				c.Relay.Enabled = false
-			default:
-				return fmt.Errorf(`relay.enabled must be true or false, got %q`, v)
-			}
-			return nil
-		},
-	})
-	register(Key{
-		Path:        "relay.mode",
-		Description: `"paired" accepts only kind:1059 events addressed to the owner; "public" accepts any well-formed event.`,
-		Get:         func(c *Config) string { return c.Relay.Mode },
-		Set: func(c *Config, v string) error {
-			v = strings.TrimSpace(v)
-			if v != "paired" && v != "public" {
-				return fmt.Errorf(`relay.mode must be "paired" or "public", got %q`, v)
-			}
-			c.Relay.Mode = v
-			return nil
-		},
-	})
-	register(Key{
-		Path:        "relay.listen",
-		Description: "host:port the embedded relay binds to. Disable the relay via relay.enabled instead of clearing this.",
-		Get:         func(c *Config) string { return c.Relay.Listen },
-		Set: func(c *Config, v string) error {
-			v = strings.TrimSpace(v)
-			if v == "" {
-				return fmt.Errorf("relay.listen must be a non-empty host:port; to disable the local relay, set relay.enabled = false instead")
-			}
-			if _, _, err := net.SplitHostPort(v); err != nil {
-				return fmt.Errorf("relay.listen must be host:port, got %q: %w", v, err)
-			}
-			c.Relay.Listen = v
-			return nil
-		},
-	})
-	register(Key{
-		Path:        "relay.data_dir",
-		Description: "Subdirectory under the state directory where the relay writes its event store.",
-		Get:         func(c *Config) string { return c.Relay.DataDir },
-		Set:         func(c *Config, v string) error { c.Relay.DataDir = strings.TrimSpace(v); return nil },
-	})
-	register(Key{
 		Path:        "dashboard.enabled",
 		Description: "Run the embedded local web dashboard alongside the daemon.",
 		Get: func(c *Config) string {

@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
+
+	"github.com/LucianoXu/eidopsyche/internal/config"
 )
 
 var startCmd = &cobra.Command{
@@ -25,7 +28,7 @@ daemon unit. The daemon survives your shell exiting (user-mode units may need
 
 Use 'eidos relay service install' to manage the relay service separately.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, stateDir, err := loadGateConfig()
+		_, stateDir, err := loadGateConfig()
 		if err != nil {
 			return err
 		}
@@ -35,12 +38,18 @@ Use 'eidos relay service install' to manage the relay service separately.`,
 		}
 		ctx := context.Background()
 
-		// Preflight the relay port only when we're going to install / start
-		// the relay unit. Daemon-only deployments don't bind any port from
-		// our binary, so port-in-use isn't a meaningful failure mode here.
-		if cfg.RelayEnabled() && !relayAlreadyManaged(ctx, mgr) {
-			if err := preflightRelayPort(stateDir); err != nil {
-				return err
+		// Warn if a residual [relay] section is present in the gate config.
+		// Since v0.5 the relay runs as a separate process managed by
+		// `eidos relay service`; the gate no longer reads or acts on [relay].
+		cfgPath := filepath.Join(stateDir, "config.toml")
+		if _, meta, loadErr := config.LoadWithMeta(cfgPath); loadErr == nil {
+			for _, key := range meta.Undecoded() {
+				if len(key) > 0 && key[0] == "relay" {
+					fmt.Fprintln(os.Stderr,
+						"warning: [relay] section is no longer read by gate; configure the relay via `eidos relay init`. "+
+							"See CHANGELOG.md for the migration recipe.")
+					break
+				}
 			}
 		}
 
