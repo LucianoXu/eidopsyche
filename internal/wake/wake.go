@@ -63,6 +63,9 @@ func WritePending(dir string, sig Signal) error {
 		return fmt.Errorf("rename tmp: %w", err)
 	}
 	cleanup = false
+	if err := fsyncDir(dir); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -78,9 +81,22 @@ func ReadActive(dir string) (*Signal, error) {
 	return readSlot(ActivePath(dir))
 }
 
-// PromoteToActive moves pending.json -> active.json. Returns the promoted
-// signal, or nil if there was no pending. Errors only on IO failure.
+// PromoteToActive moves pending.json -> active.json under the wake-dir flock.
+// Returns the promoted signal, or nil if there was no pending. Errors only on
+// IO failure. Holding the flock for the entire read+rename critical section
+// prevents a concurrent Submit from replacing pending.json between the read
+// and the rename, which would leave the caller with a stale in-memory signal
+// while active.json on disk contains a newer write.
 func PromoteToActive(dir string) (*Signal, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("mkdir wake dir: %w", err)
+	}
+	lock, err := acquireLock(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseLock(lock)
+
 	src := PendingPath(dir)
 	dst := ActivePath(dir)
 	sig, err := readSlot(src)
@@ -92,6 +108,9 @@ func PromoteToActive(dir string) (*Signal, error) {
 	}
 	if err := os.Rename(src, dst); err != nil {
 		return nil, fmt.Errorf("promote rename: %w", err)
+	}
+	if err := fsyncDir(dir); err != nil {
+		return nil, err
 	}
 	return sig, nil
 }
@@ -181,4 +200,20 @@ func readSlot(path string) (*Signal, error) {
 		return nil, fmt.Errorf("decode %s: %w", path, err)
 	}
 	return &s, nil
+}
+
+// fsyncDir opens dir read-only and calls Sync() to flush directory-entry
+// updates (e.g. renames) to stable storage. Without this, a kernel crash
+// after os.Rename may leave the directory entry update un-durable on most
+// filesystems.
+func fsyncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("fsync wake dir: %w", err)
+	}
+	defer d.Close()
+	if err := d.Sync(); err != nil {
+		return fmt.Errorf("fsync wake dir: %w", err)
+	}
+	return nil
 }

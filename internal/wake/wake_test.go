@@ -2,6 +2,7 @@ package wake
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -154,5 +155,87 @@ func TestSubmitUnderConcurrentProducers(t *testing.T) {
 	}
 	if len(got.CoalescedFrom) != n-1 {
 		t.Errorf("coalesced_from len = %d, want %d", len(got.CoalescedFrom), n-1)
+	}
+}
+
+// TestPromoteToActiveRaceFree verifies that concurrent Submit and PromoteToActive
+// calls do not trigger the race detector. 200 iterations of mixed producers and
+// promoters must all complete without error.
+func TestPromoteToActiveRaceFree(t *testing.T) {
+	dir := t.TempDir()
+	const iterations = 200
+
+	// Seed an initial pending signal so PromoteToActive has something to work with.
+	seed := Signal{V: 1, ID: "seed-0", Reason: ReasonHeartBeat, TriggeredAt: 0}
+	if err := Submit(dir, seed); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	// Half goroutines submit, half promote.
+	wg.Add(iterations)
+	for i := 0; i < iterations; i++ {
+		if i%2 == 0 {
+			go func(i int) {
+				defer wg.Done()
+				sig := Signal{
+					V:           1,
+					ID:          fmt.Sprintf("submit-%d", i),
+					Reason:      ReasonMindGate,
+					TriggeredAt: int64(i),
+				}
+				if err := Submit(dir, sig); err != nil {
+					t.Errorf("submit %d: %v", i, err)
+				}
+			}(i)
+		} else {
+			go func(i int) {
+				defer wg.Done()
+				promoted, err := PromoteToActive(dir)
+				if err != nil {
+					t.Errorf("promote %d: %v", i, err)
+					return
+				}
+				if promoted == nil {
+					// No pending at this moment — that's fine.
+					return
+				}
+				// Verify the returned signal matches what's now in active.json.
+				// Under the flock, PromoteToActive is the sole writer of active.json,
+				// so the file we read immediately after must contain the same ID.
+				active, err := ReadActive(dir)
+				if err != nil {
+					t.Errorf("read active after promote %d: %v", i, err)
+					return
+				}
+				if active == nil {
+					t.Errorf("active.json missing right after promote %d", i)
+					return
+				}
+				if active.ID != promoted.ID {
+					t.Errorf("promote %d: returned ID %q but active.json has ID %q",
+						i, promoted.ID, active.ID)
+				}
+			}(i)
+		}
+	}
+	wg.Wait()
+}
+
+// TestWritePendingDirFsync exercises the dir-fsync path introduced to make
+// renames durable. The test simply verifies that WritePending succeeds and the
+// file is readable; any panic or error in fsyncDir is caught here.
+func TestWritePendingDirFsync(t *testing.T) {
+	dir := t.TempDir()
+	sig := Signal{V: 1, ID: "fsync-test", Reason: ReasonManual, TriggeredAt: 42}
+	if err := WritePending(dir, sig); err != nil {
+		t.Fatalf("WritePending: %v", err)
+	}
+	got, err := ReadPending(dir)
+	if err != nil {
+		t.Fatalf("ReadPending: %v", err)
+	}
+	if got == nil || got.ID != "fsync-test" {
+		t.Fatalf("unexpected read result: %+v", got)
 	}
 }

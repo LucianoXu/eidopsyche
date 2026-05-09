@@ -5,6 +5,19 @@
 //   - pending.json: next-up coalescing slot. Producers atomically replace it.
 //   - active.json:  currently-being-processed wake. Owned by the supervisor.
 //
+// # Locking discipline
+//
+// A per-directory flock file (<dir>/.lock) serialises all mutations:
+//
+//   - Producers must use [Submit], which acquires LOCK_EX for the full
+//     read-pending → merge → write-pending critical section.
+//   - The supervisor must use [PromoteToActive], which acquires LOCK_EX for
+//     the full read-pending → rename-to-active critical section.
+//
+// Raw [WritePending] and os.Rename are NOT safe under concurrent access; they
+// are provided for single-threaded test helpers and internal use inside an
+// already-held lock.
+//
 // See docs/superpowers/specs/2026-05-09-mindforge-v0-design.md §6 for the
 // rationale and coalescing rules.
 package wake
