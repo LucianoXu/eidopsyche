@@ -55,6 +55,13 @@ func (f *fakeClient) RunInit(_ context.Context, opts forgectl.RunInitOpts) (forg
 func (f *fakeClient) ContainerExec(_ context.Context, _ string, _ []string) (forgectl.ExecResult, error) {
 	return forgectl.ExecResult{}, nil
 }
+func (f *fakeClient) VolumeList(_ context.Context, _ string) ([]string, error) { return nil, nil }
+func (f *fakeClient) ContainerLogs(_ context.Context, _ string, _ bool, _ io.Writer) error {
+	return nil
+}
+func (f *fakeClient) CopyFromContainer(_ context.Context, _ string, _ string, _ io.Writer) error {
+	return nil
+}
 
 // fakeClientPullErr wraps fakeClient to override ImagePull with an error func.
 type fakeClientPullErr struct {

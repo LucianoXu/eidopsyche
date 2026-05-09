@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
@@ -39,6 +40,19 @@ type Client interface {
 	ContainerExec(ctx context.Context, name string, cmd []string) (ExecResult, error)
 
 	ImagePull(ctx context.Context, ref string, w io.Writer) error
+
+	// VolumeList returns the names of all volumes whose names start with
+	// prefix. An empty prefix returns all volumes.
+	VolumeList(ctx context.Context, prefix string) ([]string, error)
+
+	// ContainerLogs streams the combined stdout+stderr of a container to w.
+	// If follow is true, the stream continues until the container stops or
+	// the context is cancelled.
+	ContainerLogs(ctx context.Context, name string, follow bool, w io.Writer) error
+
+	// CopyFromContainer copies a path from inside the container to w as a tar
+	// stream.
+	CopyFromContainer(ctx context.Context, name, srcPath string, w io.Writer) error
 }
 
 // ExecResult is the outcome of a docker exec.
@@ -266,6 +280,43 @@ func (r *realClient) ContainerExec(ctx context.Context, name string, cmdv []stri
 		return ExecResult{}, err
 	}
 	return ExecResult{ExitCode: insp.ExitCode, Stdout: outBuf.Bytes(), Stderr: errBuf.Bytes()}, nil
+}
+
+func (r *realClient) VolumeList(ctx context.Context, prefix string) ([]string, error) {
+	resp, err := r.c.VolumeList(ctx, volume.ListOptions{Filters: filters.NewArgs()})
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, v := range resp.Volumes {
+		if prefix == "" || strings.HasPrefix(v.Name, prefix) {
+			out = append(out, v.Name)
+		}
+	}
+	return out, nil
+}
+
+func (r *realClient) ContainerLogs(ctx context.Context, name string, follow bool, w io.Writer) error {
+	rc, err := r.c.ContainerLogs(ctx, name, container.LogsOptions{
+		ShowStdout: true, ShowStderr: true, Follow: follow,
+	})
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	// Logs are stdcopy-multiplexed; demux to combined output.
+	_, err = stdcopy.StdCopy(w, w, rc)
+	return err
+}
+
+func (r *realClient) CopyFromContainer(ctx context.Context, name, srcPath string, w io.Writer) error {
+	rc, _, err := r.c.CopyFromContainer(ctx, name, srcPath)
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	_, err = io.Copy(w, rc)
+	return err
 }
 
 // writeBuffer is a tiny buffer that is also a slice accessor.
