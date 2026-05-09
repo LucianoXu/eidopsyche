@@ -54,7 +54,44 @@ func watchWakes(ctx context.Context) error {
 	if err := os.MkdirAll(wakeDir, 0o700); err != nil {
 		return err
 	}
+	if err := recoverStaleActive(wakeDir); err != nil {
+		log.Printf("recover stale active wake: %v", err)
+	}
 	return watchWakesIn(ctx, wakeDir, runAgentForWake)
+}
+
+// recoverStaleActive handles a leftover active.json from a previous
+// supervisor invocation — typically caused by a hard container shutdown
+// during a wake (docker stop --time=0, host reboot, OOM kill). Without
+// this, a stale active.json blocks every future wake forever because
+// drainPending sees "another wake is in progress" and skips.
+//
+// Recovery rule: if active.json exists at startup, treat it as an
+// aborted wake. Merge a "previous wake was interrupted" hint into
+// pending.json so the next agent spawn knows what happened, then
+// remove the active marker. The agent will pick up where things left
+// off via the usual inbox-since-last-wake-ts read.
+func recoverStaleActive(dir string) error {
+	stale, err := wake.ReadActive(dir)
+	if err != nil {
+		return fmt.Errorf("read stale active: %w", err)
+	}
+	if stale == nil {
+		return nil
+	}
+	log.Printf("supervisor: recovering aborted wake %q (was active across restart)", stale.ID)
+	hint := wake.Signal{
+		V:           wake.SchemaVersion,
+		ID:          fmt.Sprintf("%d-recover-%s", stale.TriggeredAt, stale.ID),
+		Reason:      stale.Reason,
+		TriggeredAt: stale.TriggeredAt,
+		Hint:        "previous wake was interrupted; this is the recovery follow-up",
+		Context:     stale.Context,
+	}
+	if err := wake.Submit(dir, hint); err != nil {
+		return fmt.Errorf("submit recovery wake: %w", err)
+	}
+	return wake.ClearActive(dir)
 }
 
 // watchWakesIn is the testable seam. It serializes wake processing: only

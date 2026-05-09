@@ -62,8 +62,30 @@ func runAgent(wakeFile, ontologyDir string) error {
 		SinceLastWakeSeconds: sig.Context.SinceLastWakeSeconds,
 	})
 
+	// --permission-mode auto: a mind-form is invoked non-interactively
+	// from the supervisor; there is no operator on the other end of
+	// stdin to approve every Bash / Edit / Write tool call. Without an
+	// auto-accept mode, the agent can think but cannot act (`eidos gate
+	// send` returns "requires approval", file writes to memory/episodic
+	// are blocked). The container is the sandbox boundary — per SPEC,
+	// the volume + isolated process + scoped network are exactly the
+	// "trust-the-walls" frame this mode is designed for.
+	//
+	// Mode choice notes:
+	//   - bypassPermissions / --dangerously-skip-permissions: refuses
+	//     to run as uid 0, which is exactly what supervisor →
+	//     agent-runner → claude looks like in our root-by-default
+	//     container today. (Switching to a non-root user is a future
+	//     image improvement; for now we work with what root permits.)
+	//   - dontAsk: misleading name — it actually auto-DENIES tool
+	//     calls, leaving the agent able to read but not act. Caused
+	//     a memorable "alice is locked-in" wake on first deploy.
+	//   - acceptEdits: auto-accepts file edits but still gates Bash.
+	//   - auto: auto-accepts everything (Bash, Edit, Write, Read, …)
+	//     and runs cleanly as root. This is what we want.
 	c := exec.Command("claude",
 		"--append-system-prompt", string(identity),
+		"--permission-mode", "auto",
 		"-p", msg,
 	)
 	c.Dir = ontologyDir
