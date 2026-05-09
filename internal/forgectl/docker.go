@@ -93,6 +93,10 @@ type RunInitOpts struct {
 	Cmd       []string
 	Stdin     io.Reader
 	AttachTTY bool
+	// User overrides the image's USER directive for this one-shot run.
+	// Format matches docker's --user flag: "uid", "uid:gid", "name", or
+	// "name:group". Empty leaves the image's USER in place.
+	User string
 }
 
 // RunInitResult is the result of RunInit.
@@ -219,6 +223,7 @@ func (r *realClient) RunInit(ctx context.Context, opts RunInitOpts) (RunInitResu
 		Image:        opts.Image,
 		Env:          opts.Env,
 		Cmd:          opts.Cmd,
+		User:         opts.User,
 		AttachStdin:  opts.Stdin != nil,
 		AttachStdout: true,
 		AttachStderr: true,
