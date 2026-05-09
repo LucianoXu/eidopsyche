@@ -24,6 +24,10 @@ func platformNew(cfg Config) (Manager, error) {
 
 type systemd struct {
 	cfg Config
+	// run is the function that actually invokes systemctl. Tests substitute
+	// it; production callers leave it nil and fall through to exec.Command
+	// via the systemctl method below. Mirrors the launchd manager's seam.
+	run func(ctx context.Context, args ...string) ([]byte, error)
 }
 
 func (s *systemd) unitDir() (string, error) {
@@ -46,10 +50,15 @@ func (s *systemd) unitDir() (string, error) {
 // systemctl runs `systemctl [--user] <args...>` and returns combined output.
 // It does NOT propagate non-zero exit as a hard error for query-shaped calls
 // (is-enabled, is-active) because systemd uses exit code to signal state.
+//
+// The actual invocation is routed through s.run, which tests can override.
 func (s *systemd) systemctl(ctx context.Context, args ...string) ([]byte, error) {
 	full := args
 	if s.cfg.Scope == ScopeUser {
 		full = append([]string{"--user"}, args...)
+	}
+	if s.run != nil {
+		return s.run(ctx, full...)
 	}
 	out, err := exec.CommandContext(ctx, "systemctl", full...).CombinedOutput()
 	return out, err
@@ -154,6 +163,23 @@ func (s *systemd) StopDaemon(ctx context.Context) error {
 
 func (s *systemd) StopRelay(ctx context.Context) error {
 	return s.stopOne(ctx, RelayUnitName)
+}
+
+// RestartDaemon issues `systemctl [--user] restart <daemon>`. systemd's
+// `restart` is atomic — the unit's main process is replaced under one
+// transaction — so we prefer it over a stop+start sequence which would
+// briefly leave the daemon down even when the unit was already running.
+//
+// The unit must be installed; restart on a non-installed unit returns
+// systemd's "Unit not loaded" error verbatim. Callers that want the
+// "no-op when nothing installed" semantics should gate on Status() first.
+func (s *systemd) RestartDaemon(ctx context.Context) error {
+	out, err := s.systemctl(ctx, "restart", DaemonUnitName)
+	if err != nil {
+		return fmt.Errorf("systemctl restart %s: %w (output: %s)",
+			DaemonUnitName, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func (s *systemd) Status(ctx context.Context) ([]Status, error) {

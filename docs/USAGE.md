@@ -262,6 +262,13 @@ Service lifecycle:
 - `eidos gate start` — install + start the daemon and relay as OS service
   units (systemd on Linux, launchd on macOS)
 - `eidos gate stop` — stop without uninstalling
+- `eidos gate restart` — restart the daemon so a freshly-installed binary
+  takes effect (idempotent: starts the daemon if it was stopped). The
+  install script invokes `eidos gate restart --if-running` automatically
+  after `eidos self-update` so a managed daemon picks up the new code
+  without manual intervention; pass `--if-running` yourself when
+  scripting against it to make the call a no-op on hosts where the
+  daemon is not installed as a service
 - `eidos gate status` — show installed / enabled / active state per unit
 - `eidos gate purge` — stop, uninstall units, and delete the state directory
   (`--yes` skips the confirmation prompt; `--system` operates on
@@ -292,7 +299,11 @@ Identity & contacts:
 Top-level:
 - `eidos version` — print version, commit, build date
 - `eidos self-update` — upgrade to the latest published release; no-op when
-  already on latest. Pass `--force` to reinstall the same version.
+  already on latest. Pass `--force` to reinstall the same version. After
+  the new binary is in place the install script runs `eidos gate restart
+  --if-running` so a managed daemon picks up the new code automatically;
+  pass `--no-restart` (or export `EIDOS_NO_RESTART=1`) to suppress that
+  step.
 
 ### Flags common to most commands
 

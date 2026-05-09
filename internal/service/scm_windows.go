@@ -285,6 +285,19 @@ func (s *scm) StopRelay(ctx context.Context) error {
 	return s.stopUnit(ctx, s.relayUnit(""))
 }
 
+// RestartDaemon stops the daemon (if running) and starts it again. SCM
+// has no native single-shot restart with a guaranteed transition, so we
+// sequence stop → start and rely on stopUnit / startUnit's per-state
+// polls to confirm the transitions. The same recovery actions that
+// systemd's Restart=on-failure expresses are wired up at install time.
+func (s *scm) RestartDaemon(ctx context.Context) error {
+	u := s.daemonUnit()
+	if err := s.stopUnit(ctx, u); err != nil {
+		return err
+	}
+	return s.startUnit(ctx, u)
+}
+
 func (s *scm) Status(ctx context.Context) ([]Status, error) {
 	// `eidos gate status` is a read-only operation, so we deliberately
 	// avoid `mgr.Connect()` (which requests SC_MANAGER_ALL_ACCESS and

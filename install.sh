@@ -191,6 +191,23 @@ main() {
             *) echo "  note: $BINDIR is not on \$PATH — add it (e.g. in ~/.bashrc) to call ${BIN_NAME} directly" ;;
         esac
     fi
+
+    # Auto-restart the gate daemon so a managed service picks up the new
+    # binary without operator intervention. `gate restart --if-running`
+    # is a no-op when nothing is installed (fresh-install case) and on
+    # platforms with no service backend, so it is safe to invoke
+    # unconditionally on linux/darwin.
+    #
+    # Skipped when:
+    #   - EIDOS_NO_RESTART=1     (operator opt-out, also set by `eidos self-update --no-restart`)
+    #   - DESTDIR is set         (staged/packaged install — no live daemon)
+    #   - OS is windows          (no service backend yet, see #15)
+    if [ "${EIDOS_NO_RESTART:-}" != "1" ] && [ -z "${DESTDIR:-}" ] && [ "$OS" != "windows" ]; then
+        # Best-effort: a non-zero exit must not fail the install. The
+        # binary is already in place; restart failures degrade UX but do
+        # not corrupt the install.
+        "$BINDIR/$(basename "$src")" gate restart --if-running || true
+    fi
 }
 
 main "$@"

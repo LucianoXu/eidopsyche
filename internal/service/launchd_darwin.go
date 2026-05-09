@@ -180,6 +180,19 @@ func (l *launchd) StopDaemon(ctx context.Context) error {
 	return nil
 }
 
+// RestartDaemon boots the daemon out of its current launchd domain (if
+// loaded) and bootstraps the on-disk plist. RunAtLoad=true in the plist
+// means bootstrap also (re)launches the process, so a single startOne
+// call gives us atomic-from-the-operator's-POV restart semantics that
+// match `systemctl restart` on Linux.
+//
+// The plist must already exist on disk; restart on an uninstalled unit
+// surfaces the bootstrap error verbatim. Callers wanting "no-op when
+// nothing installed" should gate on Status() first.
+func (l *launchd) RestartDaemon(ctx context.Context) error {
+	return l.startOne(ctx, DaemonUnitName)
+}
+
 // StopRelay sends SIGTERM to the relay. See stopOne for best-effort
 // semantics.
 func (l *launchd) StopRelay(ctx context.Context) error {

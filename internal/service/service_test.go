@@ -229,3 +229,89 @@ func TestSystemdRelayUnitName(t *testing.T) {
 		t.Errorf("RelayUnitName = %q, want %q", RelayUnitName, "eidos-relay")
 	}
 }
+
+// TestSystemdRestartDaemonInvokesSystemctlRestart verifies that
+// RestartDaemon hands `restart <daemon-unit>` to systemctl exactly once,
+// with --user prepended for ScopeUser. The fake `run` seam returns
+// success so we don't need a live systemctl on the test host.
+func TestSystemdRestartDaemonInvokesSystemctlRestart(t *testing.T) {
+	var got [][]string
+	mgr := &systemd{
+		cfg: Config{BinaryPath: "/eidos", Scope: ScopeUser},
+		run: func(ctx context.Context, args ...string) ([]byte, error) {
+			got = append(got, append([]string(nil), args...))
+			return nil, nil
+		},
+	}
+	if err := mgr.RestartDaemon(context.Background()); err != nil {
+		t.Fatalf("RestartDaemon: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 systemctl invocation, got %d (%v)", len(got), got)
+	}
+	want := []string{"--user", "restart", DaemonUnitName}
+	if !equalStrings(got[0], want) {
+		t.Errorf("systemctl args: got %v, want %v", got[0], want)
+	}
+}
+
+// TestSystemdRestartDaemonScopeSystemOmitsUserFlag confirms ScopeSystem
+// drops the --user prefix so a host-wide unit gets restarted via the
+// system bus, matching how StartDaemon / StopDaemon route arguments.
+func TestSystemdRestartDaemonScopeSystemOmitsUserFlag(t *testing.T) {
+	var got [][]string
+	mgr := &systemd{
+		cfg: Config{BinaryPath: "/eidos", Scope: ScopeSystem},
+		run: func(ctx context.Context, args ...string) ([]byte, error) {
+			got = append(got, append([]string(nil), args...))
+			return nil, nil
+		},
+	}
+	if err := mgr.RestartDaemon(context.Background()); err != nil {
+		t.Fatalf("RestartDaemon: %v", err)
+	}
+	want := []string{"restart", DaemonUnitName}
+	if len(got) != 1 || !equalStrings(got[0], want) {
+		t.Errorf("systemctl args: got %v, want %v", got, want)
+	}
+}
+
+// TestSystemdRestartDaemonSurfacesError confirms that a systemctl
+// failure (e.g. "Unit not loaded") propagates as a wrapped error
+// carrying both the underlying error and systemctl's stderr — callers
+// rely on this so the operator gets actionable context, not a bare
+// "exit status 1".
+func TestSystemdRestartDaemonSurfacesError(t *testing.T) {
+	mgr := &systemd{
+		cfg: Config{BinaryPath: "/eidos", Scope: ScopeUser},
+		run: func(ctx context.Context, args ...string) ([]byte, error) {
+			return []byte("Unit eidos-gate-daemon.service not loaded.\n"),
+				errSyntheticSystemctlExit
+		},
+	}
+	err := mgr.RestartDaemon(context.Background())
+	if err == nil {
+		t.Fatal("expected error from RestartDaemon")
+	}
+	if !strings.Contains(err.Error(), "Unit eidos-gate-daemon.service not loaded") {
+		t.Errorf("error missing systemctl output: %v", err)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+var errSyntheticSystemctlExit = stubError("synthetic systemctl exit 5")
+
+type stubError string
+
+func (e stubError) Error() string { return string(e) }

@@ -83,6 +83,13 @@ type Manager interface {
 	StopDaemon(ctx context.Context) error
 	// StopRelay stops the relay unit without uninstalling it.
 	StopRelay(ctx context.Context) error
+	// RestartDaemon restarts the daemon unit so a freshly-installed binary
+	// (e.g. just dropped in by `eidos self-update`) takes effect. It is
+	// idempotent: if the unit is currently stopped it is started; if running
+	// it is bounced. Callers that want a no-op when the unit is not even
+	// installed should consult Status() first — RestartDaemon itself returns
+	// the underlying manager error in that case.
+	RestartDaemon(ctx context.Context) error
 	// Status returns one entry per managed unit, in stable order.
 	// It always checks both daemon and relay so residuals stay discoverable.
 	Status(ctx context.Context) ([]Status, error)

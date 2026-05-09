@@ -66,3 +66,37 @@ func TestLaunchdRelayUnitName(t *testing.T) {
 		t.Errorf("RelayUnitName = %q, want %q", RelayUnitName, "eidos-relay")
 	}
 }
+
+// TestLaunchdRestartDaemonBootstrapsAfterBootout verifies the restart
+// path matches startOne's bootout-then-bootstrap sequence: launchctl is
+// invoked exactly twice, first to evict any prior instance and then to
+// bring the plist back up. RunAtLoad=true in the rendered plist makes
+// the bootstrap call also (re)launch the process, so this is the
+// minimum cross-platform "restart" semantics the gate cli relies on.
+func TestLaunchdRestartDaemonBootstrapsAfterBootout(t *testing.T) {
+	tmp := t.TempDir()
+	var calls [][]string
+	l := &launchd{
+		cfg: Config{
+			BinaryPath: "/usr/local/bin/eidos",
+			Scope:      ScopeUser,
+			UnitDir:    tmp,
+		},
+		run: func(ctx context.Context, args ...string) ([]byte, error) {
+			calls = append(calls, append([]string(nil), args...))
+			return nil, nil
+		},
+	}
+	if err := l.RestartDaemon(context.Background()); err != nil {
+		t.Fatalf("RestartDaemon: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 launchctl invocations, got %d (%v)", len(calls), calls)
+	}
+	if calls[0][0] != "bootout" {
+		t.Errorf("first call: got %v, want bootout first", calls[0])
+	}
+	if calls[1][0] != "bootstrap" {
+		t.Errorf("second call: got %v, want bootstrap second", calls[1])
+	}
+}
