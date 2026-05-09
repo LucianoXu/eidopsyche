@@ -46,13 +46,15 @@ func TestUnitContentEmbedsBinaryAndStateDir(t *testing.T) {
 	}
 	for _, want := range []string{
 		"ExecStart=/usr/local/bin/eidos relay start --dir /tmp/relay-dir",
-		"Environment=EIDOS_RELAY_HOME=/tmp/relay-dir",
 		"WorkingDirectory=/tmp/relay-dir",
 		"After=network-online.target",
 	} {
 		if !strings.Contains(relay, want) {
 			t.Errorf("relay unit missing %q\nfull:\n%s", want, relay)
 		}
+	}
+	if strings.Contains(relay, "Environment=EIDOS_RELAY_HOME=") {
+		t.Errorf("relay unit unexpectedly carries EIDOS_RELAY_HOME (no consumer reads it)\nfull:\n%s", relay)
 	}
 }
 
@@ -62,9 +64,6 @@ func TestUnitContentOmitsEmptyStateDir(t *testing.T) {
 		t.Errorf("daemon: empty StateDir should not produce an Environment= line\n%s", mgr.daemonUnit())
 	}
 	relay := mgr.relayUnit("")
-	if strings.Contains(relay, "Environment=EIDOS_RELAY_HOME=") {
-		t.Errorf("relay: empty relayDir should not produce an Environment= line\n%s", relay)
-	}
 	if strings.Contains(relay, "WorkingDirectory=") {
 		t.Errorf("relay: empty relayDir should not produce a WorkingDirectory= line\n%s", relay)
 	}

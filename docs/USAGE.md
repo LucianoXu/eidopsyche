@@ -64,11 +64,11 @@ For pure local debug (one host, two instances):
 ```
 # Instance A
 $ eidos gate init --label alice --home ws://127.0.0.1:22895
-$ eidos relay --config-dir /tmp/relay-a init --mode paired --listen 127.0.0.1:22895
+$ eidos relay init --dir /tmp/relay-a --mode paired --listen 127.0.0.1:22895
 
 # Instance B
 $ eidos gate --state-dir /tmp/mg-b init --label bob --home ws://127.0.0.1:22896
-$ eidos relay --config-dir /tmp/relay-b init --mode paired --listen 127.0.0.1:22896
+$ eidos relay init --dir /tmp/relay-b --mode paired --listen 127.0.0.1:22896
 ```
 
 ## Step 1 — Each starts services
@@ -93,9 +93,23 @@ If you set up a local relay, start it separately:
 ```
 $ eidos relay service install
 $ eidos relay service start
-$ eidos relay status
-✓ eidos-relay  active  pid=4124  mode=paired  listen=0.0.0.0:22895
+$ eidos relay service status
+  eidos-relay            active  pid=4124
+$ eidos relay status   # only readable when the relay process is stopped
+config dir: /home/alice/.config/eidos/relay
+mode:       paired
+listen:     0.0.0.0:22895
+owner:      0123…cdef
+tls:        cert="" key=""
+auth:       required=true service_url=""
+events:     0 stored
 ```
+
+`eidos relay status` opens the badger event store directly to count
+events, so it cannot run while the relay process holds the directory
+lock. Use `eidos relay service status` for liveness while the unit
+is active; stop the unit before running `eidos relay status` for the
+event-count probe.
 
 On Linux user-mode, services survive your shell exiting; for survival
 across a full logout on a headless host, run
@@ -352,15 +366,15 @@ config directory and port. Gate and relay are independent processes:
 $ eidos gate --state-dir /tmp/mg-a init --label alice --home ws://127.0.0.1:22895
 $ eidos gate --state-dir /tmp/mg-a daemon &
 # Instance A — relay
-$ eidos relay --config-dir /tmp/relay-a init --mode paired --listen 127.0.0.1:22895
-$ eidos relay --config-dir /tmp/relay-a start &
+$ eidos relay init --dir /tmp/relay-a --mode paired --listen 127.0.0.1:22895
+$ eidos relay start --dir /tmp/relay-a &
 
 # Instance B — gate
 $ eidos gate --state-dir /tmp/mg-b init --label bob --home ws://127.0.0.1:22896
 $ eidos gate --state-dir /tmp/mg-b daemon &
 # Instance B — relay
-$ eidos relay --config-dir /tmp/relay-b init --mode paired --listen 127.0.0.1:22896
-$ eidos relay --config-dir /tmp/relay-b start &
+$ eidos relay init --dir /tmp/relay-b --mode paired --listen 127.0.0.1:22896
+$ eidos relay start --dir /tmp/relay-b &
 ```
 
 `--home` (in gate) and `--listen` (in relay) are independent. For local debug

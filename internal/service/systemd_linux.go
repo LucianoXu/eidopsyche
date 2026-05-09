@@ -206,11 +206,9 @@ WantedBy=default.target
 // relayUnit generates the systemd unit content for the relay service.
 // relayDir is the relay's working directory and is also passed as --dir.
 func (s *systemd) relayUnit(relayDir string) string {
-	envLine := ""
 	wdLine := ""
 	dirFlag := ""
 	if relayDir != "" {
-		envLine = "Environment=EIDOS_RELAY_HOME=" + relayDir + "\n"
 		wdLine = "WorkingDirectory=" + relayDir + "\n"
 		dirFlag = " --dir " + relayDir
 	}
@@ -221,7 +219,7 @@ After=network-online.target
 [Service]
 Type=simple
 ` + wdLine + `ExecStart=` + s.cfg.BinaryPath + ` relay start` + dirFlag + `
-` + envLine + `Restart=on-failure
+Restart=on-failure
 RestartSec=2
 
 [Install]
