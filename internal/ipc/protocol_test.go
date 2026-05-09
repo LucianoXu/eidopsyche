@@ -3,10 +3,29 @@ package ipc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestError_ImplementsError(t *testing.T) {
+	var err error = &Error{Code: ErrInvalidParams, Message: "bad"}
+	if got, want := err.Error(), "INVALID_PARAMS: bad"; got != want {
+		t.Fatalf("Error()=%q, want %q", got, want)
+	}
+}
+
+func TestError_ErrorsAs(t *testing.T) {
+	err := error(&Error{Code: ErrContactNotFound, Message: "alice"})
+	var got *Error
+	if !errors.As(err, &got) {
+		t.Fatal("errors.As failed")
+	}
+	if got.Code != ErrContactNotFound {
+		t.Fatalf("Code=%q, want %q", got.Code, ErrContactNotFound)
+	}
+}
 
 type echoHandler struct{}
 

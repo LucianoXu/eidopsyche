@@ -24,6 +24,13 @@ type Error struct {
 	Message string `json:"message"`
 }
 
+// Error implements the standard error interface so *Error can be returned
+// from Go-level call sites (e.g. (*daemon.Daemon).Call) and recovered via
+// errors.As to preserve the typed code.
+func (e *Error) Error() string {
+	return e.Code + ": " + e.Message
+}
+
 const (
 	ErrInvalidRequest        = "INVALID_REQUEST"
 	ErrInvalidParams         = "INVALID_PARAMS"
