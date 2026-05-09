@@ -73,6 +73,31 @@ listen = "0.0.0.0:7777"
 	}
 }
 
+func TestWakeDirParse(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	body := `[wake]
+dir = "/eidos/run/wake"
+`
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Wake.Dir != "/eidos/run/wake" {
+		t.Errorf("Wake.Dir = %q, want /eidos/run/wake", loaded.Wake.Dir)
+	}
+}
+
+func TestWakeDirDefaultEmpty(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Wake.Dir != "" {
+		t.Errorf("Defaults().Wake.Dir = %q, want empty", cfg.Wake.Dir)
+	}
+}
+
 func TestSaveLoadRoundtrip(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "config.toml")

@@ -1,3 +1,13 @@
+// Package forge implements the `eidos forge` subcommand tree. It serves
+// two surfaces from the same binary:
+//
+//   - On the host: orchestrate mind-form Docker containers (create, start,
+//     stop, status, list, logs, exec, wake, login, ontology, purge).
+//   - In the container: reflect on self (whoami, inbox, send, memory,
+//     ontology-status, wake).
+//
+// Selection is by the EIDOS_IN_CONTAINER environment variable; see
+// incontainer.go.
 package forge
 
 import (
@@ -6,16 +16,20 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "forge",
-	Short: "MindForge — mind-form lifecycle and self-reflection (not yet implemented)",
-	Long: `MindForge is the mind-form lifecycle and self-reflection framework.
-It manages mind-form Docker instances on the host (create / start / stop / status
-/ list / logs / exec / wake) and exposes self-reflection commands inside the
-container (whoami / memory / skills / config / ontology).
+	Short: "MindForge — mind-form lifecycle and self-reflection",
+	Long: `eidos forge orchestrates mind-form containers from the host and exposes
+self-reflection commands inside the container. Run on the host to manage
+mind-forms; run inside a mind-form to inspect and act as the mind-form.`,
+}
 
-The forge subcommand is reserved here as a stub; implementation lands in a
-future release.`,
+func init() {
+	if InContainer() {
+		registerInContainer(rootCmd)
+	} else {
+		registerHost(rootCmd)
+	}
 }
 
 // Command returns the root cobra.Command for the `eidos forge` subcommand
-// tree. It is wired up by the parent eidos main package.
+// tree.
 func Command() *cobra.Command { return rootCmd }

@@ -68,6 +68,11 @@ type Daemon struct {
 	lifeSpawner LifecycleSpawner
 	activeLife  *lifecycleJob
 
+	// wakeDir is the directory where wake signals are written after a
+	// successful inbox persist. Empty on host-side deployments (no-op);
+	// set to cfg.Wake.Dir (e.g. /eidos/run/wake) inside the container.
+	wakeDir string
+
 	// testSendChatReply, if non-nil, replaces sendChatReply during tests
 	// to avoid actual NIP-17 publish over the network.
 	testSendChatReply func(ctx context.Context, toPubkey string, text string) error
@@ -108,6 +113,7 @@ func Start(stateDir string) (*Daemon, error) {
 		dedupe:      make(map[string]struct{}, 1024),
 		selfWrapIDs: make(map[string]struct{}, 1024),
 		relayHealth: newRelayHealthStore(),
+		wakeDir:     cfg.Wake.Dir,
 	}
 	// Wire Pool's per-URL state hook so transitions surface in d.relayHealth
 	// AND in the dashboard SSE hub. The hook runs from inside the Pool's
@@ -417,6 +423,11 @@ func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *
 			d.Log.Error("append inbox", "err", err)
 			return
 		}
+		if d.wakeDir != "" {
+			if err := submitWake(d.wakeDir, msg); err != nil {
+				d.Log.Warn("wake submit", "err", err)
+			}
+		}
 		d.broadcastInbox(msg)
 
 	case envelope.TypeCommand:
@@ -457,6 +468,11 @@ func (d *Daemon) persistSoftReject(ev *gnostr.Event, rumor *gnostr.Event, reason
 	if err := d.Box.AppendInbox(msg); err != nil {
 		d.Log.Error("append inbox (soft-reject)", "err", err)
 		return
+	}
+	if d.wakeDir != "" {
+		if err := submitWake(d.wakeDir, msg); err != nil {
+			d.Log.Warn("wake submit (soft-reject)", "err", err)
+		}
 	}
 	d.broadcastInbox(msg)
 }

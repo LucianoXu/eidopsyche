@@ -67,3 +67,13 @@ install: build
 uninstall:
 	@rm -f $(BINDIR)/eidos
 	@echo "removed:   $(BINDIR)/eidos"
+
+IMAGE_TAG ?= dev
+
+.PHONY: image
+image:
+	docker build -t ghcr.io/lucianoxu/eidopsyche-mindform:$(IMAGE_TAG) -f docker/mindform/Dockerfile .
+
+.PHONY: image-push
+image-push: image
+	docker push ghcr.io/lucianoxu/eidopsyche-mindform:$(IMAGE_TAG)

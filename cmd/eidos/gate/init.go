@@ -19,8 +19,9 @@ import (
 )
 
 var (
-	initLabel string
-	initHome  string
+	initLabel   string
+	initHome    string
+	initService bool
 )
 
 var initCmd = &cobra.Command{
@@ -32,6 +33,8 @@ var initCmd = &cobra.Command{
 func init() {
 	initCmd.Flags().StringVar(&initLabel, "label", "", "label for this identity (required; how others see your card by default — change later with `eidos gate set-label`)")
 	initCmd.Flags().StringVar(&initHome, "home", "", "home relay URL (required; ws:// or wss://) — the URL peers will dial to reach you")
+	initCmd.Flags().BoolVar(&initService, "service", false, "after initializing, install and start the gate daemon service in one step")
+	addSystemFlag(initCmd) // --system writes to the same useSystemServices var as start/stop/etc.
 	if err := initCmd.MarkFlagRequired("label"); err != nil {
 		panic(err) // Cobra returns nil for known flags; surfacing a panic here is appropriate for a setup bug.
 	}
@@ -113,14 +116,25 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("\nyour identity:")
 	fmt.Printf("  npub: %s\n", k.Npub)
 	fmt.Printf("  hex:  %s\n", k.PublicHex)
+
+	if initService {
+		mgr, err := buildServiceManager()
+		if err != nil {
+			return fmt.Errorf("install service: %w", err)
+		}
+		if err := mgr.StartDaemon(ctx); err != nil {
+			return fmt.Errorf("start service: %w", err)
+		}
+		fmt.Println("\n✓ gate daemon service installed and started")
+		fmt.Println("  next: eidos gate card           # show your identity card")
+		return nil
+	}
+
 	fmt.Println("\nnext steps:")
-	fmt.Println("  eidos gate service install     # run daemon as a system service")
-	fmt.Println("  eidos gate service start")
-	fmt.Println("  eidos gate card                # show your identity card")
+	fmt.Println("  eidos gate start                # install and start the daemon (re-run with `eidos gate init --service` to do both at init time)")
+	fmt.Println("  eidos gate card                 # show your identity card")
 	fmt.Println("\noptional — run a self-hosted relay on this host:")
-	fmt.Println("  eidos relay init --mode public --listen 0.0.0.0:7777")
-	fmt.Println("  # or: eidos relay init --mode paired --owner <npub> --listen 0.0.0.0:7777")
-	fmt.Println("  eidos relay service install")
-	fmt.Println("  eidos relay service start")
+	fmt.Println("  eidos relay init --mode public --listen 0.0.0.0:7777 --service")
+	fmt.Println("  # or: eidos relay init --mode paired --owner <npub> --listen 0.0.0.0:7777 --service")
 	return nil
 }
