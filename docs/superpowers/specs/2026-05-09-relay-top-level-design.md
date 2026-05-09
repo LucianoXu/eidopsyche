@@ -3,7 +3,7 @@
 **Date**: 2026-05-09
 **Status**: Approved (pending implementation)
 **Target**: dev (the next release after v0.5.0)
-**Scope**: Lift relay execution out of the `gate` subcommand tree into a top-level `eidos relay`. Give the relay its own config file and state directory. Add sqlite-backed event persistence. Remove the publisher whitelist. Split service-unit installation so relay-only hosts never invoke `eidos gate ...`.
+**Scope**: Lift relay execution out of the `gate` subcommand tree into a top-level `eidos relay`. Give the relay its own config file and state directory. Add badger-backed event persistence. Remove the publisher whitelist. Split service-unit installation so relay-only hosts never invoke `eidos gate ...`.
 
 This builds on `2026-05-07-mindgate-relay-decoupling-design.md` (which made the embedded relay opt-in alongside three home-relay topologies) and finishes the architectural decomposition that doc paved the way for. It also lands inside the `[relay.tls]` / `[relay.auth]` config blocks introduced in `2026-05-08-mindgate-auth-tls-relay-health-design.md` — those blocks move with the rest of the relay config to the new file, unchanged in semantics.
 
@@ -26,9 +26,9 @@ Five commitments shape the rest:
 
 1. **Relay is infrastructure, not an entity.** It does not have a network identity, does not need a keypair, and does not appear as a participant in the social graph. Optional NIP-11 admin `pubkey` is administrative metadata only. The CLI surface (`eidos relay …`) reflects this — no "gate" prefix, no "identity" plumbing.
 2. **Three deployment roles are first-class.** Gate-only (uses external relays); gate + co-located paired relay (personal-inbox operator); relay-only (community / shared-infrastructure operator). The 2026-05-07 doc already made this true at the topology level; this doc finishes it at the CLI / config / service level.
-3. **State is decoupled.** Relay reads only from its own config file at `~/.config/eidos/relay/config.toml` and its own event store at `~/.config/eidos/relay/events.db`. It does not open gate's `state.db`. Owner pubkey for paired mode is an explicit config field; there is no `db.GetMeta` lookup.
+3. **State is decoupled.** Relay reads only from its own config file at `~/.config/eidos/relay/config.toml` and its own event store at `~/.config/eidos/relay/events/`. It does not open gate's `state.db`. Owner pubkey for paired mode is an explicit config field; there is no `db.GetMeta` lookup.
 4. **The publisher whitelist is removed.** Per SPEC `:145`, the source of truth is the gate's client-side filter. Relay-side filtering is keep-the-mode-rules (paired = kind:1059 + addressed-to-owner) only. This eliminates the last runtime coupling between gate and relay.
-5. **Persistence is in this iteration.** Without it, the relay-only role makes no sense (operator runs a relay that forgets every event the moment a subscriber disconnects). We use `github.com/fiatjaf/eventstore/sqlite3` as a drop-in for `khatru` handlers — minimal new code, retention is unlimited (no TTL) for now.
+5. **Persistence is in this iteration.** Without it, the relay-only role makes no sense (operator runs a relay that forgets every event the moment a subscriber disconnects). We use `github.com/fiatjaf/eventstore/badger` as a drop-in for `khatru` handlers — minimal new code, retention is unlimited (no TTL) for now.
 
 Pre-1.0 rules (per `CLAUDE.md`) allow this to ship as a breaking minor release with a documented migration recipe in CHANGELOG. No backward-compat alias for `eidos gate relay`.
 
@@ -39,8 +39,8 @@ Three roles, each runnable on a distinct host or co-located:
 | Role | Processes on host | Config dirs present | Reachability requirement |
 |---|---|---|---|
 | **Gate-only** | `eidos-gate-daemon` | `~/.config/eidos/{config.toml, state.db}` | None (uses external relays) |
-| **Gate + paired relay** | `eidos-gate-daemon` + `eidos-relay` | both above + `~/.config/eidos/relay/{config.toml, events.db}` | Relay process must be reachable by senders (clearnet, LAN, Tor, …) |
-| **Relay-only** | `eidos-relay` | `~/.config/eidos/relay/{config.toml, events.db}` only | Same as above |
+| **Gate + paired relay** | `eidos-gate-daemon` + `eidos-relay` | both above + `~/.config/eidos/relay/{config.toml, events/}` | Relay process must be reachable by senders (clearnet, LAN, Tor, …) |
+| **Relay-only** | `eidos-relay` | `~/.config/eidos/relay/{config.toml, events/}` only | Same as above |
 
 A relay-only host never invokes `eidos gate …` and never produces a `state.db`. The two processes communicate, when co-located, only by URL (the gate publishes to / subscribes from the relay's `ws://` or `wss://` endpoint exactly as it would for any external relay).
 
@@ -61,9 +61,9 @@ eidos relay service {install|start|stop|status|uninstall} [--system | --user]
 
 | Command | Behavior |
 |---|---|
-| `init` | Creates `~/.config/eidos/relay/`, writes `config.toml`, opens `events.db` (creates schema). `--mode` is required. `--owner` is required iff `--mode paired`; rejected for `--mode public`. Refuses if the dir already contains a `config.toml` (operator can `--force`). |
-| `start` | Runs the relay process in the foreground. Loads `config.toml`, opens `events.db`, wires `eventstore/sqlite3` into `khatru`, calls `Server.ListenAndServe`. Replaces today's `eidos gate relay`. |
-| `status` | Prints listen addr, mode, owner pubkey (paired only), event count from `events.db`, uptime if running under a service manager. |
+| `init` | Creates `~/.config/eidos/relay/`, writes `config.toml`, opens `events/` (creates badger DB directory). `--mode` is required. `--owner` is required iff `--mode paired`; rejected for `--mode public`. Refuses if the dir already contains a `config.toml` (operator can `--force`). |
+| `start` | Runs the relay process in the foreground. Loads `config.toml`, opens `events/`, wires `eventstore/badger` into `khatru`, calls `Server.ListenAndServe`. Replaces today's `eidos gate relay`. |
+| `status` | Prints listen addr, mode, owner pubkey (paired only), event count from `events/`, uptime if running under a service manager. |
 | `config get/set` | Read / mutate `relay/config.toml`. Validation mirrors gate's existing `eidos gate config` (typed keys: bool, host:port, npub). |
 | `service ...` | Manages the new `eidos-relay` unit. `install` writes the unit file pointing at `eidos relay start`; `--system` and `--user` flags match `eidos gate service`'s scopes. |
 
@@ -89,7 +89,7 @@ eidos relay service {install|start|stop|status|uninstall} [--system | --user]
 ├── state.db               # gate state (relay_whitelist view dropped; owner_pubkey meta retained for gate's own use)
 └── relay/
     ├── config.toml        # all [relay] / [relay.tls] / [relay.auth] sections
-    └── events.db          # sqlite event store via fiatjaf/eventstore/sqlite3
+    └── events/            # badger DB directory (badger-backed event store)
 ```
 
 A relay-only host has only the `relay/` subtree under `~/.config/eidos/`.
@@ -124,12 +124,12 @@ service_url = ""                   # optional; overrides khatru's auto-derived U
 | Path | Purpose |
 |---|---|
 | `cmd/eidos/relay/root.go` | `Command()` returns the `cobra.Command` for `eidos relay`; registered in `cmd/eidos/main.go` alongside forge / gate / supervisor. |
-| `cmd/eidos/relay/init.go` | `eidos relay init`. Validates flags; writes config.toml; creates events.db (open + close to ensure schema). |
+| `cmd/eidos/relay/init.go` | `eidos relay init`. Validates flags; writes config.toml; creates events/ (open + close to ensure badger directory is initialized). |
 | `cmd/eidos/relay/start.go` | `eidos relay start`. Loads config, opens eventstore, calls `relayd.New`, `ListenAndServe`. Signal handling identical to today's `eidos gate relay`. |
 | `cmd/eidos/relay/status.go` | `eidos relay status`. Prints config + event count + service-manager state. |
 | `cmd/eidos/relay/config.go` | `eidos relay config get/set`. Mirrors `cmd/eidos/gate/config.go` shape for the new key set. |
 | `cmd/eidos/relay/service.go` | `eidos relay service install/start/stop/status/uninstall`. Calls into `internal/service` with the new `RelayUnitName`. |
-| `internal/relayd/store.go` | Wires `fiatjaf/eventstore/sqlite3` into `khatru`. New helper `OpenEventStore(path string) (*sqlite3.SQLite3Backend, error)`. |
+| `internal/relayd/store.go` | Wires `fiatjaf/eventstore/badger` into `khatru`. New helper `OpenEventStore(dir string) (*badger.BadgerBackend, error)`. |
 | `internal/relaycfg/` (new package) | Relay config struct, `Load(dir string)`, `Save`, `Defaults()`. Kept distinct from `internal/config` so a relay-only build path does not import gate config types. |
 
 ### 6.2 Removed
@@ -153,11 +153,11 @@ service_url = ""                   # optional; overrides khatru's auto-derived U
 
 ## 7. Persistence
 
-- **Backend**: `github.com/fiatjaf/eventstore/sqlite3`. Pin the version in `go.mod` at implementation time to whatever is current and stable.
-- **Path**: `~/.config/eidos/relay/events.db`. Created at `eidos relay init`; opened on `eidos relay start`.
+- **Backend**: `github.com/fiatjaf/eventstore/badger` (uses dgraph-io/badger v4 — pure Go, no CGO). Pin in go.mod at implementation time. Pure Go is non-negotiable because the release pipeline (`.goreleaser.yml`) builds with `CGO_ENABLED=0` to support cross-compilation; CGO-dependent backends like `eventstore/sqlite3` would silently fail at runtime in the released binary.
+- **Path**: `~/.config/eidos/relay/events/` (a directory containing badger SST files; badger creates and manages this on startup). Created at `eidos relay init`; opened on `eidos relay start`.
 - **Wiring** (in `internal/relayd/relayd.go`):
   ```go
-  store := &sqlite3.SQLite3Backend{DatabaseURL: cfg.EventStorePath}
+  store := &badger.BadgerBackend{Path: cfg.EventStorePath}
   if err := store.Init(); err != nil { return nil, err }
   r.StoreEvent    = append(r.StoreEvent,    store.SaveEvent)
   r.QueryEvents   = append(r.QueryEvents,   store.QueryEvents)
@@ -165,9 +165,9 @@ service_url = ""                   # optional; overrides khatru's auto-derived U
   r.DeleteEvent   = append(r.DeleteEvent,   store.DeleteEvent)
   r.ReplaceEvent  = append(r.ReplaceEvent,  store.ReplaceEvent)
   ```
-- **Retention**: unlimited. Operator purges manually if needed (`rm events.db` while relay is stopped, or a future `eidos relay purge --events` command). Per-kind TTL / age-based eviction is deferred.
+- **Retention**: unlimited. Operator purges manually if needed (`rm -rf events/` while relay is stopped, or a future `eidos relay purge --events` command). Per-kind TTL / age-based eviction is deferred.
 - **Schema**: owned by the eventstore library; we don't run migrations against it.
-- **Concurrency**: single writer (the relay process). Bind one open `*sqlite3.SQLite3Backend` per `Server`.
+- **Concurrency**: single writer (the relay process). Bind one open `*badger.BadgerBackend` per `Server`.
 - **No data migration**: there is no existing persisted relay data to bring forward.
 
 ## 8. Migration
@@ -196,13 +196,13 @@ In the same PR:
 - `:137-141` — replace the "self-hosted local relay (推荐)" framing with neutral enumeration of the three deployment roles. Note that all relay deployments require the host to be reachable by senders.
 - After `:137`, add a paragraph clarifying that **a relay does not have a network entity identity**. Identity belongs to gates / mindforms only. Optional NIP-11 admin `pubkey` is administrative metadata, not network participation.
 - `:145` — note the relay-side publisher whitelist has been removed. Client-side whitelist in the gate is the sole social-graph filter.
-- New short subsection on relay persistence: events stored in sqlite at `~/.config/eidos/relay/events.db`; retention is operator-controlled (manual purge for now); per-kind / TTL eviction is a future iteration.
+- New short subsection on relay persistence: events stored via badger at `~/.config/eidos/relay/events/`; retention is operator-controlled (manual purge for now); per-kind / TTL eviction is a future iteration.
 
 ## 10. Testing
 
-- `internal/relayd/relayd_test.go` — drop whitelist-required tests. Add a persistence test: open `Server` with a temp `events.db`, publish an event, close, reopen, query `kind:1059 #p:owner`, expect to find it.
+- `internal/relayd/relayd_test.go` — drop whitelist-required tests. Add a persistence test: open `Server` with a temp `events/` directory, publish an event, close, reopen, query `kind:1059 #p:owner`, expect to find it.
 - `cmd/eidos/relay/init_test.go` — config write; `--mode paired` requires `--owner`; `--mode public` rejects `--owner`; rejects existing config without `--force`.
-- `cmd/eidos/relay/start_test.go` — loads config, fails clean on missing `events.db`, fails clean on bind error.
+- `cmd/eidos/relay/start_test.go` — loads config, fails clean on missing `events/` directory, fails clean on bind error.
 - `internal/service/{systemd_linux,launchd_darwin,scm_windows}_test.go` — update `RelayUnitName` constant; add tests that gate's `Install` no longer touches relay paths and that the new relay `Install` writes a unit pointing at `eidos relay start`.
 - Integration smoke (manual / scripted): two-host topology — host A runs `eidos gate init && eidos gate service install && eidos gate service start`; host B runs `eidos relay init --mode public --listen 0.0.0.0:7777 && eidos relay service install && eidos relay service start`; A's gate is configured with B's URL via `eidos gate relay-add`; another gate publishes to B; A retrieves the event after restart (verifies persistence).
 
