@@ -2,8 +2,6 @@ package daemon
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"os"
 	"os/exec"
 )
@@ -25,26 +23,17 @@ import (
 // On Darwin: launchd doesn't group children with the parent by
 // default, so a plain exec.Cmd is fine.
 //
-// On any other GOOS we fall through to the plain command — Windows
-// is not on the supported-host list for the daemon today.
+// On Windows: the SCM service is independent of the spawning process
+// group, and `eidos gate stop` goes through SCM rather than killing the
+// daemon's own process tree, so no extra isolation is required.
+//
+// shortLifecycleHex (used to suffix transient systemd-run unit names)
+// lives next to its only caller in lifecycle_spawn_linux.go so it
+// doesn't show up as unused on non-linux builds.
 func lifecycleSpawn(ctx context.Context, args []string) (*exec.Cmd, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
 	return platformLifecycleSpawn(ctx, self, args)
-}
-
-// shortLifecycleHex returns 8 hex chars used as a transient
-// systemd-run unit suffix. Avoiding `rand.Read` failures here means
-// our transient unit name might collide with another, but
-// `--collect` cleans the unit on exit so the worst case is a
-// systemd warning — preferred over the spawner failing outright.
-func shortLifecycleHex() string {
-	var b [4]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		// Fallback so the spawn doesn't fail on a randomness error.
-		return "00000000"
-	}
-	return hex.EncodeToString(b[:])
 }

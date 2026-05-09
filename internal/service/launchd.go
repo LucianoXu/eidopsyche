@@ -144,20 +144,13 @@ var plistEscaper = strings.NewReplacer(
 
 func plistEscape(s string) string { return plistEscaper.Replace(s) }
 
-// writeUnitIfChanged writes content to path only when it differs from the
-// existing file. Avoids gratuitous mtime updates and unit reloads (systemd
-// daemon-reload, launchd bootout/bootstrap).
-func writeUnitIfChanged(path, content string) error {
-	existing, err := os.ReadFile(path)
-	if err == nil && string(existing) == content {
-		return nil
-	}
-	return os.WriteFile(path, []byte(content), 0o644)
-}
-
 // Sanity assertion: shared service constants don't violate launchd Label
 // constraints (no whitespace, no wildcards). The init runs on every platform
 // at import time so any future rename of the constants gets caught early.
+//
+// writeUnitIfChanged lives in unit_io_unix.go because it's only called by
+// the linux/darwin Manager backends; the Windows SCM backend stores its
+// service config inside SCM rather than as a unit file on disk.
 func init() {
 	for _, name := range []string{DaemonUnitName, RelayUnitName} {
 		if strings.ContainsAny(name, " \t/?*") {

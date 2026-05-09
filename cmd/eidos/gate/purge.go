@@ -20,9 +20,10 @@ var purgeCmd = &cobra.Command{
 	Short: "Stop services, remove units, and delete the gate state directory",
 	Long: `Wipes everything this host knows about the gate identity:
   1) stops the daemon and relay services if running
-  2) disables and removes the systemd unit files
-  3) reloads systemd
-  4) deletes the gate state directory (key, state.db, config.toml, relay/)
+  2) deregisters them from the host service manager
+     (systemd unit files on Linux, launchd plists on macOS, SCM
+     service entries on Windows)
+  3) deletes the gate state directory (key, state.db, config.toml, relay/)
 
 Useful for tearing down test deployments and starting from a clean slate.
 
@@ -40,11 +41,7 @@ By default purge prompts for confirmation. Pass --yes to skip the prompt
 		fmt.Println("This will permanently remove:")
 		fmt.Printf("  - state directory: %s\n", stateDir)
 		if mgr != nil {
-			scope := "user"
-			if useSystemServices {
-				scope = "system"
-			}
-			fmt.Printf("  - %s systemd units: %s.service, %s.service\n", scope, service.DaemonUnitName, service.RelayUnitName)
+			fmt.Printf("  - service entries: %s, %s (host service manager)\n", service.DaemonUnitName, service.RelayUnitName)
 		} else {
 			fmt.Println("  - (system services not supported on this platform; skipping unit teardown)")
 		}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/daemon"
+	"github.com/LucianoXu/eidopsyche/internal/service"
 )
 
 var daemonCmd = &cobra.Command{
@@ -28,7 +29,13 @@ var daemonCmd = &cobra.Command{
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
 		fmt.Fprintf(os.Stderr, "eidos-gate-daemon starting state_dir=%s\n", dir)
-		return d.Run(ctx)
+		// On Windows, when launched by SCM, RunSupervised dispatches via
+		// `golang.org/x/sys/windows/svc` and translates SERVICE_CONTROL_STOP
+		// into a context cancellation. Elsewhere it is a pass-through that
+		// just runs the closure with the signal-driven context above.
+		return service.RunSupervised(ctx, service.DaemonUnitName, func(ctx context.Context) error {
+			return d.Run(ctx)
+		})
 	},
 }
 

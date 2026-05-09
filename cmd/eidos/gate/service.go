@@ -21,9 +21,14 @@ import (
 var useSystemServices bool
 
 // addSystemFlag attaches the --system flag to a service-management command.
+//
+// On Linux this picks /etc/systemd/system over ~/.config/systemd/user. On
+// macOS it picks /Library/LaunchDaemons over ~/Library/LaunchAgents. On
+// Windows the SCM database is host-wide regardless, so the flag exists for
+// API parity but does not change behavior.
 func addSystemFlag(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&useSystemServices, "system", false,
-		"manage system-wide units (/etc/systemd/system, requires root) instead of user units")
+		"manage host-wide units (Linux: /etc/systemd/system, root; macOS: /Library/LaunchDaemons, root; Windows: no-op, SCM is host-wide)")
 }
 
 // buildServiceManager wires up a service.Manager from the running binary's
@@ -57,9 +62,12 @@ func buildServiceManager(withRelay bool) (service.Manager, error) {
 	if err != nil {
 		if errors.Is(err, service.ErrUnsupported) {
 			return nil, fmt.Errorf(`%w
-Run the daemon and relay manually instead:
+Run the daemon and relay manually instead. Linux/macOS:
   eidos gate daemon &
-  eidos gate relay &`, err)
+  eidos gate relay &
+PowerShell:
+  Start-Job -Name eidos-gate -ScriptBlock { eidos.exe gate daemon }
+  Start-Job -Name eidos-relay -ScriptBlock { eidos.exe gate relay }`, err)
 		}
 		return nil, err
 	}
