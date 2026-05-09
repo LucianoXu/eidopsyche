@@ -14,7 +14,6 @@ func stub(use, short string) *cobra.Command {
 	}
 }
 
-func newCreateCmd() *cobra.Command   { return stub("create <name>", "create a mind-form") }
 func newStartCmd() *cobra.Command    { return stub("start <name>", "start a mind-form") }
 func newStopCmd() *cobra.Command     { return stub("stop <name>", "stop a mind-form") }
 func newStatusCmd() *cobra.Command   { return stub("status <name>", "show mind-form status") }
