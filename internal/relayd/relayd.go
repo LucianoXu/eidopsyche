@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 
+	"github.com/fiatjaf/eventstore/badger"
 	"github.com/fiatjaf/khatru"
 	gnostr "github.com/nbd-wtf/go-nostr"
 )
@@ -17,12 +19,12 @@ const (
 )
 
 type Config struct {
-	Mode      Mode
-	Listen    string
-	OwnerHex  string
-	Whitelist *WhitelistSource
-	TLS       TLSConfig
-	Auth      AuthConfig
+	Mode           Mode
+	Listen         string
+	OwnerHex       string
+	TLS            TLSConfig
+	Auth           AuthConfig
+	EventStorePath string // Empty = ephemeral (default); non-empty enables badger persistence.
 }
 
 // AuthConfig governs NIP-42 AUTH enforcement. Required defaults to false
@@ -43,24 +45,23 @@ type TLSConfig struct {
 }
 
 type Server struct {
-	cfg  Config
-	r    *khatru.Relay
-	http *http.Server
+	cfg            Config
+	r              *khatru.Relay
+	http           *http.Server
+	eventStore     *badger.BadgerBackend
+	closeStoreOnce sync.Once
 }
 
 func New(cfg Config) (*Server, error) {
 	r := khatru.NewRelay()
 	// Info is a *nip11.RelayInformationDocument, initialized by NewRelay.
-	r.Info.Name = "eidos-gate-relay"
+	r.Info.Name = "eidos-relay"
 	r.Info.Software = "eidopsyche"
 
 	switch cfg.Mode {
 	case ModePaired:
 		if cfg.OwnerHex == "" {
 			return nil, fmt.Errorf("paired mode requires OwnerHex")
-		}
-		if cfg.Whitelist == nil {
-			return nil, fmt.Errorf("paired mode requires Whitelist")
 		}
 		r.RejectEvent = append(r.RejectEvent,
 			func(ctx context.Context, event *gnostr.Event) (bool, string) {
@@ -90,6 +91,20 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	srv := &Server{cfg: cfg, r: r}
+
+	if cfg.EventStorePath != "" {
+		evStore, err := OpenEventStore(cfg.EventStorePath)
+		if err != nil {
+			return nil, err
+		}
+		r.StoreEvent = append(r.StoreEvent, evStore.SaveEvent)
+		r.QueryEvents = append(r.QueryEvents, evStore.QueryEvents)
+		r.CountEvents = append(r.CountEvents, evStore.CountEvents)
+		r.DeleteEvent = append(r.DeleteEvent, evStore.DeleteEvent)
+		r.ReplaceEvent = append(r.ReplaceEvent, evStore.ReplaceEvent)
+		srv.eventStore = evStore
+	}
+
 	srv.http = &http.Server{Addr: cfg.Listen, Handler: r}
 	return srv, nil
 }
@@ -150,11 +165,33 @@ func (s *Server) ListenAndServe() error {
 	}
 	return s.http.ListenAndServe()
 }
-func (s *Server) Shutdown(ctx context.Context) error { return s.http.Shutdown(ctx) }
+
+// Shutdown gracefully drains HTTP connections and then force-closes any
+// remaining hijacked WebSocket connections before releasing the badger
+// handle. http.Server.Shutdown does not terminate hijacked connections, so
+// without the follow-up Close() an in-flight QueryEvents / SaveEvent call
+// could race against eventStore.Close(). A sync.Once guards the store close
+// so calling both Shutdown and Close is safe.
+func (s *Server) Shutdown(ctx context.Context) error {
+	err := s.http.Shutdown(ctx)
+	// Force-close any connections (including hijacked WebSockets) that
+	// Shutdown left open, before we release the badger handle.
+	_ = s.http.Close()
+	if s.eventStore != nil {
+		s.closeStoreOnce.Do(s.eventStore.Close)
+	}
+	return err
+}
 
 // Close forces an immediate stop: the listener closes and all active
 // connections (including upgraded WebSockets) are terminated. Use when
 // graceful drain isn't appropriate — chiefly tests that simulate a relay
 // disappearing under a daemon's feet.
-func (s *Server) Close() error { return s.http.Close() }
+func (s *Server) Close() error {
+	err := s.http.Close()
+	if s.eventStore != nil {
+		s.closeStoreOnce.Do(s.eventStore.Close)
+	}
+	return err
+}
 func (s *Server) Addr() string { return s.http.Addr }

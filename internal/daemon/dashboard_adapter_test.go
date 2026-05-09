@@ -35,9 +35,9 @@ func TestDashboardAdapter_ConfigSet_Concurrent(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < iters; i++ {
-			modes := []string{"paired", "public"}
-			if err := a.ConfigSet(context.Background(), "relay.mode", modes[i%2]); err != nil {
-				t.Errorf("ConfigSet relay.mode: %v", err)
+			sockets := []string{"sock", "gate.sock"}
+			if err := a.ConfigSet(context.Background(), "daemon.socket", sockets[i%2]); err != nil {
+				t.Errorf("ConfigSet daemon.socket: %v", err)
 				return
 			}
 		}
@@ -61,8 +61,8 @@ func TestDashboardAdapter_ConfigSet_Concurrent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if final.Relay.Mode != "paired" && final.Relay.Mode != "public" {
-		t.Errorf("relay.mode lost: got %q", final.Relay.Mode)
+	if final.Daemon.Socket != "sock" && final.Daemon.Socket != "gate.sock" {
+		t.Errorf("daemon.socket lost: got %q", final.Daemon.Socket)
 	}
 	if final.LogLevel != "info" && final.LogLevel != "debug" && final.LogLevel != "warn" {
 		t.Errorf("log_level lost: got %q", final.LogLevel)

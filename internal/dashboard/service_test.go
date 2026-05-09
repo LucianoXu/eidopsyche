@@ -22,9 +22,6 @@ func newPhase5Deps() fakeDeps {
 			StateDir:     "/var/lib/eidos/gate",
 			DashboardURL: "http://127.0.0.1:22893",
 			IPCSocket:    "/var/lib/eidos/gate/sock",
-			RelayEnabled: true,
-			RelayMode:    "paired",
-			RelayListen:  "0.0.0.0:22895",
 		},
 	}
 }
@@ -49,7 +46,6 @@ func TestSettingsService_FragmentForHTMX(t *testing.T) {
 		// status fields:
 		`v0.4.0`,
 		`abcdef1`,
-		`paired`,
 		`/var/lib/eidos/gate/sock`,
 		// 4 action cards:
 		`hx-post="/settings/service/reconnect"`,

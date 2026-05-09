@@ -14,11 +14,11 @@ import (
 // hint to decide when to consider the service hung — too short and a
 // daemon doing a clean inbox flush gets killed; too long and the
 // service-stop UX feels sluggish. Five seconds matches the relay's
-// graceful shutdown timeout (cmd/eidos/gate/relay.go) and gives the
+// graceful shutdown timeout (cmd/eidos/relay/start.go) and gives the
 // daemon plenty of headroom to drain its goroutines.
 const scmStopWaitHint = 5 * time.Second
 
-// RunSupervised lets a long-running command (gate daemon, gate relay)
+// RunSupervised lets a long-running command (gate daemon, relay)
 // participate in the host's service supervisor when one is in charge of
 // this process.
 //

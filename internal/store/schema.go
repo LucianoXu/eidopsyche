@@ -35,14 +35,9 @@ CREATE TABLE IF NOT EXISTS relay_state (
   relay_url     TEXT PRIMARY KEY,
   last_seen_at  INTEGER NOT NULL DEFAULT 0
 );
-
-CREATE VIEW IF NOT EXISTS relay_whitelist AS
-  SELECT pubkey FROM contacts WHERE tier != 'blocked'
-  UNION
-  SELECT value AS pubkey FROM meta WHERE key = 'owner_pubkey';
 `
 
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 const schemaV2 = `
 CREATE TABLE IF NOT EXISTS invites (
@@ -64,4 +59,8 @@ CREATE TABLE IF NOT EXISTS invite_redemptions (
   FOREIGN KEY (invite_id) REFERENCES invites(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_invites_status ON invites(status, expires_at);
+`
+
+const schemaV3 = `
+DROP VIEW IF EXISTS relay_whitelist;
 `

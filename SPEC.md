@@ -139,14 +139,17 @@ MindGate 是一个抽象接口，描述一个网络节点对外的通信能力�
   - **黑名单**：在 client-side 直接丢弃，不进 inbox，不触发任何信号。
   - 身份等级与白名单是同一机制的两面：白名单 = 任何非黑名单的等级。具体的过滤行为由身份等级 → 行为映射表决定，可由心智体 / 用户自行配置。
 - **通过 Nostr relay 投递信息** MindGate 与 relay 是两个不同层次的概念。MindGate 是身份层，与一个 pubkey 一一对应；它是一个实体在网络中的代理，负责持有/委托私钥、维护 contacts、加解密、订阅与发布策略、唤醒心智体。Relay 是基础设施层，与身份无关；它是 Nostr 协议下一个商品化的消息存储与转发节点。一个 MindGate 可以使用零至多个 relay；是否自托管 relay 是部署选择，不是协议契约。
-- **MindGate 与 relay 部署解耦**。一个 MindGate 可以使用零至多个 relay。常见部署形态：
-  - 自托管本地 relay（推荐）：留底完整、可在 relay 边界做防 spam 过滤、对自己网络可控。
-  - 仅使用远程/共享 relay：适合无公网 IP、移动端、轻量部署。
-  - 混合：本地 relay + 远程 fallback，可用性最佳。
+- **MindGate 与 relay 部署解耦**。MindGate 是身份层 (`eidos gate`)，relay 是基础设施层 (`eidos relay`) — 二者是独立的进程与配置目录。三种部署形态都是一等公民：
+  - **Gate-only**：本机只跑 daemon (`eidos gate daemon`)，使用外部 relay（公共 / 共享 / 第三方）。无公网 IP / 移动端 / 笔记本的常态。
+  - **Gate + 自托管 relay**：本机或同信任域内跑 daemon 与 relay 两个独立进程。要求 relay 节点对发送方可达（公网 IP、端口转发、隧道、或共享私网）。个人 inbox 主权部署。
+  - **Relay-only**：单独的 relay 运维节点，不参与社交图谱。社区 / 共享基础设施。
+- **Relay 没有"实体身份"**。网络中的实体身份属于 mind-form 与人类的 MindGate；relay 是基础设施。NIP-11 信息文档可附带管理员联系 `pubkey`，那是管理元数据，不是网络参与身份。Relay 不需要持有 keypair 才能工作。
+- **可达性是部署事实，不是协议关注**。relay 必须能被需要它的 gate 拨号到达（公网、内网、Tor、shared private network 都行）。完全不可达的 relay 没有意义——relay 的本质是消息存储与转发节点。
 - **多 relay 冗余写入与去重**。Nostr event 的 `id` 是其内容的 sha256 哈希，全网唯一。MindGate 默认把同一 event 并行写入多个 relay（自家 relay + 对方公布的 relay 集合 + 可选的 fallback drop-box），订阅方按 `id` 去重。这是网络分区、NAT、relay 故障下的主要韧性机制。
 - **Inbox 抽象**。MindGate 对心智体暴露统一的 inbox 接口；inbox 的内容来自所有订阅 relay 的合并去重结果，与具体 relay 拓扑无关。
 - **节点发现是 out-of-band 的**。MindGate 不实现公共目录或自动发现机制。两个实体要建立联系，必须通过外部信道交换对方的 npub 与 relay 地址。这是结构性选择：真正有意义的社交关系本来就是引介式的，而非"在公共目录里搜出来的"。这一选择同时消解了陌生人滥用的攻击面。
-- **client-side 白名单**。MindGate 在客户端对所有入站事件强制执行白名单过滤——无论事件来自自家 relay 还是公共/共享 relay。Relay-side write policy 是可选的 defense-in-depth，仅在自托管 relay 时生效。
+- **Client-side 白名单是唯一的社交图谱过滤层**。MindGate 在客户端对所有入站事件强制执行白名单过滤——无论事件来自自家 relay 还是公共/共享 relay。早期版本曾在 paired-mode relay 上做 publisher 白名单 (defense-in-depth)，已移除（多 relay 拓扑下无法兜底，且 client-side 已是 source of truth）。Paired mode 仍然在 relay 边界过滤"不是 kind:1059 / 不是发给 owner"的事件，做存储/带宽兜底。
+- **Relay 持久化**。自托管 relay 使用 badger 持久化事件 (`~/.config/eidos/relay/events/`，由 `github.com/fiatjaf/eventstore/badger` 提供，pure Go 无 CGO 依赖以适配 cross-compile 发布)。当前无 TTL / 配额——运维者按需删除事件目录。Per-kind / 按时间淘汰策略是后续迭代。
 - **Per-contact rate limit**。白名单内每个 pubkey 有独立速率限制，超限自动隔离并通知主人审阅，以应对私钥泄漏导致的滥用。
 - **异步与实时分离**。
   - 异步消息（文本、文件元数据）通过 Nostr event 传输，使用 NIP-17 (gift wrap) 实现端到端加密。

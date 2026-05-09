@@ -38,38 +38,6 @@ func TestResolveStateDirPriority(t *testing.T) {
 	}
 }
 
-func TestDefaultsRelayDisabled(t *testing.T) {
-	cfg := Defaults()
-	if cfg.Relay.Enabled {
-		t.Errorf("Defaults().Relay.Enabled = true, want false")
-	}
-	if cfg.Relay.Listen != "0.0.0.0:22895" {
-		t.Errorf("Defaults().Relay.Listen = %q, want 0.0.0.0:22895", cfg.Relay.Listen)
-	}
-	if cfg.Relay.Mode != "paired" {
-		t.Errorf("Defaults().Relay.Mode = %q, want paired", cfg.Relay.Mode)
-	}
-}
-
-func TestRelayEnabledHelper(t *testing.T) {
-	cases := []struct {
-		name    string
-		enabled bool
-		want    bool
-	}{
-		{"explicit true", true, true},
-		{"explicit false", false, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			c := Config{Relay: RelayConfig{Enabled: tc.enabled}}
-			if c.RelayEnabled() != tc.want {
-				t.Errorf("RelayEnabled() = %v, want %v", c.RelayEnabled(), tc.want)
-			}
-		})
-	}
-}
-
 func TestDefaults_Dashboard(t *testing.T) {
 	d := Defaults()
 	if !d.Dashboard.Enabled {
@@ -80,87 +48,28 @@ func TestDefaults_Dashboard(t *testing.T) {
 	}
 }
 
-func TestDefaults_RelayAuthAndTLS(t *testing.T) {
-	d := Defaults()
-	if !d.Relay.Auth.Required {
-		t.Error("Defaults().Relay.Auth.Required must be true (NIP-17 §Recommendations default)")
-	}
-	if d.Relay.Auth.ServiceURL != "" {
-		t.Errorf("Defaults().Relay.Auth.ServiceURL = %q, want empty", d.Relay.Auth.ServiceURL)
-	}
-	if d.Relay.TLS.CertFile != "" || d.Relay.TLS.KeyFile != "" {
-		t.Errorf("Defaults().Relay.TLS must be empty: %+v", d.Relay.TLS)
-	}
-}
-
-func TestLoad_LegacyConfigKeepsAuthRequiredDefault(t *testing.T) {
-	// A v0.5 config has no [relay.auth] block; loading it must apply the
-	// spec-default Required=true rather than Go's zero-value false.
+// TestLoadIgnoresStrayRelaySection verifies that a gate config.toml containing
+// a legacy [relay] section (from a pre-v0.5 install) is silently ignored rather
+// than causing a decode error. BurntSushi/toml does not error on unknown keys by
+// default; this test pins that behaviour so a regression is caught immediately.
+func TestLoadIgnoresStrayRelaySection(t *testing.T) {
 	dir := t.TempDir()
-	p := filepath.Join(dir, "config.toml")
+	path := filepath.Join(dir, "config.toml")
 	body := `
 log_level = "info"
-[relay]
-  enabled = false
-  mode = "paired"
-  listen = "0.0.0.0:22895"
-  data_dir = "relay"
-`
-	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := Load(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !loaded.Relay.Auth.Required {
-		t.Error("legacy config: Relay.Auth.Required should default to true")
-	}
-}
 
-func TestLoad_ExplicitAuthRequiredFalse(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "config.toml")
-	body := `
-[relay]
-  enabled = true
-[relay.auth]
-  required = false
-`
-	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := Load(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.Relay.Auth.Required {
-		t.Error("explicit required=false should override default")
-	}
-}
+[daemon]
+socket = "sock"
 
-func TestSaveLoadRoundtrip_RelayTLS(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "config.toml")
-	cfg := Defaults()
-	cfg.Relay.TLS.CertFile = "/etc/letsencrypt/live/example.com/fullchain.pem"
-	cfg.Relay.TLS.KeyFile = "/etc/letsencrypt/live/example.com/privkey.pem"
-	cfg.Relay.Auth.ServiceURL = "wss://example.com"
-	if err := Save(p, cfg); err != nil {
+[relay]
+mode = "paired"
+listen = "0.0.0.0:7777"
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := Load(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.Relay.TLS.CertFile != cfg.Relay.TLS.CertFile {
-		t.Errorf("CertFile roundtrip: got %q", loaded.Relay.TLS.CertFile)
-	}
-	if loaded.Relay.TLS.KeyFile != cfg.Relay.TLS.KeyFile {
-		t.Errorf("KeyFile roundtrip: got %q", loaded.Relay.TLS.KeyFile)
-	}
-	if loaded.Relay.Auth.ServiceURL != "wss://example.com" {
-		t.Errorf("Auth.ServiceURL roundtrip: got %q", loaded.Relay.Auth.ServiceURL)
+	if _, err := Load(path); err != nil {
+		t.Errorf("legacy [relay] section should be ignored, not error: %v", err)
 	}
 }
 
@@ -194,7 +103,6 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	p := filepath.Join(dir, "config.toml")
 	cfg := Defaults()
 	cfg.LogLevel = "debug"
-	cfg.Relay.Enabled = true
 	if err := Save(p, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -204,9 +112,6 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	}
 	if loaded.LogLevel != "debug" {
 		t.Fatalf("got %q", loaded.LogLevel)
-	}
-	if !loaded.Relay.Enabled {
-		t.Fatalf("Relay.Enabled = false after roundtrip")
 	}
 	if _, err := os.Stat(p); err != nil {
 		t.Fatal(err)

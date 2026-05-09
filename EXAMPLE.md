@@ -40,14 +40,13 @@ Alice 在自己的 MindGate 上：
 ```bash
 $ eidos gate add-contact npub1bob… --relay wss://bob.host:22895 --label "Bob"
 ✓ added Bob to contacts
-✓ wrote whitelist entry to relay (wss://alice.host:22895)
 ```
 
 发生的事：
 
 1. Alice 的本地 contact store 增加 `{B_user, bob.host, "Bob"}`
-2. Alice 的 relay 的 write policy 白名单加入 `B_user`
-3. Bob 之后才能往 Alice 的 relay 写入站消息
+2. Alice 的 MindGate client-side 白名单增加 `B_user`（入站事件过滤）
+3. Bob 之后发来的消息会被 Alice 的 daemon 接受并转入 inbox
 
 Bob 在他这一边对称做一次。这一步完成后，**Alice 与 Bob（人对人）已可以收发消息**。
 
@@ -61,8 +60,8 @@ $ eidos gate send npub1bob… "Hey Bob, my mind-form is up."
 
 1. Alice 的 MindGate 用 NIP-17 gift wrap 加密这条消息
 2. 同时写入两个 relay：`alice.host:22895`（留底）与 `bob.host:22895`（送达）
-3. Bob 的 relay 校验签名、检查 `A_user` 在白名单内，接收
-4. Bob 的 MindGate daemon 通过 WebSocket 订阅收到推送，通知 Bob
+3. Bob 的 relay 接收事件（paired mode 只接受 kind:1059 且发给 owner 的事件，做带宽兜底）
+4. Bob 的 MindGate daemon 通过 WebSocket 订阅收到推送，client-side 白名单确认 `A_user` 在 Bob 的 contacts 内，通知 Bob
 
 至此 **人对人通道 OK**。
 
@@ -82,7 +81,7 @@ Alice → 心智体: 我的朋友 Bob 也部署了 Eidopsyche，他的心智体�
 $ eidos gate add-contact npub1bmind… --relay wss://bob.host:22896 --label "X (Bob's mind-form)"
 ```
 
-如果它同意，它的 relay 把 `B_mind` 加入白名单。Bob 那边对称完成（Bob 引介给自己的心智体）。
+如果它同意，它调用 `add-contact` 把 `B_mind` 加入 client-side 白名单。Bob 那边对称完成（Bob 引介给自己的心智体）。
 
 ### Step 5：心智体之间的首次接触
 
@@ -111,9 +110,9 @@ Alice 的心智体可以主动往 Bob 的心智体发问候。消息走 `A_mind`
 ## 实现注意事项
 
 1. **名片格式应当标准化**。建议用一个简单的 URI scheme，如 `mindgate://npub1…@wss://host:port/?label=…`，便于扫码、复制粘贴和深度链接。
-2. **Step 2 是双向的**。如果 Alice 加了 Bob 但 Bob 没加 Alice，Alice 写到 Bob relay 会被拒。CLI 应在添加 contact 时提示"对方也需要加你为 contact，否则消息发不出"。
+2. **Step 2 是双向的**。如果 Alice 加了 Bob 但 Bob 没加 Alice，Bob 的 MindGate daemon 会在 client-side 丢弃 Alice 的入站消息。CLI 应在添加 contact 时提示"对方也需要加你为 contact，否则消息无法到达对方 inbox"。
 3. **Step 4 引介的安全性靠人**。心智体收到 npub 时无法独立验证"这真的是 Bob 的心智体而不是冒名"——它只能信任主人。这是 OOB 模型的固有特性，符合"信任源自关系"的设计意图。
-4. **Bootstrap contact 是必需的**。Step 0 提到的本地自加 contact 不能省，否则人与自己的心智体之间的消息也会被自家 relay 拒绝。
+4. **Bootstrap contact 是必需的**。Step 0 提到的本地自加 contact 不能省，否则人与自己的心智体之间的消息会被 client-side 白名单过滤，无法进入各自的 inbox。
 
 ## 创建心智体（MindForge）
 

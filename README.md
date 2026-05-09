@@ -91,6 +91,12 @@ install script (single source of truth for upgrade logic). Pass `--force`
 to reinstall the current version (useful for repairing a corrupted binary
 or pinning via `EIDOS_VERSION=...`).
 
+After the new binary is in place the install script runs
+`eidos gate restart --if-running` so a managed daemon picks up the new
+code automatically. Pass `--no-restart` (or export `EIDOS_NO_RESTART=1`)
+to suppress the auto-restart; you can run `eidos gate restart` yourself
+later to apply the upgrade.
+
 On Windows, `eidos self-update` is not yet wired to `install.ps1`; rerun
 the install one-liner above to upgrade.
 
@@ -108,23 +114,26 @@ host:
 # Daemon-only against a public Nostr relay (zero infrastructure):
 eidos gate init --label alice --home wss://relay.damus.io
 
-# Self-host the embedded relay on this same machine:
-eidos gate init --label alice --home wss://alice.example.com \
-  --with-local-relay --listen 0.0.0.0:22895
+# Self-host the embedded relay on this same machine (two separate steps):
+eidos gate init --label alice --home wss://alice.example.com
+eidos relay init --mode paired --listen 0.0.0.0:22895
 
 # Single-host two-instance debug (loopback only):
-eidos gate init --label alice --home ws://127.0.0.1:22895 \
-  --with-local-relay --listen 127.0.0.1:22895
+eidos gate init --label alice --home ws://127.0.0.1:22895
+eidos relay init --mode paired --listen 127.0.0.1:22895
 ```
 
 Then:
 
 ```sh
-# 1. Start the gate as OS services (systemd on Linux, launchd on macOS,
-#    Windows Service Control Manager on Windows). Only the daemon unit
-#    is installed unless --with-local-relay was set at init.
+# 1. Start the gate (and optionally the relay) as OS services.
 eidos gate start
 eidos gate status
+
+# If you set up a local relay:
+eidos relay service install
+eidos relay service start
+eidos relay status
 
 # 2. Print and share your card out-of-band
 eidos gate card

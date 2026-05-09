@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -25,7 +27,7 @@ func TestOpenAndMigrate(t *testing.T) {
 	}
 }
 
-func TestMigrateV2Fresh(t *testing.T) {
+func TestMigrateFresh(t *testing.T) {
 	dir := t.TempDir()
 	db, err := Open(filepath.Join(dir, "state.db"), false)
 	if err != nil {
@@ -43,7 +45,7 @@ func TestMigrateV2Fresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert into invites: %v", err)
 	}
-	// Verify schema_version is 2.
+	// Verify schema_version matches the current SchemaVersion.
 	v, err := db.SchemaVersion(ctx)
 	if err != nil {
 		t.Fatalf("SchemaVersion: %v", err)
@@ -90,5 +92,31 @@ func TestMetaRoundtrip(t *testing.T) {
 	}
 	if v != "alice" {
 		t.Fatalf("got %q want %q", v, "alice")
+	}
+}
+
+func TestSchemaV3DropsRelayWhitelistView(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open(filepath.Join(dir, "state.db"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	var name string
+	err = db.QueryRowContext(ctx,
+		`SELECT name FROM sqlite_master WHERE type='view' AND name='relay_whitelist'`,
+	).Scan(&name)
+	switch {
+	case err == nil:
+		t.Errorf("relay_whitelist view still exists after Migrate; got %q", name)
+	case errors.Is(err, sql.ErrNoRows):
+		// expected — the view must not exist
+	default:
+		t.Fatalf("unexpected error querying sqlite_master: %v", err)
 	}
 }
