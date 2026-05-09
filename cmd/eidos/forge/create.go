@@ -77,8 +77,7 @@ func validateRelay(s string) error {
 	return nil
 }
 
-// runCreate is the orchestration entry point; Task 3.4 fills it in.
+// runCreate is the orchestration entry point.
 func runCreate(cmd *cobra.Command, name string, o createOpts) error {
-	cmd.PrintErrf("create %s: orchestration not yet implemented\n", name)
-	return nil
+	return runCreate2(cmd, name, o)
 }
