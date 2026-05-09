@@ -64,22 +64,11 @@ func bringUpAuthRequired(t *testing.T, name string, mode relayd.Mode) *instance 
 		t.Fatal(err)
 	}
 
-	dbRO, err := store.Open(filepath.Join(dir, "state.db"), true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wl := relayd.NewWhitelistSource(dbRO, 100*time.Millisecond)
-	rctx, rcancel := context.WithCancel(context.Background())
-	go wl.Run(rctx)
-	if err := wl.RefreshNow(rctx); err != nil {
-		t.Fatal(err)
-	}
 	rsrv, err := relayd.New(relayd.Config{
-		Mode:      mode,
-		Listen:    addr,
-		OwnerHex:  k.PublicHex,
-		Whitelist: wl,
-		Auth:      relayd.AuthConfig{Required: true},
+		Mode:     mode,
+		Listen:   addr,
+		OwnerHex: k.PublicHex,
+		Auth:     relayd.AuthConfig{Required: true},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -102,9 +91,7 @@ func bringUpAuthRequired(t *testing.T, name string, mode relayd.Mode) *instance 
 		relay:    rsrv,
 		cancel: func() {
 			dcancel()
-			rcancel()
 			rsrv.Shutdown(context.Background())
-			dbRO.Close()
 		},
 	}
 	t.Cleanup(in.cancel)
