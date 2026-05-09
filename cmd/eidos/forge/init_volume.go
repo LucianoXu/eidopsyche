@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/store"
@@ -77,6 +78,21 @@ func runInitVolume(stdout, stderr io.Writer, stdin io.Reader) error {
 		"--home", relay,
 	); err != nil {
 		return fmt.Errorf("gate init: %w", err)
+	}
+
+	// Patch the freshly-written gate config so the in-container daemon's
+	// wake hook fires when an inbound NIP-17 message lands. The default
+	// Config.Wake.Dir is empty (host gate has no wake-output behavior);
+	// in the mind-form container we want the daemon to write
+	// pending.json into /eidos/run/wake/, which the supervisor watches.
+	cfgPath := filepath.Join(gateDir, "config.toml")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return fmt.Errorf("load gate config: %w", err)
+	}
+	cfg.Wake.Dir = "/eidos/run/wake"
+	if err := config.Save(cfgPath, cfg); err != nil {
+		return fmt.Errorf("save gate config (wake dir): %w", err)
 	}
 
 	// Add the master contact directly to state.db. We bypass `eidos gate

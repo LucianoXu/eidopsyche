@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,7 +89,13 @@ func watchWakesIn(ctx context.Context, dir string, spawn SpawnAgent) error {
 				continue
 			}
 			if _, err := drainPending(ctx, dir, spawn); err != nil {
-				return err
+				// Spawn errors (claude exit non-zero, OAuth missing,
+				// transient runtime issues) are runtime conditions, not
+				// supervisor-fatal. Log and continue watching — letting
+				// the supervisor crash here would loop with docker's
+				// restart-policy and produce a flapping container.
+				// Only inotify / fsnotify errors below are fatal.
+				log.Printf("wake spawn: %v", err)
 			}
 		case err, ok := <-w.Errors:
 			if !ok {

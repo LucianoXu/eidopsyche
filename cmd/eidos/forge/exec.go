@@ -6,6 +6,7 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 func newExecCmd() *cobra.Command {
@@ -23,7 +24,17 @@ func newExecCmd() *cobra.Command {
 			if len(rest) == 0 {
 				rest = []string{"sh"}
 			}
-			argv := append([]string{"exec", "-it", forgectl.ContainerName(name)}, rest...)
+			// Only attach a TTY when stdin and stdout are themselves TTYs.
+			// In a non-interactive context (scripts, awk pipelines, CI),
+			// `docker exec -it` fails with "cannot attach stdin to a
+			// TTY-enabled container because stdin is not a terminal".
+			// Always pass -i (so stdin is wired through) but pass -t only
+			// when both ends look interactive.
+			flags := "-i"
+			if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
+				flags = "-it"
+			}
+			argv := append([]string{"exec", flags, forgectl.ContainerName(name)}, rest...)
 			c := exec.Command("docker", argv...) //nolint:gosec // argv built from validated inputs
 			c.Stdin = os.Stdin
 			c.Stdout = os.Stdout
