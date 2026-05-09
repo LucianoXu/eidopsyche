@@ -25,12 +25,13 @@ type dashboardAdapter struct{ d *Daemon }
 // the daemon directly.
 func NewDashboardAdapter(d *Daemon) dashboard.DashboardDeps { return dashboardAdapter{d: d} }
 
+// adapter-shim: OwnPubkey() has no error return on dashboard.DashboardDeps;
+// a whoami Call failure (e.g. transient meta read error) still needs to
+// produce a usable string. The Key.PublicHex field is the in-memory
+// canonical pubkey loaded at daemon start, so reading it is a safe
+// last-resort fallback.
 func (a dashboardAdapter) OwnPubkey() string {
 	var w whoamiResult
-	// OwnPubkey has no error return on the dashboard interface; a Call
-	// failure would only happen if the daemon's own meta is unreadable,
-	// in which case PublicHex is still the field of record. Fall back
-	// to the live key so the surface stays usable during recovery.
 	if err := a.d.Call(context.Background(), "whoami", nil, &w); err == nil && w.Pubkey != "" {
 		return w.Pubkey
 	}
