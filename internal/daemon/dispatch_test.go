@@ -2,7 +2,10 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -309,6 +312,70 @@ func TestDispatch_InboundAck_FirstAckWins(t *testing.T) {
 	rows, _ := d.Box.ListOutbox(nil, "", 0)
 	if rows[0].AckEventID != "ackwrap-original" {
 		t.Errorf("first-ack-wins violated: got %s", rows[0].AckEventID)
+	}
+}
+
+// TestDispatch_InboundAck_ConcurrentDuplicates_AppendsOneDelta asserts the
+// CAS guard inside handleInboundAck: two concurrent inbound ack envelopes
+// for the same Sent must produce exactly one ack-delta row on disk, not
+// one per goroutine. ListOutbox would still render first-ack-wins, but
+// duplicate disk rows would slowly bloat the outbox with control-plane
+// noise.
+func TestDispatch_InboundAck_ConcurrentDuplicates_AppendsOneDelta(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	to := "bob-pubkey-hex"
+	if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: to, Tier: contacts.TierFriend}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Box.AppendOutbox(inbox.Sent{V: 1, EventID: "evW", InnerID: ackTestRumorRef, To: to, SentAt: 100}); err != nil {
+		t.Fatal(err)
+	}
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeAck, Ref: ackTestRumorRef}
+	content, _ := envelope.Encode(env)
+
+	const concurrency = 8
+	start := make(chan struct{})
+	done := make(chan struct{}, concurrency)
+	for i := 0; i < concurrency; i++ {
+		i := i
+		go func() {
+			<-start
+			d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ackwrap-" + strconv.Itoa(i)}, makeRumor(to, content))
+			done <- struct{}{}
+		}()
+	}
+	close(start)
+	for i := 0; i < concurrency; i++ {
+		<-done
+	}
+
+	// Count raw ack-delta rows directly on disk: any line whose AckedAt > 0
+	// is an ack delta. We expect exactly one despite the N concurrent dispatch
+	// calls.
+	deltaCount := 0
+	files, _ := filepath.Glob(filepath.Join(d.StateDir, "outbox", "*", "*", "*.jsonl"))
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			if line == "" {
+				continue
+			}
+			var s inbox.Sent
+			if err := json.Unmarshal([]byte(line), &s); err != nil {
+				t.Fatal(err)
+			}
+			if s.AckedAt != 0 {
+				deltaCount++
+			}
+		}
+	}
+	if deltaCount != 1 {
+		t.Errorf("concurrent acks produced %d delta rows on disk, want 1", deltaCount)
 	}
 }
 

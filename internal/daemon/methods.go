@@ -362,7 +362,10 @@ func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	preCopy := pre
 	d.emitDashEvent(dashboard.Event{Kind: "outbox.message", Sent: &preCopy})
 
-	urls := d.publishTargets(ctx, c.Relays)
+	urls, err := d.publishTargets(ctx, c.Relays)
+	if err != nil {
+		return nil, internalErr(err)
+	}
 
 	publishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

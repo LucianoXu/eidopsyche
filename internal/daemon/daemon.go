@@ -46,7 +46,14 @@ type Daemon struct {
 	dashSubs    []*dashSub
 	dedupe      map[string]struct{}
 	selfWrapIDs map[string]struct{}
-	relayHealth *relayHealthStore
+	// ackedInnerIDs tracks rumor IDs (Sent.InnerID == ack.Ref) for which
+	// we have already begun appending an ack delta in this process run.
+	// Without it, two concurrent inbound acks for the same message could
+	// both observe AckedAt==0 from ListOutbox and both append delta rows.
+	// In-memory only — after restart the persisted AckedAt on the Sent
+	// row provides the same guard via the existing match.AckedAt!=0 check.
+	ackedInnerIDs map[string]struct{}
+	relayHealth   *relayHealthStore
 
 	// configMu serialises read-modify-write of config.toml so two
 	// concurrent dashboard ConfigSet calls cannot lose updates by
@@ -103,21 +110,22 @@ func Start(stateDir string) (*Daemon, error) {
 		return nil, err
 	}
 	d := &Daemon{
-		StateDir:    stateDir,
-		Cfg:         cfg,
-		Key:         k,
-		DB:          db,
-		Repo:        contacts.New(db),
-		Invites:     invitedb.New(db),
-		Box:         inbox.New(stateDir),
-		Pool:        nostr.NewPoolWithSigner(keypairSigner{k: k}),
-		Log:         slog.New(slog.NewJSONHandler(os.Stderr, nil)),
-		startedAt:   time.Now(),
-		kick:        make(chan struct{}, 1),
-		dedupe:      make(map[string]struct{}, 1024),
-		selfWrapIDs: make(map[string]struct{}, 1024),
-		relayHealth: newRelayHealthStore(),
-		wakeDir:     cfg.Wake.Dir,
+		StateDir:      stateDir,
+		Cfg:           cfg,
+		Key:           k,
+		DB:            db,
+		Repo:          contacts.New(db),
+		Invites:       invitedb.New(db),
+		Box:           inbox.New(stateDir),
+		Pool:          nostr.NewPoolWithSigner(keypairSigner{k: k}),
+		Log:           slog.New(slog.NewJSONHandler(os.Stderr, nil)),
+		startedAt:     time.Now(),
+		kick:          make(chan struct{}, 1),
+		dedupe:        make(map[string]struct{}, 1024),
+		selfWrapIDs:   make(map[string]struct{}, 1024),
+		ackedInnerIDs: make(map[string]struct{}, 1024),
+		relayHealth:   newRelayHealthStore(),
+		wakeDir:       cfg.Wake.Dir,
 	}
 	// Wire Pool's per-URL state hook so transitions surface in d.relayHealth
 	// AND in the dashboard SSE hub. The hook runs from inside the Pool's
@@ -559,17 +567,27 @@ func (d *Daemon) ownRelayURLs(ctx context.Context) ([]string, error) {
 }
 
 // publishTargets returns the union of own_relays, the recipient's known
-// relays, and configured fallback relays, deduplicated. Used by both the
-// initial send path and the tier-2 ack emit path.
-func (d *Daemon) publishTargets(ctx context.Context, recipientRelays []string) []string {
+// relays, and configured fallback relays, deduplicated. The DB error is
+// returned so callers can choose: sendMessage propagates it (operator
+// must see infrastructure failures), emitAck logs and falls back to the
+// non-DB inputs (tier-2 ack is best-effort).
+func (d *Daemon) publishTargets(ctx context.Context, recipientRelays []string) ([]string, error) {
 	targets := map[string]struct{}{}
-	if rows, err := d.DB.QueryContext(ctx, `SELECT relay_url FROM own_relays`); err == nil {
-		for rows.Next() {
-			var u string
-			_ = rows.Scan(&u)
-			targets[u] = struct{}{}
+	rows, err := d.DB.QueryContext(ctx, `SELECT relay_url FROM own_relays`)
+	if err != nil {
+		return nil, fmt.Errorf("query own_relays: %w", err)
+	}
+	for rows.Next() {
+		var u string
+		if scanErr := rows.Scan(&u); scanErr != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan own_relays: %w", scanErr)
 		}
-		rows.Close()
+		targets[u] = struct{}{}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate own_relays: %w", err)
 	}
 	for _, u := range recipientRelays {
 		targets[u] = struct{}{}
@@ -581,7 +599,7 @@ func (d *Daemon) publishTargets(ctx context.Context, recipientRelays []string) [
 	for u := range targets {
 		urls = append(urls, u)
 	}
-	return urls
+	return urls, nil
 }
 
 // handleInboundAck consumes a successfully-decoded type=ack envelope.
@@ -589,6 +607,12 @@ func (d *Daemon) publishTargets(ctx context.Context, recipientRelays []string) [
 // with AckedAt/AckEventID populated. First-ack-wins (idempotent on
 // re-receipt). Mismatched / unknown refs are dropped with debug-log.
 // Never writes to inbox.jsonl, never triggers a wake.
+//
+// Concurrent duplicate acks: the in-memory ackedInnerIDs map provides a
+// compare-and-set guard so the read-check-append sequence below cannot
+// race two ack envelopes for the same Sent into appending two delta
+// rows. After daemon restart the persisted AckedAt on the matching Sent
+// row carries the same idempotency.
 func (d *Daemon) handleInboundAck(ctx context.Context, ev *gnostr.Event, rumor *gnostr.Event, env envelope.Envelope) {
 	// We never emit acks to ourselves, so a self-rumor here is anomalous.
 	if rumor.PubKey == d.Key.PublicHex {
@@ -621,9 +645,20 @@ func (d *Daemon) handleInboundAck(ctx context.Context, ev *gnostr.Event, rumor *
 		return
 	}
 	if match.AckedAt != 0 {
-		// First-ack-wins: idempotent on duplicate ack.
+		// First-ack-wins: idempotent on duplicate ack arriving after
+		// the previous one was already persisted.
 		return
 	}
+
+	// Compare-and-set: claim this InnerID before writing the delta.
+	// If a concurrent goroutine already claimed it, drop silently.
+	d.mu.Lock()
+	if _, claimed := d.ackedInnerIDs[env.Ref]; claimed {
+		d.mu.Unlock()
+		return
+	}
+	d.ackedInnerIDs[env.Ref] = struct{}{}
+	d.mu.Unlock()
 
 	delta := inbox.Sent{
 		V:          1,
@@ -667,7 +702,12 @@ func (d *Daemon) emitAck(ctx context.Context, toPubkey string, recipientRelays [
 		d.Log.Warn("wrap ack envelope", "err", err, "ref", ref)
 		return
 	}
-	urls := d.publishTargets(ctx, recipientRelays)
+	urls, err := d.publishTargets(ctx, recipientRelays)
+	if err != nil {
+		// Best-effort: log and keep going — but with no targets, abort.
+		d.Log.Warn("emit ack: publishTargets", "err", err, "to", toPubkey)
+		return
+	}
 	if len(urls) == 0 {
 		d.Log.Debug("emit ack: no relay targets", "to", toPubkey)
 		return
