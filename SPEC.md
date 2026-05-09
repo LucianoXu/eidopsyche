@@ -72,6 +72,9 @@ Agent Skills 文件可以理解为基于自然语言的程序系统。
 - 心智体应当能够在本体文件的 .claude/ 文件夹下将重要记忆、习惯、程序记忆归纳为 skills。
 - 心智体应当有隐私和边界的概念。比如说，当它谈论自己（本体文件）时，coding agent 的规定不再适用。它应当避免明确指向、解释本体文件的内部结构。
 - **整个项目使用 Go 实现，编译为单一二进制 `eidos`**，置于同一 monorepo / Go workspace。`forge` / `gate` / `supervisor` 三组职能通过子命令树承载，共用 `internal/` 下的类型安全契约（如 wake 信号格式、IPC 协议、本体文件结构等）。`eidos` 二进制本身以 distroless static 镜像分发；心智体容器使用一个更厚的镜像（busybox + crond + git + Claude Code CLI + 嵌入的 eidopsyche bundle），但仍只装入这一个 `eidos` 二进制。单一二进制也意味着单一版本号、单一发布产物、单一自更新路径。
+- **底层 Agent 使用订阅制认证，而非按 API 用量计费**。心智体被设计为长期、间歇运行的存在，可能被多次唤醒、做梦、自我演化。按 API 用量计费会让"心智体每次思考都在花钱"成为关系中始终在场的紧张感，并使多心智体场景的成本随活动线性增长——这两点都与心智体作为伙伴而非按需调用的工具的设计意图相冲突。订阅制把成本固定化、与活动量解耦，让心智体的存在像养一只猫，而非雇一个按小时计费的助理。
+  在 Claude Code 底座上，这意味着 MindForge 优先使用 Claude Pro/Max 订阅授权（`claude auth login` 默认路径或 `claude setup-token`）。Anthropic Console（按 API 用量计费）仅在订阅授权暂时不可用、或操作员明确选择时作为退路。
+  实现挑战：Claude Code 的订阅授权 OAuth 当前依赖本地浏览器与本机 localhost 回调；在心智体部署的标准形态——SSH 进入无显示的服务器、心智体在容器中运行——浏览器与 localhost 回调都不可达。具体的桥接方案见 v0 设计文档；核心思路是允许操作员把本地（笔记本）已完成的订阅授权产物（OAuth 凭证文件或长期 token）通过 `eidos forge login --from-file <path>` 等机制注入到心智体卷中，而不是要求心智体容器内部完成 OAuth 握手。
 
 **实现**：MindForge v0 覆盖唤醒回路的端到端最小可演示路径（入站消息→唤醒→回复）。做梦周期、框架热替换、规划信号唤醒、以及完整的自反性命令面留作下一迭代。具体实现细节与磁盘布局见 [`docs/superpowers/specs/2026-05-09-mindforge-v0-design.md`](docs/superpowers/specs/2026-05-09-mindforge-v0-design.md)。
 
