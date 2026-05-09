@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"syscall"
 )
 
 const (
@@ -169,13 +168,18 @@ func Submit(dir string, sig Signal) error {
 	return WritePending(dir, merged)
 }
 
+// acquireLock and releaseLock are platform-specific (see wake_lock_unix.go
+// and wake_lock_windows.go). They take a blocking exclusive lock on the
+// wake-dir's .lock sentinel file, mirroring the cross-platform pattern
+// used in internal/daemon/lock_{unix,windows}.go.
+
 func acquireLock(dir string) (*os.File, error) {
 	path := filepath.Join(dir, lockName)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open lock: %w", err)
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := platformLock(f); err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("flock: %w", err)
 	}
@@ -183,7 +187,7 @@ func acquireLock(dir string) (*os.File, error) {
 }
 
 func releaseLock(f *os.File) {
-	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	_ = platformUnlock(f)
 	_ = f.Close()
 }
 

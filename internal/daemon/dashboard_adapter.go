@@ -16,7 +16,6 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
 	"github.com/LucianoXu/eidopsyche/internal/invitedb"
-	"github.com/LucianoXu/eidopsyche/internal/nostr"
 	"github.com/LucianoXu/eidopsyche/internal/version"
 )
 
@@ -71,83 +70,20 @@ func (a dashboardAdapter) ListRelayHealth() []dashboard.RelayState {
 	return out
 }
 
+// Send routes the dashboard's send-message request through the same
+// IPC method handler the CLI uses. See SPEC.md "调用路径统一" and
+// docs/superpowers/specs/2026-05-09-unified-call-path-design.md.
+//
+// All side effects (resolveTarget for npub→hex, contact-existence check
+// with self-loopback exemption, two-phase outbox persistence,
+// ipc.ErrNoRelaysReachable on full publish failure) live in the handler.
+// The dashboard handler converts the returned *ipc.Error into a 502 + toast.
 func (a dashboardAdapter) Send(ctx context.Context, toPubkey string, env envelope.Envelope) (string, error) {
-	content, err := envelope.Encode(env)
-	if err != nil {
+	var result SendResult
+	if err := a.d.Call(ctx, "send", SendParams{To: toPubkey, Envelope: &env}, &result); err != nil {
 		return "", err
 	}
-	wrapBob, _, err := nostr.Wrap(a.d.Key.PrivateHex, toPubkey, content)
-	if err != nil {
-		return "", err
-	}
-	wrapSelf, _, err := nostr.Wrap(a.d.Key.PrivateHex, a.d.Key.PublicHex, content)
-	if err != nil {
-		return "", err
-	}
-	a.d.recordSelfWrap(wrapSelf.ID)
-
-	// Union: own_relays + recipient.Relays (when known) + fallbacks. Mirrors
-	// the existing IPC sendMessage handler so dashboard sends behave the same.
-	targets := map[string]struct{}{}
-	if urls, err := a.d.ownRelayURLs(ctx); err == nil {
-		for _, u := range urls {
-			targets[u] = struct{}{}
-		}
-	}
-	if c, err := a.d.Repo.Get(ctx, toPubkey); err == nil {
-		for _, u := range c.Relays {
-			targets[u] = struct{}{}
-		}
-	}
-	for _, u := range a.d.Cfg.Publish.FallbackRelays {
-		targets[u] = struct{}{}
-	}
-	urls := make([]string, 0, len(targets))
-	for u := range targets {
-		urls = append(urls, u)
-	}
-
-	publishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	res := a.d.Pool.Publish(publishCtx, urls, wrapBob)
-	_ = a.d.Pool.Publish(publishCtx, urls, wrapSelf)
-
-	accepted := []string{}
-	for _, r := range res {
-		if r.OK {
-			accepted = append(accepted, r.Relay)
-		}
-	}
-	if len(accepted) == 0 {
-		return "", fmt.Errorf("no relay accepted publish on %d urls", len(urls))
-	}
-	now := time.Now().Unix()
-	sent := inbox.Sent{
-		EventID:     wrapBob.ID,
-		SelfEventID: wrapSelf.ID,
-		To:          toPubkey,
-		Kind:        14,
-		Content:     content,
-		RumorAt:     now,
-		SentAt:      now,
-		AcceptedBy:  accepted,
-		Final:       true,
-	}
-	if err := a.d.Box.AppendOutbox(sent); err != nil {
-		// Match the IPC sendMessage handler's behaviour: persisting the
-		// outbox row is part of the contract. If it fails, the publish
-		// already succeeded but the local record is missing — surface
-		// the error so the caller renders a failure rather than showing
-		// a sent-bubble that vanishes on next reload.
-		return "", fmt.Errorf("append outbox: %w", err)
-	}
-	// Intentionally do NOT emit dashboard.Event{Kind: "outbox.message"} here:
-	// the dashboard's POST /thread/<pk>/send response already swaps the
-	// rendered bubble into #thread-body. An SSE emit would race that swap
-	// and the originating tab would render the same event twice with
-	// identical data-event-id. Multi-tab outbox sync is out of scope for
-	// v1; reload to see sends from a sibling tab.
-	return wrapBob.ID, nil
+	return result.EventID, nil
 }
 
 func (a dashboardAdapter) SubscribeEvents() (<-chan dashboard.Event, func()) {

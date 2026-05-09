@@ -23,6 +23,26 @@ Eidopsyche 项目应当易于分发和使用，具有良好的引导。
 目前主要以英文引导。
 
 
+## 调用路径统一
+
+Eidopsyche 的每个常驻组件（当前的 MindGate daemon、未来的 MindForge daemon 等）都会被多种上游接口驱动：CLI 子命令、本地 WebUI、Agent MCP server、远程签名（NIP-46）薄客户端等。这些接口是同一组能力的不同呈现，**不是不同的能力**。
+
+为避免行为漂移、丢失的鉴权检查、不一致的错误码、被遗忘的副作用，我们采用一条硬性约束：
+
+> **每个能动作（执行操作的命令）只允许有一条代码路径。** 所有调用方（CLI、WebUI、Agent MCP、薄客户端）必须通过该组件 daemon 内部的同一个分发器调用，传递同样打包格式的参数（`{method, params: JSON}`），获取同一组类型化错误码。调用方只承担三件事：参数收集、参数打包、结果呈现。
+
+具体含义：
+- daemon 暴露一张方法表，每条目对应一个能力，有命名错误码与稳定的 JSON 参数 schema。
+- CLI 子命令是 `参数 → JSON → IPC 调用 → 结果渲染` 的薄壳。
+- WebUI handler 是 `表单/路径 → JSON → 同一个分发器（in-process）→ HTML/SSE 渲染` 的薄壳。
+- 未来的 Agent MCP server 是 `MCP tool 调用 → JSON → 同一个分发器 → MCP response` 的薄壳。
+- 远程签名（NIP-46）薄客户端通过 Nostr 上的 RPC 转发同样的方法名与参数。
+
+**只有当 daemon 不存在或不可达时**（例如首次 `eidos gate init` 在 daemon 启动前；或纯文件诊断命令），调用方才允许直接读写状态文件 —— 这一例外必须在该命令的实现处显式标注。
+
+这条约束是 KISS、DRY 与 POLA 三原则在跨进程接口层面的具体落地。具体迁移路线见 `docs/superpowers/specs/2026-05-09-unified-call-path-design.md`。
+
+
 ## MindForge
 
 MindForge 是一个由 AI 驱动、以文件为本体的心智体数字生命框架。它是建立在 Agent 系统之上、自主运行的 Agent Harness 系统。它自知自觉，具有持续记忆。
