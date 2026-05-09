@@ -1,6 +1,8 @@
 package forge
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -20,6 +22,7 @@ type fakeClient struct {
 	contExists bool
 	pulled     []string
 	inits      []forgectl.RunInitOpts
+	initStdin  [][]byte // captured stdin bytes (one entry per RunInit call)
 }
 
 func (f *fakeClient) VolumeExists(_ context.Context, _ string) (bool, error) {
@@ -50,9 +53,15 @@ func (f *fakeClient) ImagePull(_ context.Context, ref string, _ io.Writer) error
 	return nil
 }
 func (f *fakeClient) RunInit(_ context.Context, opts forgectl.RunInitOpts) (forgectl.RunInitResult, error) {
-	// drain stdin so producers don't block
+	// Capture stdin so tests can introspect the tar bytes the orchestrator
+	// streams in (the wizard's JournalEntry-as-tar-entry plumbing relies
+	// on this).
 	if opts.Stdin != nil {
-		_, _ = io.Copy(io.Discard, opts.Stdin)
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, opts.Stdin)
+		f.initStdin = append(f.initStdin, buf.Bytes())
+	} else {
+		f.initStdin = append(f.initStdin, nil)
 	}
 	f.inits = append(f.inits, opts)
 	return forgectl.RunInitResult{ExitCode: 0}, nil
@@ -134,8 +143,8 @@ func TestCreateFlagValidation(t *testing.T) {
 
 func TestCreateRefusesIfVolumeExists(t *testing.T) {
 	f := &fakeClient{volExists: true}
-	err := orchestrate(context.Background(), f, "alice", createOpts{
-		owner: "npub1ownertest", relay: "wss://r", label: "alice", noLogin: true, image: "img:dev",
+	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
+		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice", NoLogin: true, Image: "img:dev",
 	})
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("want exists error, got %v", err)
@@ -150,8 +159,8 @@ func TestCreateRefusesIfVolumeExists(t *testing.T) {
 // the tag.)
 func TestCreateSkipsPullWhenImagePresentLocally(t *testing.T) {
 	f := &fakeClientLocalImage{}
-	err := orchestrate(context.Background(), f, "alice", createOpts{
-		owner: "npub1ownertest", relay: "wss://r", label: "alice", noLogin: true, image: "img:dev",
+	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
+		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice", NoLogin: true, Image: "img:dev",
 	})
 	if err != nil {
 		t.Fatalf("orchestrate: %v", err)
@@ -172,8 +181,8 @@ func (f *fakeClientLocalImage) ImageExists(_ context.Context, _ string) (bool, e
 
 func TestCreateOrchestratesAllSteps(t *testing.T) {
 	f := &fakeClient{}
-	err := orchestrate(context.Background(), f, "alice", createOpts{
-		owner: "npub1ownertest", relay: "wss://r", label: "alice", noLogin: true, image: "img:dev",
+	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
+		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice", NoLogin: true, Image: "img:dev",
 	})
 	if err != nil {
 		t.Fatalf("orchestrate: %v", err)
@@ -204,8 +213,8 @@ func TestCreateImagePullErrorsBubbled(t *testing.T) {
 	want := errors.New("net down")
 	pullErrFn := func(_ context.Context, _ string, _ io.Writer) error { return want }
 	wrapped := &fakeClientPullErr{fakeClient: *f, pullErr: pullErrFn}
-	err := orchestrate(context.Background(), wrapped, "alice", createOpts{
-		owner: "npub1ownertest", relay: "wss://r", label: "alice", noLogin: true, image: "img:dev",
+	err := Orchestrate(context.Background(), wrapped, "alice", CreateOpts{
+		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice", NoLogin: true, Image: "img:dev",
 	})
 	if err == nil || !errors.Is(err, want) {
 		t.Errorf("expected wrapped pull error, got %v", err)
@@ -217,8 +226,8 @@ func TestCreateImagePullErrorsBubbled(t *testing.T) {
 // the image's USER directive.
 func TestCreateInitContainerRunsAsRoot(t *testing.T) {
 	f := &fakeClient{}
-	err := orchestrate(context.Background(), f, "alice", createOpts{
-		owner: "npub1ownertest", relay: "wss://r", label: "alice", noLogin: true, image: "img:dev",
+	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
+		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice", NoLogin: true, Image: "img:dev",
 	})
 	if err != nil {
 		t.Fatalf("orchestrate: %v", err)
@@ -235,9 +244,9 @@ func TestCreateInitContainerRunsAsRoot(t *testing.T) {
 // init-volume's env as EIDOS_FORGE_MODEL.
 func TestCreateModelEnvPlumbing(t *testing.T) {
 	f := &fakeClient{}
-	err := orchestrate(context.Background(), f, "alice", createOpts{
-		owner: "npub1ownertest", relay: "wss://r", label: "alice",
-		noLogin: true, image: "img:dev", model: "claude-sonnet-4-7",
+	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
+		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice",
+		NoLogin: true, Image: "img:dev", Model: "claude-sonnet-4-7",
 	})
 	if err != nil {
 		t.Fatalf("orchestrate: %v", err)
@@ -275,7 +284,7 @@ func TestCreateModelFlagValidation(t *testing.T) {
 		t.Fatal("garbage --model should be rejected")
 	}
 	if !strings.Contains(err.Error(), "model") {
-		t.Errorf("error should mention model: %v", err)
+		t.Errorf("error should mention Model: %v", err)
 	}
 }
 
@@ -289,4 +298,96 @@ func TestValidateModel_Helper(t *testing.T) {
 	if err := validateModel("garbage"); err == nil {
 		t.Error("garbage should fail validation")
 	}
+}
+
+// TestOrchestrate_KeyHexFlowsToInitEnv pins the wizard's keypair-injection
+// path: when CreateOpts.KeyHex is set, the env passed to init-volume
+// must include EIDOS_FORGE_KEY_HEX so the in-container gate init
+// adopts it instead of generating a fresh keypair.
+func TestOrchestrate_KeyHexFlowsToInitEnv(t *testing.T) {
+	f := &fakeClient{}
+	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
+		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice",
+		Image: "img:dev", KeyHex: "deadbeef",
+	})
+	if err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	init := f.inits[0]
+	if !envContains(init.Env, "EIDOS_FORGE_KEY_HEX=deadbeef") {
+		t.Errorf("init env missing EIDOS_FORGE_KEY_HEX=deadbeef: %v", init.Env)
+	}
+}
+
+// TestOrchestrate_NoKeyHexOmitsEnv: the legacy `eidos forge create`
+// path (no wizard, no KeyHex) must NOT inject EIDOS_FORGE_KEY_HEX —
+// otherwise init-volume would try to load a non-existent file.
+func TestOrchestrate_NoKeyHexOmitsEnv(t *testing.T) {
+	f := &fakeClient{}
+	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
+		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice", Image: "img:dev",
+	})
+	if err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	init := f.inits[0]
+	for _, e := range init.Env {
+		if strings.HasPrefix(e, "EIDOS_FORGE_KEY_HEX=") {
+			t.Errorf("EIDOS_FORGE_KEY_HEX present despite KeyHex unset: %q", e)
+		}
+	}
+}
+
+// TestOrchestrate_JournalEntryLandsInTar: the wizard's rendered
+// summoning book must reach the volume verbatim, including any `{{`
+// literals in the user-provided text.
+func TestOrchestrate_JournalEntryLandsInTar(t *testing.T) {
+	f := &fakeClient{}
+	const journal = "# 召唤书\n\nThis has {{.Literal}} that must NOT expand.\n"
+	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
+		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice",
+		Image: "img:dev", JournalEntry: journal,
+	})
+	if err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	if len(f.initStdin) != 1 {
+		t.Fatalf("captured stdin entries = %d, want 1", len(f.initStdin))
+	}
+	got := tarEntryFromBytes(t, f.initStdin[0], "journal/0000-summoning.md")
+	if got != journal {
+		t.Errorf("journal entry in tar = %q, want %q", got, journal)
+	}
+}
+
+func envContains(env []string, target string) bool {
+	for _, e := range env {
+		if e == target {
+			return true
+		}
+	}
+	return false
+}
+
+func tarEntryFromBytes(t *testing.T, body []byte, name string) string {
+	t.Helper()
+	tr := tar.NewReader(bytes.NewReader(body))
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("tar.Next: %v", err)
+		}
+		if h.Name == name {
+			b, err := io.ReadAll(tr)
+			if err != nil {
+				t.Fatalf("read entry: %v", err)
+			}
+			return string(b)
+		}
+	}
+	t.Fatalf("tar entry %q not in stream", name)
+	return ""
 }

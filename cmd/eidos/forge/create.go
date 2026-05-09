@@ -10,17 +10,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type createOpts struct {
-	owner   string
-	relay   string
-	label   string
-	noLogin bool
-	image   string
-	model   string
+// CreateOpts is the inputs to Orchestrate. All flag-bound CLI options
+// land here, and the First Contact wizard fills it in from in-memory
+// summoning state. The wizard-only fields KeyHex and JournalEntry are
+// not exposed as CLI flags — they make no sense for scripted use.
+type CreateOpts struct {
+	Owner        string
+	Relay        string
+	Label        string
+	NoLogin      bool
+	Image        string
+	Model        string
+	KeyHex       string // wizard-only: pre-generated MindForm private hex
+	JournalEntry string // wizard-only: rendered summoning-book markdown
 }
 
 func newCreateCmd() *cobra.Command {
-	o := createOpts{}
+	o := CreateOpts{}
 	cmd := &cobra.Command{
 		Use:   "create <name>",
 		Short: "Create a mind-form (image pull + volume + ontology + key + login)",
@@ -35,27 +41,27 @@ func newCreateCmd() *cobra.Command {
 			if err := forgectl.ValidateName(name); err != nil {
 				return err
 			}
-			if err := validateOwner(o.owner); err != nil {
+			if err := validateOwner(o.Owner); err != nil {
 				return err
 			}
-			if err := validateRelay(o.relay); err != nil {
+			if err := validateRelay(o.Relay); err != nil {
 				return err
 			}
-			if err := validateModel(o.model); err != nil {
+			if err := validateModel(o.Model); err != nil {
 				return err
 			}
-			if o.label == "" {
-				o.label = name
+			if o.Label == "" {
+				o.Label = name
 			}
 			return runCreate(cmd, name, o)
 		},
 	}
-	cmd.Flags().StringVar(&o.owner, "owner", "", "master human's npub (required)")
-	cmd.Flags().StringVar(&o.relay, "relay", "", "relay URL the mind-form publishes/subscribes to (required)")
-	cmd.Flags().StringVar(&o.label, "label", "", "human-readable label (default: <name>)")
-	cmd.Flags().BoolVar(&o.noLogin, "no-login", false, "skip the interactive claude /login step")
-	cmd.Flags().StringVar(&o.image, "image", "", "override container image (default: pinned in this binary)")
-	cmd.Flags().StringVar(&o.model, "model", "", "claude model id to pin (e.g. claude-sonnet-4-7); empty = claude default")
+	cmd.Flags().StringVar(&o.Owner, "owner", "", "master human's npub (required)")
+	cmd.Flags().StringVar(&o.Relay, "relay", "", "relay URL the mind-form publishes/subscribes to (required)")
+	cmd.Flags().StringVar(&o.Label, "label", "", "human-readable label (default: <name>)")
+	cmd.Flags().BoolVar(&o.NoLogin, "no-login", false, "skip the interactive claude /login step")
+	cmd.Flags().StringVar(&o.Image, "image", "", "override container image (default: pinned in this binary)")
+	cmd.Flags().StringVar(&o.Model, "model", "", "claude model id to pin (e.g. claude-sonnet-4-7); empty = claude default")
 	return cmd
 }
 
@@ -88,6 +94,6 @@ func validateRelay(s string) error {
 }
 
 // runCreate is the orchestration entry point.
-func runCreate(cmd *cobra.Command, name string, o createOpts) error {
+func runCreate(cmd *cobra.Command, name string, o CreateOpts) error {
 	return runCreate2(cmd, name, o)
 }

@@ -48,8 +48,8 @@ func (f *minimalFake) ContainerRemove(_ context.Context, _ string) error {
 	f.hasContainer = false
 	return nil
 }
-func (f *minimalFake) ImageExists(_ context.Context, _ string) (bool, error)     { return true, nil }
-func (f *minimalFake) ImagePull(_ context.Context, _ string, _ io.Writer) error  { return nil }
+func (f *minimalFake) ImageExists(_ context.Context, _ string) (bool, error)    { return true, nil }
+func (f *minimalFake) ImagePull(_ context.Context, _ string, _ io.Writer) error { return nil }
 func (f *minimalFake) RunInit(_ context.Context, _ RunInitOpts) (RunInitResult, error) {
 	return RunInitResult{}, nil
 }

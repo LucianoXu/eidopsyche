@@ -68,15 +68,31 @@ func runInitVolume(stdout, stderr io.Writer, stdin io.Reader) error {
 	label := os.Getenv("EIDOS_FORGE_LABEL")
 	owner := os.Getenv("EIDOS_FORGE_OWNER")
 	relay := os.Getenv("EIDOS_FORGE_RELAY")
+	keyHex := os.Getenv("EIDOS_FORGE_KEY_HEX")
 	if label == "" || owner == "" || relay == "" {
 		return errors.New("EIDOS_FORGE_LABEL, EIDOS_FORGE_OWNER, EIDOS_FORGE_RELAY must be set")
 	}
 
-	if err := runCmd(stderr, "eidos", "gate", "init",
+	gateInitArgs := []string{"gate", "init",
 		"--state-dir", gateDir,
 		"--label", label,
 		"--home", relay,
-	); err != nil {
+	}
+	if keyHex != "" {
+		// First Contact wizard path: the host pre-generated the keypair so
+		// the operator's summoning book could include the MindForm's npub
+		// before the volume existed. Pre-write the key here, then tell
+		// `gate init` to adopt it instead of generating a fresh one.
+		k, err := identity.FromHex(keyHex)
+		if err != nil {
+			return fmt.Errorf("EIDOS_FORGE_KEY_HEX: %w", err)
+		}
+		if err := identity.SaveKey(filepath.Join(gateDir, "key"), k); err != nil {
+			return fmt.Errorf("save host-supplied key: %w", err)
+		}
+		gateInitArgs = append(gateInitArgs, "--key-from-existing")
+	}
+	if err := runCmd(stderr, "eidos", gateInitArgs...); err != nil {
 		return fmt.Errorf("gate init: %w", err)
 	}
 
