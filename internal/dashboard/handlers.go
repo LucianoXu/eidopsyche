@@ -162,7 +162,7 @@ func threadHandler(deps DashboardDeps, r *renderer, logger *slog.Logger) http.Ha
 			counterpart = sidebarContact{Pubkey: pk, Label: shortenPubkey(pk), Tier: contacts.TierAcquaintance}
 		}
 		bubbles := buildBubbles(deps, pk)
-		out, err := r.Render("thread", threadData{
+		threadHTML, err := r.Render("thread", threadData{
 			Counterpart: counterpart,
 			Bubbles:     bubbles,
 			OwnPubkey:   deps.OwnPubkey(),
@@ -172,8 +172,34 @@ func threadHandler(deps DashboardDeps, r *renderer, logger *slog.Logger) http.Ha
 			http.Error(w, "render failed", 500)
 			return
 		}
+
+		// Direct navigation (refresh, deep link, no HX-Request header):
+		// wrap the thread fragment in the full shell so CSS, sidebar,
+		// and topbar render. Without this, refreshing a thread page
+		// returns just the inner thread template — the browser shows
+		// it as a bare HTML fragment with no flex layout, causing the
+		// thread-body to grow to fit all bubbles instead of scrolling.
+		if req.Header.Get("HX-Request") == "" {
+			label, _ := deps.OwnLabel(ctx)
+			side := buildSidebar(ctx, deps, pk, false)
+			out, rerr := r.Render("shell", shellData{
+				OwnLabel: label,
+				OwnNpub:  deps.OwnPubkey(),
+				Sidebar:  side,
+				Main:     template.HTML(threadHTML), //nolint:gosec // trusted internal template output
+			})
+			if rerr != nil {
+				logger.Error("render shell", "err", rerr)
+				http.Error(w, "render failed", 500)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(out))
+			return
+		}
+
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(out))
+		_, _ = w.Write([]byte(threadHTML))
 	}
 }
 
