@@ -11,6 +11,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/dashboard"
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
+	"github.com/LucianoXu/eidopsyche/internal/inbox"
 )
 
 // makeRumor builds a minimal rumor (kind:14) with the given pubkey & content,
@@ -224,5 +225,88 @@ func TestDispatch_BlockedSender_NoAck(t *testing.T) {
 
 	if called != 0 {
 		t.Errorf("ack emitted for blocked sender: count=%d", called)
+	}
+}
+
+const ackTestRumorRef = "00000000000000000000000000000000000000000000000000000000aaaaaaaa"
+
+func TestDispatch_InboundAck_MutatesOutbox(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	to := "bob-pubkey-hex"
+	if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: to, Tier: contacts.TierFriend}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Box.AppendOutbox(inbox.Sent{V: 1, EventID: "evW", InnerID: ackTestRumorRef, To: to, SentAt: 100}); err != nil {
+		t.Fatal(err)
+	}
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeAck, Ref: ackTestRumorRef}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ackwrap1"}, makeRumor(to, content))
+
+	rows, _ := d.Box.ListOutbox(nil, "", 0)
+	if len(rows) != 1 || rows[0].AckedAt == 0 || rows[0].AckEventID != "ackwrap1" {
+		t.Errorf("ack not recorded: %+v", rows)
+	}
+}
+
+func TestDispatch_InboundAck_UnknownRef_Drops(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	to := "bob-pubkey-hex"
+	if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: to, Tier: contacts.TierFriend}); err != nil {
+		t.Fatal(err)
+	}
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeAck, Ref: strings.Repeat("a", 64)}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ackwrap-orphan"}, makeRumor(to, content))
+
+	rows, _ := d.Box.ListOutbox(nil, "", 0)
+	if len(rows) != 0 {
+		t.Errorf("orphan ack created rows: %+v", rows)
+	}
+}
+
+func TestDispatch_InboundAck_WrongSender_Rejects(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	bob := "bob-pubkey-hex"
+	carol := "carol-pubkey-hex"
+	for _, p := range []string{bob, carol} {
+		if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: p, Tier: contacts.TierFriend}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = d.Box.AppendOutbox(inbox.Sent{V: 1, EventID: "evW", InnerID: ackTestRumorRef, To: bob, SentAt: 100})
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeAck, Ref: ackTestRumorRef}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ackwrap"}, makeRumor(carol, content))
+
+	rows, _ := d.Box.ListOutbox(nil, "", 0)
+	if len(rows) != 1 || rows[0].AckedAt != 0 {
+		t.Errorf("ack from wrong sender was accepted: %+v", rows)
+	}
+}
+
+func TestDispatch_InboundAck_FirstAckWins(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	to := "bob-pubkey-hex"
+	if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: to, Tier: contacts.TierFriend}); err != nil {
+		t.Fatal(err)
+	}
+	_ = d.Box.AppendOutbox(inbox.Sent{V: 1, EventID: "evW", InnerID: ackTestRumorRef, To: to, SentAt: 100,
+		AckedAt: 999, AckEventID: "ackwrap-original"})
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeAck, Ref: ackTestRumorRef}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ackwrap-second"}, makeRumor(to, content))
+
+	rows, _ := d.Box.ListOutbox(nil, "", 0)
+	if rows[0].AckEventID != "ackwrap-original" {
+		t.Errorf("first-ack-wins violated: got %s", rows[0].AckEventID)
 	}
 }

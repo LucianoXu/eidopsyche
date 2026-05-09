@@ -441,6 +441,10 @@ func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *
 			d.emitAck(ctx, rumor.PubKey, senderContact.Relays, rumor.ID)
 		}
 
+	case envelope.TypeAck:
+		d.handleInboundAck(ctx, ev, rumor, env)
+		return
+
 	case envelope.TypeCommand:
 		if rumor.PubKey != d.Key.PublicHex {
 			d.persistSoftReject(ev, rumor, "unauthorized_command")
@@ -578,6 +582,66 @@ func (d *Daemon) publishTargets(ctx context.Context, recipientRelays []string) [
 		urls = append(urls, u)
 	}
 	return urls
+}
+
+// handleInboundAck consumes a successfully-decoded type=ack envelope.
+// Looks up the matching Sent by InnerID == env.Ref, appends a delta row
+// with AckedAt/AckEventID populated. First-ack-wins (idempotent on
+// re-receipt). Mismatched / unknown refs are dropped with debug-log.
+// Never writes to inbox.jsonl, never triggers a wake.
+func (d *Daemon) handleInboundAck(ctx context.Context, ev *gnostr.Event, rumor *gnostr.Event, env envelope.Envelope) {
+	// We never emit acks to ourselves, so a self-rumor here is anomalous.
+	if rumor.PubKey == d.Key.PublicHex {
+		return
+	}
+	c, err := d.Repo.Get(ctx, rumor.PubKey)
+	if err != nil || c.Tier == contacts.TierBlocked {
+		d.Log.Debug("dropped ack from non-contact / blocked", "from", rumor.PubKey)
+		return
+	}
+
+	rows, err := d.Box.ListOutbox(nil, "", 0)
+	if err != nil {
+		d.Log.Warn("handleInboundAck: list outbox", "err", err)
+		return
+	}
+	var match *inbox.Sent
+	for i := range rows {
+		if rows[i].InnerID == env.Ref {
+			match = &rows[i]
+			break
+		}
+	}
+	if match == nil {
+		d.Log.Debug("ack ref not found in outbox", "ref", env.Ref, "from", rumor.PubKey)
+		return
+	}
+	if match.To != rumor.PubKey {
+		d.Log.Warn("ack from non-recipient", "ref", env.Ref, "expected", match.To, "actual", rumor.PubKey)
+		return
+	}
+	if match.AckedAt != 0 {
+		// First-ack-wins: idempotent on duplicate ack.
+		return
+	}
+
+	delta := inbox.Sent{
+		V:          1,
+		EventID:    match.EventID,
+		SentAt:     match.SentAt,
+		AckedAt:    time.Now().Unix(),
+		AckEventID: ev.ID,
+	}
+	if err := d.Box.AppendOutbox(delta); err != nil {
+		d.Log.Error("append ack delta", "err", err)
+		return
+	}
+
+	// Push a fresh Sent snapshot to the dashboard so the bubble flips ✓ → ✓✓.
+	merged := *match
+	merged.AckedAt = delta.AckedAt
+	merged.AckEventID = delta.AckEventID
+	d.emitDashEvent(dashboard.Event{Kind: "outbox.message", Sent: &merged})
 }
 
 // emitAck builds an envelope-v1 type=ack and publishes it as a NIP-17 wrap
