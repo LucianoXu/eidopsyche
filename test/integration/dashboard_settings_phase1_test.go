@@ -113,8 +113,8 @@ func TestDashboardSettings_Phase1_ConfigFlow(t *testing.T) {
 	resp := mustDo(t, req)
 	body := mustReadAll(t, resp)
 	for _, want := range []string{
-		`id="cfg-relay-mode"`,
-		`id="cfg-relay-enabled"`,
+		`id="cfg-daemon-socket"`,
+		`id="cfg-dashboard-enabled"`,
 		`id="cfg-log_level"`,
 		"Restart required",
 	} {
@@ -149,7 +149,9 @@ func TestDashboardSettings_Phase1_ConfigFlow(t *testing.T) {
 	}
 
 	// 3. POST an invalid value; row-error chip surfaces, file unchanged.
-	form = url.Values{"path": {"relay.mode"}, "value": {"bogus"}}
+	// log_level rejects anything outside debug|info|warn|error, so "bogus"
+	// triggers a row-level validation error.
+	form = url.Values{"path": {"log_level"}, "value": {"bogus"}}
 	req = mustNewReq(t, "POST", base+"/settings/config", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Origin", base)
@@ -166,8 +168,8 @@ func TestDashboardSettings_Phase1_ConfigFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loadedAgain.Relay.Mode == "bogus" {
-		t.Error("invalid POST must not persist to disk")
+	if loadedAgain.LogLevel != "debug" {
+		t.Errorf("invalid POST must not persist to disk; log_level = %q (want \"debug\")", loadedAgain.LogLevel)
 	}
 
 	// 4. POST an unknown key is rejected with 400 (defense in depth: the
