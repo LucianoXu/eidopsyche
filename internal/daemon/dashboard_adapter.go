@@ -141,7 +141,11 @@ func (a dashboardAdapter) ConfigSet(ctx context.Context, path, value string) err
 // ── phase 2: contacts ──────────────────────────────────────────────
 
 func (a dashboardAdapter) GetContact(ctx context.Context, pubkey string) (*contacts.Contact, error) {
-	return a.d.Repo.Get(ctx, pubkey)
+	var c contacts.Contact
+	if err := a.d.Call(ctx, "contact.get", map[string]string{"target": pubkey}, &c); err != nil {
+		return nil, err
+	}
+	return &c, nil
 }
 
 // AddContact admits a contact described by a mindgate:// card. If the
@@ -254,11 +258,7 @@ func (a dashboardAdapter) SetContactLabel(ctx context.Context, pubkey, label str
 }
 
 func (a dashboardAdapter) SetContactTier(ctx context.Context, pubkey string, tier contacts.Tier) error {
-	if err := a.d.Repo.SetTier(ctx, pubkey, tier); err != nil {
-		return err
-	}
-	a.d.emitDashEvent(dashboard.Event{Kind: "contact.tier-changed"})
-	return nil
+	return a.d.Call(ctx, "contact.set-tier", ContactSetTierParams{Target: pubkey, Tier: string(tier)}, nil)
 }
 
 // ── phase 3: invites ───────────────────────────────────────────────

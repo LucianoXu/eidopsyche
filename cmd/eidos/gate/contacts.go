@@ -100,6 +100,33 @@ var removeContactCmd = &cobra.Command{
 	},
 }
 
+var contactCmd = &cobra.Command{
+	Use:   "contact",
+	Short: "Per-contact operations",
+}
+
+var contactSetTierCmd = &cobra.Command{
+	Use:   "set-tier <target> <tier>",
+	Short: "Move a contact between trust tiers (master|friend|acquaintance|blocked)",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+		var resp map[string]string
+		if err := mustOK(c.Call("contact.set-tier", map[string]string{
+			"target": args[0],
+			"tier":   args[1],
+		}, &resp)); err != nil {
+			return err
+		}
+		fmt.Printf("%s: tier=%s\n", resp["pubkey"], resp["tier"])
+		return nil
+	},
+}
+
 func init() {
 	addContactCmd.Flags().StringArrayVar(&addContactRelays, "relay", nil, "relay URL (repeatable)")
 	addContactCmd.Flags().StringVar(&addContactLabel, "label", "", "human label")
@@ -107,4 +134,6 @@ func init() {
 	rootCmd.AddCommand(addContactCmd)
 	rootCmd.AddCommand(contactsCmd)
 	rootCmd.AddCommand(removeContactCmd)
+	contactCmd.AddCommand(contactSetTierCmd)
+	rootCmd.AddCommand(contactCmd)
 }

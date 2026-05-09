@@ -46,6 +46,8 @@ func init() {
 	register("invite.redeem", inviteRedeem)
 	register("config.get", configGet)
 	register("config.set", configSet)
+	register("contact.get", contactGet)
+	register("contact.set-tier", contactSetTier)
 }
 
 // ConfigSetParams is the JSON-stable parameter shape for the "config.set"
@@ -232,6 +234,61 @@ func contactList(ctx context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage)
 		})
 	}
 	return out, nil
+}
+
+// ContactSetTierParams is the JSON-stable parameter shape for
+// "contact.set-tier". Target accepts npub / hex / label (resolved via
+// resolveTarget); Tier must be one of the four constants in
+// internal/contacts.
+type ContactSetTierParams struct {
+	Target string `json:"target"`
+	Tier   string `json:"tier"`
+}
+
+// contactGet looks up a single contact and returns the full record.
+// Target accepts npub / hex / label; the same resolveTarget rules as
+// every other target-bearing method apply.
+func contactGet(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p struct {
+		Target string `json:"target"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	pk, ipcErr := resolveTarget(ctx, d, p.Target)
+	if ipcErr != nil {
+		return nil, ipcErr
+	}
+	c, err := d.Repo.Get(ctx, pk)
+	if err != nil {
+		if errors.Is(err, contacts.ErrNotFound) {
+			return nil, &ipc.Error{Code: ipc.ErrContactNotFound, Message: pk}
+		}
+		return nil, internalErr(err)
+	}
+	return c, nil
+}
+
+// contactSetTier updates the tier of an existing contact. Validation
+// lives in contacts.Repo.SetTier; invalid tier strings come back as
+// INVALID_PARAMS, missing contacts as CONTACT_NOT_FOUND.
+func contactSetTier(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p ContactSetTierParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	pk, ipcErr := resolveTarget(ctx, d, p.Target)
+	if ipcErr != nil {
+		return nil, ipcErr
+	}
+	if err := d.Repo.SetTier(ctx, pk, contacts.Tier(p.Tier)); err != nil {
+		if errors.Is(err, contacts.ErrNotFound) {
+			return nil, &ipc.Error{Code: ipc.ErrContactNotFound, Message: pk}
+		}
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	d.emitDashEvent(dashboard.Event{Kind: "contact.tier-changed"})
+	return map[string]string{"pubkey": pk, "tier": p.Tier}, nil
 }
 
 // contactRemove removes a contact by npub, hex pubkey, or label.
