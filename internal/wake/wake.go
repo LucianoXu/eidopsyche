@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 const (
@@ -127,6 +128,44 @@ func Merge(prev *Signal, next Signal) Signal {
 	from = append(from, prev.Reason)
 	out.CoalescedFrom = from
 	return out
+}
+
+// Submit is the producer-side entry point. It takes the wake-dir flock,
+// reads pending if any, merges with `sig`, and atomically writes it back.
+// Safe under concurrent producers (gate daemon, cron, manual).
+func Submit(dir string, sig Signal) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("mkdir wake dir: %w", err)
+	}
+	lock, err := acquireLock(dir)
+	if err != nil {
+		return err
+	}
+	defer releaseLock(lock)
+	prev, err := ReadPending(dir)
+	if err != nil {
+		return fmt.Errorf("read pending: %w", err)
+	}
+	merged := Merge(prev, sig)
+	return WritePending(dir, merged)
+}
+
+func acquireLock(dir string) (*os.File, error) {
+	path := filepath.Join(dir, lockName)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open lock: %w", err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("flock: %w", err)
+	}
+	return f, nil
+}
+
+func releaseLock(f *os.File) {
+	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	_ = f.Close()
 }
 
 func readSlot(path string) (*Signal, error) {

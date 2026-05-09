@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -123,5 +124,35 @@ func TestMergeChainsAcrossManyArrivals(t *testing.T) {
 	}
 	if len(cur.CoalescedFrom) != 3 {
 		t.Errorf("coalesced_from len = %d, want 3", len(cur.CoalescedFrom))
+	}
+}
+
+func TestSubmitUnderConcurrentProducers(t *testing.T) {
+	dir := t.TempDir()
+	const n = 200
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			sig := Signal{V: 1, ID: "x", Reason: ReasonMindGate, TriggeredAt: int64(i)}
+			if err := Submit(dir, sig); err != nil {
+				t.Errorf("submit %d: %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	got, err := ReadPending(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("nil pending after producers")
+	}
+	if got.CoalescedCount != n-1 {
+		t.Errorf("coalesced_count = %d, want %d", got.CoalescedCount, n-1)
+	}
+	if len(got.CoalescedFrom) != n-1 {
+		t.Errorf("coalesced_from len = %d, want %d", len(got.CoalescedFrom), n-1)
 	}
 }
