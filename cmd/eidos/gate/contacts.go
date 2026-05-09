@@ -5,6 +5,9 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/LucianoXu/eidopsyche/internal/contacts"
+	"github.com/LucianoXu/eidopsyche/internal/identity"
 )
 
 var (
@@ -70,12 +73,13 @@ var contactsCmd = &cobra.Command{
 			return err
 		}
 		defer c.Close()
-		var resp []map[string]any
+		var resp []*contacts.Contact
 		if err := mustOK(c.Call("contact.list", nil, &resp)); err != nil {
 			return err
 		}
-		for _, r := range resp {
-			fmt.Printf("%s  %-20s  %s\n", r["npub"], r["label"], r["tier"])
+		for _, ct := range resp {
+			npub, _ := identity.EncodeNpub(ct.Pubkey)
+			fmt.Printf("%s  %-20s  %s\n", npub, ct.Label, ct.Tier)
 		}
 		return nil
 	},

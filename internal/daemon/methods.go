@@ -53,6 +53,99 @@ func init() {
 	register("service.status", serviceStatus)
 	register("lifecycle.run", lifecycleRunMethod)
 	register("lifecycle.status", lifecycleStatusMethod)
+	register("contact.add-from-card", contactAddFromCard)
+}
+
+// ContactAddFromCardParams is the parameter shape for the
+// "contact.add-from-card" IPC method. URI is a mindgate:// card; if
+// LabelOverride is empty the embedded card label is used.
+type ContactAddFromCardParams struct {
+	URI           string `json:"uri"`
+	LabelOverride string `json:"label_override"`
+}
+
+// contactAddFromCard parses a card URI and admits its npub as a contact.
+// If the pubkey is already known the row is upserted: label is updated
+// (override > embedded), the card's relay hint is appended if new, and
+// the existing tier is preserved. Strict-add semantics live in
+// contact.add; this method is for the dashboard's "scan & add" flow,
+// where re-presenting the same card refreshes contact metadata
+// instead of failing with CONTACT_EXISTS.
+func contactAddFromCard(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p ContactAddFromCardParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	c, err := card.Parse(strings.TrimSpace(p.URI))
+	if err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrCardInvalid, Message: err.Error()}
+	}
+	pk, err := identity.DecodeNpub(c.Npub)
+	if err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidNpub, Message: err.Error()}
+	}
+	label := strings.TrimSpace(p.LabelOverride)
+	if label == "" {
+		label = strings.TrimSpace(c.Label)
+	}
+	if label == "" {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams,
+			Message: "card has no label and none was provided"}
+	}
+
+	// Upsert path.
+	if existing, err := d.Repo.Get(ctx, pk); err == nil && existing != nil {
+		if err := d.Repo.SetLabel(ctx, pk, label); err != nil {
+			return nil, internalErr(err)
+		}
+		relayAdded := false
+		if c.Relay != "" && !relayListContains(existing.Relays, c.Relay) {
+			if err := d.Repo.AddRelay(ctx, pk, c.Relay); err != nil {
+				return nil, internalErr(err)
+			}
+			relayAdded = true
+		}
+		d.emitDashEvent(dashboard.Event{Kind: "contact.relabeled"})
+		if relayAdded {
+			d.Refresh()
+		}
+		saved, _ := d.Repo.Get(ctx, pk)
+		return saved, nil
+	}
+
+	// New-contact path. Skip the relay hint if empty so subscriptionURLs
+	// doesn't end up with an empty URL (which poisons relay health with
+	// dial failures).
+	contact := contacts.Contact{
+		Pubkey: pk,
+		Label:  label,
+		Tier:   contacts.TierFriend,
+	}
+	if c.Relay != "" {
+		contact.Relays = []string{c.Relay}
+	}
+	if err := d.Repo.Add(ctx, contact); err != nil {
+		return nil, internalErr(err)
+	}
+	d.emitDashEvent(dashboard.Event{Kind: "contact.added"})
+	if c.Relay != "" {
+		d.Refresh()
+	}
+	saved, _ := d.Repo.Get(ctx, pk)
+	return saved, nil
+}
+
+// relayListContains is a local set-membership helper used by
+// contact.add-from-card's relay-hint dedup. Kept here rather than
+// imported because the dashboard-adapter copy of this helper is being
+// removed in Phase 5.
+func relayListContains(s []string, x string) bool {
+	for _, v := range s {
+		if v == x {
+			return true
+		}
+	}
+	return false
 }
 
 // ConfigSetParams is the JSON-stable parameter shape for the "config.set"
@@ -221,24 +314,15 @@ func contactAdd(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMess
 	return map[string]bool{"ok": true}, nil
 }
 
-// contactList returns all contacts in the repo.
+// contactList returns all contacts in the repo as the typed slice
+// the contacts package owns. CLI and dashboard both decode into the
+// same struct; npub-form rendering is a render-time concern.
 func contactList(ctx context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
 	all, err := d.Repo.List(ctx)
 	if err != nil {
 		return nil, internalErr(err)
 	}
-	out := make([]map[string]any, 0, len(all))
-	for _, c := range all {
-		npub, _ := identity.EncodeNpub(c.Pubkey)
-		out = append(out, map[string]any{
-			"npub":   npub,
-			"pubkey": c.Pubkey,
-			"label":  c.Label,
-			"tier":   string(c.Tier),
-			"relays": c.Relays,
-		})
-	}
-	return out, nil
+	return all, nil
 }
 
 // ContactSetTierParams is the JSON-stable parameter shape for
@@ -427,25 +511,15 @@ func contactSetLabel(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.Ra
 	return map[string]string{"pubkey": pk, "label": label}, nil
 }
 
-// relayList returns own relays ordered by role then URL.
+// relayList returns own relays ordered by role then URL. Result is
+// the typed OwnRelayRow slice — AddedAt rides along so dashboard and
+// CLI can both decode the same projection. The CLI ignores AddedAt.
 func relayList(ctx context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
 	rows, err := d.ListOwnRelays(ctx)
 	if err != nil {
 		return nil, internalErr(err)
 	}
-	// Return strings only, matching the pre-Phase-4 IPC contract that
-	// the existing CLI (cmd/eidos/gate/relays.go) unmarshals into
-	// []map[string]string. AddedAt is exposed via the typed helper for
-	// dashboard rendering; CLI consumers don't need it. Adding a new
-	// field here would break callers built against the older shape.
-	out := make([]map[string]string, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, map[string]string{
-			"url":  r.URL,
-			"role": r.Role,
-		})
-	}
-	return out, nil
+	return rows, nil
 }
 
 // relayAdd inserts a relay URL with the given role (home|fallback).
@@ -750,7 +824,17 @@ func resolveTarget(ctx context.Context, d *Daemon, input string) (string, *ipc.E
 	return c.Pubkey, nil
 }
 
-// inviteCreate creates a new invite token.
+// InviteCreateMethodResult bundles the persisted invite row with the
+// shareable URI so callers (CLI, dashboard) get both in one round trip
+// without needing a follow-up invite.list to re-fetch the canonical row.
+type InviteCreateMethodResult struct {
+	Invite *invitedb.Invite `json:"invite"`
+	URI    string           `json:"uri"`
+}
+
+// inviteCreate creates a new invite token and returns the canonical
+// invite row + the shareable URI. The dashboard adapter's previous
+// post-create re-read is no longer needed.
 func inviteCreate(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p struct {
 		SingleUse      bool   `json:"single_use"`
@@ -776,15 +860,18 @@ func inviteCreate(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMe
 	if err != nil {
 		return nil, internalErr(err)
 	}
-	return map[string]any{
-		"id":         res.ID,
-		"uri":        res.URI,
-		"expires_at": res.ExpiresAt,
-		"max_uses":   res.MaxUses,
-	}, nil
+	inv, err := d.Invites.Get(ctx, res.ID)
+	if err != nil {
+		return nil, internalErr(err)
+	}
+	return InviteCreateMethodResult{Invite: inv, URI: res.URI}, nil
 }
 
-// inviteList returns invites filtered by status.
+// inviteList returns invites filtered by status. The result is the
+// typed *invitedb.Invite slice; callers needing Unix-second timestamps
+// derive them from the time.Time fields. Pre-Phase-5 the handler
+// returned a flattened map[string]any — switching to the typed shape
+// removes the divergence with the dashboard adapter's projection.
 func inviteList(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p struct {
 		Status string `json:"status"`
@@ -796,24 +883,7 @@ func inviteList(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMess
 	if err != nil {
 		return nil, internalErr(err)
 	}
-	out := make([]map[string]any, 0, len(invites))
-	for _, inv := range invites {
-		var expiresAt int64
-		if !inv.ExpiresAt.IsZero() {
-			expiresAt = inv.ExpiresAt.Unix()
-		}
-		out = append(out, map[string]any{
-			"id":             inv.ID,
-			"created_at":     inv.CreatedAt.Unix(),
-			"expires_at":     expiresAt,
-			"max_uses":       inv.MaxUses,
-			"uses":           inv.Uses,
-			"status":         string(inv.Status),
-			"issuer_label":   inv.IssuerLabel,
-			"redeemer_label": inv.RedeemerLabel,
-		})
-	}
-	return out, nil
+	return invites, nil
 }
 
 // inviteRevoke revokes an invite by id prefix.

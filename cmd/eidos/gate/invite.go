@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/LucianoXu/eidopsyche/internal/daemon"
+	"github.com/LucianoXu/eidopsyche/internal/invitedb"
 )
 
 var (
@@ -62,25 +65,21 @@ var inviteCreateCmd = &cobra.Command{
 			// else default: daemon picks 7d
 		}
 
-		var resp struct {
-			ID        string `json:"id"`
-			URI       string `json:"uri"`
-			ExpiresAt int64  `json:"expires_at"`
-			MaxUses   int    `json:"max_uses"`
-		}
+		var resp daemon.InviteCreateMethodResult
 		if err := mustOK(c.Call("invite.create", params, &resp)); err != nil {
 			return err
 		}
+		inv := resp.Invite
 		// URI goes to stdout for pipe-friendliness.
 		fmt.Println(resp.URI)
 		// Metadata goes to stderr.
-		if resp.ExpiresAt > 0 {
+		if !inv.ExpiresAt.IsZero() {
 			fmt.Fprintf(os.Stderr, "id=%s  max_uses=%d  expires=%s\n",
-				resp.ID[:12], resp.MaxUses,
-				time.Unix(resp.ExpiresAt, 0).UTC().Format(time.RFC3339))
+				inv.ID[:12], inv.MaxUses,
+				inv.ExpiresAt.UTC().Format(time.RFC3339))
 		} else {
 			fmt.Fprintf(os.Stderr, "id=%s  max_uses=%d  expires=never\n",
-				resp.ID[:12], resp.MaxUses)
+				inv.ID[:12], inv.MaxUses)
 		}
 		return nil
 	},
@@ -101,16 +100,7 @@ var inviteListCmd = &cobra.Command{
 			params["status"] = inviteListStatus
 		}
 
-		var resp []struct {
-			ID            string `json:"id"`
-			CreatedAt     int64  `json:"created_at"`
-			ExpiresAt     int64  `json:"expires_at"`
-			MaxUses       int    `json:"max_uses"`
-			Uses          int    `json:"uses"`
-			Status        string `json:"status"`
-			IssuerLabel   string `json:"issuer_label"`
-			RedeemerLabel string `json:"redeemer_label"`
-		}
+		var resp []*invitedb.Invite
 		if err := mustOK(c.Call("invite.list", params, &resp)); err != nil {
 			return err
 		}
@@ -126,8 +116,8 @@ var inviteListCmd = &cobra.Command{
 				maxStr = "∞"
 			}
 			expStr := "never"
-			if inv.ExpiresAt > 0 {
-				expStr = time.Unix(inv.ExpiresAt, 0).UTC().Format("2006-01-02 15:04")
+			if !inv.ExpiresAt.IsZero() {
+				expStr = inv.ExpiresAt.UTC().Format("2006-01-02 15:04")
 			}
 			fmt.Fprintf(w, "%s\t%s\t%d/%s\t%s\t%s\t%s\n",
 				shortID, inv.Status, inv.Uses, maxStr, expStr,
