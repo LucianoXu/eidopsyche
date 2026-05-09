@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.10.0 — 2026-05-09
+
+### Highlights
+
+This release ships **MindForge v0** — the first end-to-end mind-form lifecycle layered on top of the existing MindGate communication layer. A fresh mind-form is one `eidos forge create` away: a Docker volume holds the ontology, an in-container supervisor spawns the gate daemon and per-wake agent, and inbound NIP-17 messages wake the agent through a wake-signal file. `eidos forge` provides host-side instance management and in-container reflection. See `EXAMPLE.md` for the two-instance walkthrough.
+
+This release also lands **Phase 1 of the unified-call-path migration** (SPEC §"调用路径统一", AGENTS §"Single Call Path"): every operator action — CLI, dashboard, future Agent MCP, NIP-46 thin clients — must funnel through one daemon method dispatcher with one JSON parameter schema. Phase 1 adds `(*daemon.Daemon).Call` (the in-process mirror of `ipc.Client.Call`) and migrates the dashboard's `Send` to use it.
+
+### Added
+
+- **MindForge** subcommand tree (`eidos forge`):
+  - Host-side: `create`, `start`, `stop`, `status`, `list`, `purge`, `exec`, `logs`, `wake`, `login`, `ontology export/import`.
+  - In-container reflection: `whoami`, `inbox`, `send`, `memory`, `ontology-status`, `wake`.
+  - `forge create --owner <npub> --relay <ws://…>` orchestrates volume + init container in one step (template stdin pipe, no host bind-mount of the ontology).
+  - `forge login` defaults to reusing host-side Claude credentials; falls back to setup-token; in-container fallback to `claude /login --method=console`.
+- **Container PID 1 supervisor** (`eidos supervisor run` / `agent-runner`): inotify-driven wake-signal promotion, agent harness with file lock + wake-prompt template + `EXIT_AUTH_REQUIRED` handling, root-spawned crond.
+- **Wake signal protocol** (`internal/wake`): coalescing pending/active slot model with flock-protected merging. Producer `Submit` and consumer `PromoteToActive` are safe under concurrent gate / cron / manual triggers.
+- **Mind-form container image** (`docker/mindform/Dockerfile`): busybox + crond + git + Claude Code + embedded eidopsyche bundle. Built and pushed to `ghcr.io/lucianoxu/eidopsyche-mindform` per release.
+- **Ontology scaffold** (`internal/ontology`): embedded v0 template (CLAUDE.md + self / memory / desk / drawer) renders into a fresh volume at init.
+- **Single-call-path principle** declared in `SPEC.md` ("调用路径统一") and `AGENTS.md` ("Single Call Path"). Migration plan: `docs/superpowers/specs/2026-05-09-unified-call-path-design.md` (six phases, this release ships Phase 1).
+- **`(*daemon.Daemon).Call(ctx, method, params, out) error`** — in-process IPC dispatcher. Dashboard adapter, future MCP server, and NIP-46 bridges share the same handler functions as the CLI's socket transport.
+- **`SendParams` / `SendResult`** exported on `internal/daemon` so callers build typed payloads instead of `map[string]any`.
+- **`*ipc.Error` implements `error`**: callers can `errors.As` to recover the typed code.
+- `eidos gate init --service` installs and starts the daemon (and relay, if configured) in one step.
+- Inbound NIP-17 messages write a wake signal to `[wake] dir` when configured (used by the in-container supervisor).
+
+### Fixed
+
+- **Dashboard `Send` to a non-contact npub** previously published silently via fallback relays. Now refuses with `CONTACT_NOT_FOUND` surfaced through the toast layer, matching CLI behavior.
+- Gate auto-restarts the daemon after `eidos self-update` so the running process picks up the new binary.
+- `forge create` skips image pull when the tag is already present locally.
+- `relay status` surfaces `unavailable` instead of a hard error when the relay process holds the event-store lock.
+- `gate` v0.4 upgrade detector uses `[daemon].socket` as the marker, not `[relay].enabled` (which no longer exists post-v0.9.0).
+- Cross-compile to windows for `cmd/eidos/{forge,supervisor}/` and `internal/wake/` — Linux/Unix-only syscalls (`flock`, `Setpgid`, `Kill`) are now gated behind build constraints; the supervisor namespace exists on Windows but has no subcommands, since mind-form containers are Linux-only.
+
+### Migration
+
+No breaking API changes. Existing `eidos gate ...` workflows are unchanged. To start using `eidos forge`:
+
+1. Pull the new image (or let `eidos forge create` pull on first use):
+   ```
+   docker pull ghcr.io/lucianoxu/eidopsyche-mindform:v0.10.0
+   ```
+2. Optionally enable the inbound-message wake hook by adding `[wake] dir = "/path/to/wake-dir"` to `~/.config/eidos/config.toml`. Only relevant if a mind-form container will run against this gate.
+
+
 ## v0.9.0 — 2026-05-09
 
 ### Breaking changes
