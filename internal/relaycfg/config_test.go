@@ -96,3 +96,20 @@ owner_pubkey = "deadbeef"
 		t.Fatal("expected public-with-owner to fail validation")
 	}
 }
+
+func TestSaveLoadRespectsFalseRequired(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Defaults()
+	cfg.Relay.Mode = "public"
+	cfg.Relay.Auth.Required = false
+	if err := Save(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Relay.Auth.Required {
+		t.Errorf("auth.required defaulted back to true after explicit false")
+	}
+}

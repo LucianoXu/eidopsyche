@@ -24,8 +24,8 @@ type RelaySection struct {
 	Mode        string      `toml:"mode"`
 	Listen      string      `toml:"listen"`
 	OwnerPubkey string      `toml:"owner_pubkey,omitempty"`
-	TLS         TLSSection  `toml:"tls,omitempty"`
-	Auth        AuthSection `toml:"auth,omitempty"`
+	TLS         TLSSection  `toml:"tls"`
+	Auth        AuthSection `toml:"auth"`
 }
 
 type TLSSection struct {
@@ -66,13 +66,16 @@ func Load(dir string) (Config, error) {
 		cfg.Relay.Auth.Required = true
 	}
 	if err := cfg.Validate(); err != nil {
-		return Config{}, err
+		return Config{}, fmt.Errorf("relaycfg load %s: %w", path, err)
 	}
 	return cfg, nil
 }
 
-// Save writes cfg to dir/config.toml (mkdir -p the parent first).
+// Save validates cfg and writes it to dir/config.toml (mkdir -p the parent first).
 func Save(dir string, cfg Config) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("relaycfg save mkdir %s: %w", dir, err)
 	}
@@ -114,16 +117,16 @@ func (c Config) Validate() error {
 // EventStorePath returns the canonical events.db path for a config dir.
 func EventStorePath(dir string) string { return filepath.Join(dir, "events.db") }
 
-// DefaultDir returns the conventional relay config dir under the gate's
-// XDG_CONFIG_HOME (or $HOME/.config). Stays a sibling of gate's config
-// dir so co-located deployments share the parent.
+// DefaultDir returns the conventional relay config dir under
+// XDG_CONFIG_HOME/eidos/relay (or $HOME/.config/eidos/relay if the
+// XDG variable is unset).
 func DefaultDir() (string, error) {
 	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
 		return filepath.Join(v, "eidos", "relay"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("relaycfg default dir: %w", err)
 	}
 	return filepath.Join(home, ".config", "eidos", "relay"), nil
 }
