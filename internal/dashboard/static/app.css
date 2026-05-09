@@ -1591,5 +1591,105 @@ p.lifecycle-log-foot a:hover { color: var(--seal); }
   to   { opacity: 0; transform: translateY(-4px); }
 }
 
+/* ---------------------------------------------------------------- *
+ * Relay-health strip — page-foot colophon.
+ * Always-on health indicator pinned beneath the main layout. Reuses
+ * the role-pill / state-pill chip vocabulary from Phase 4 so the
+ * strip stays in step with the Settings → Relays pane (one truth,
+ * two surfaces). Each entry self-describes inline, so the strip
+ * carries no column headers — the leading "RELAYS" mono caps marks
+ * the family, then each row reads as { role · url · state · ago }.
+ * ---------------------------------------------------------------- */
+
+footer.relays-strip {
+  flex-shrink: 0;
+  background: var(--bg);
+  border-top: 1px solid var(--rule-2);
+  padding: 9px 28px 10px;
+  position: relative;
+}
+
+/* dual-stroke imprint — same vocabulary as sidebar::after */
+footer.relays-strip::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0;
+  top: -4px;
+  height: 1px;
+  background: var(--rule);
+  pointer-events: none;
+}
+
+.relay-strip-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 22px;
+  font-family: var(--serif);
+  min-height: 22px;
+}
+
+.strip-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--fg-mute);
+  padding-right: 18px;
+  border-right: 1px solid var(--rule);
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+}
+
+.strip-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.strip-row .role-pill { vertical-align: 0; }
+
+.strip-url {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  color: var(--fg);
+  background: transparent;
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.strip-row .state-pill {
+  font-size: 9.5px;
+  padding: 1px 8px 1px 6px;
+}
+
+.strip-since {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-feature-settings: "tnum" 1;
+  color: var(--fg-mute);
+  letter-spacing: 0.04em;
+}
+.strip-since::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--fg-mute);
+}
+
+.strip-empty {
+  font-family: var(--serif);
+  font-style: italic;
+  color: var(--fg-mute);
+  font-size: 13px;
+}
+
 /* ---------------------------------------------------------------- */
 

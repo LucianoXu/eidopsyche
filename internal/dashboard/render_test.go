@@ -127,3 +127,71 @@ func labels(cs []sidebarContact) []string {
 	}
 	return out
 }
+
+func TestRender_RelaysStrip_PillVocabulary(t *testing.T) {
+	r, err := newRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := r.Render("relays", relaysData{Rows: []relayRow{
+		{URL: "ws://relay.example.invalid", Role: "home", State: "connected", LastEventAgo: "0s"},
+		{URL: "ws://fallback.example.invalid", Role: "fallback", State: "error", LastError: "tcp dial refused", LastEventAgo: "12m"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Strip frame: leading mono "Relays" label and the inner host id
+	// htmx swaps into.
+	for _, want := range []string{
+		`class="relay-strip-inner"`,
+		`id="relays-tbody"`,
+		`class="strip-label"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("strip frame missing %q in: %s", want, out)
+		}
+	}
+	// Reuses the chip vocabulary from the Settings → Relays pane so the
+	// two surfaces stay in step.
+	for _, want := range []string{
+		`class="role-pill is-home"`,
+		`class="role-pill is-fallback"`,
+		`class="state-pill is-connected"`,
+		`class="state-pill is-error"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("strip missing chip class %q in: %s", want, out)
+		}
+	}
+	// LastError is exposed via the state-pill title (hover tooltip),
+	// not as a visible glyph — keeps the strip tidy when relays are
+	// unhealthy.
+	if !strings.Contains(out, `title="tcp dial refused"`) {
+		t.Errorf("strip missing LastError tooltip on error row: %s", out)
+	}
+	// The confusing column headers from the old <table> must not leak
+	// back into this surface; the strip is supposed to be self-
+	// describing without a thead row.
+	for _, banned := range []string{`<thead`, `<th>role</th>`, `<th>url</th>`, `<th>last event</th>`} {
+		if strings.Contains(out, banned) {
+			t.Errorf("strip should not contain table-header markup %q in: %s", banned, out)
+		}
+	}
+}
+
+func TestRender_RelaysStrip_EmptyState(t *testing.T) {
+	r, err := newRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := r.Render("relays", relaysData{Rows: nil})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `class="strip-empty"`) {
+		t.Errorf("empty strip missing .strip-empty marker: %s", out)
+	}
+	if !strings.Contains(out, "No relays subscribed yet.") {
+		t.Errorf("empty strip missing human copy: %s", out)
+	}
+}
