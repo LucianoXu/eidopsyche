@@ -120,14 +120,14 @@ Each active plan is one file at `/eidos/run/plans/<id>.json`:
 ```json
 {
   "v": 1,
-  "id": "01J9NK...",
+  "id": "20260509T123000Z-plan-7f2e",
   "at": 1715284800,
   "hint": "follow up on bob's question",
   "created_at": 1715277600
 }
 ```
 
-Files are written atomically (`tmp + rename`). The filename is the ULID; this gives lexicographic ordering by creation time, which is stable enough for `forge plan list` ordering.
+Files are written atomically (`tmp + rename`). The filename is the ID (`<UTC-timestamp>-plan-<4-hex>`), matching the scheme already used for `wake.Signal.ID`. Timestamp prefix gives lexicographic ordering by creation time, which is stable enough for `forge plan list` ordering. No new dependency needed.
 
 ### 5.2 Bounds and rules
 
@@ -165,15 +165,15 @@ eidos forge plan clear
 `plan add` echoes the assigned ID and the resolved fire time:
 
 ```
-plan 01J9NK6EFRX9TGPV4ASJ8H7C2N set for 2026-05-09T14:00:00+08:00 (in 1h57m)
+plan 20260509T123000Z-plan-7f2e set for 2026-05-09T14:00:00+08:00 (in 1h57m)
 ```
 
 `plan list` prints a small table:
 
 ```
-ID                           AT                          IN       HINT
-01J9NK6EFRX9TGPV4ASJ8H7C2N   2026-05-09T14:00:00+08:00   1h57m    follow up on bob's question
-01JBMQ8XRZP4WNS7G5YH2XCTKD   2026-05-10T22:30:00+08:00   1d8h     check whether the snowflake bug returned
+ID                            AT                          IN       HINT
+20260509T123000Z-plan-7f2e    2026-05-09T14:00:00+08:00   1h57m    follow up on bob's question
+20260509T144000Z-plan-9a3c    2026-05-10T22:30:00+08:00   1d8h     check whether the snowflake bug returned
 ```
 
 Times rendered in the mind-form's configured `tz` for human legibility. `cancel` and `clear` are quiet on success; they error on a missing ID.
@@ -353,7 +353,7 @@ These pieces are computed inside the container (the host-side `forge status` com
 - `internal/scheduler` — `Add` enforces 60s..30d bounds, `List` excludes `fired/`, `Cancel` is idempotent on missing IDs, `ScanDue` is monotonic in time, `MarkFired` is atomic, two concurrent `Add` produce two distinct files.
 - `internal/dreamstate` — missing-file → zero State without error; `Begin`+`End` round-trip; concurrent `Begin` doesn't interleave; `End` without prior `Begin` increments `dream_count`.
 - `internal/config` — happy-path + malformed-input rejection for each new key; the heartbeat-interval validator's error message names the full supported set; `quiet_start` without `quiet_end` rejected; `tz` validated.
-- `cmd/eidos/supervisor/crontab.go` — every value in the supported set produces an expression accepted by a cron parser (use the existing `github.com/robfig/cron/v3` if already a dep, otherwise vendor a tiny validator).
+- `cmd/eidos/supervisor/crontab.go` — every value in the supported set produces the expected cron expression (table test); unsupported values produce an error that names the supported set. No external cron parser is needed because the supported set is a closed enumeration.
 - `cmd/eidos/supervisor/agent_runner.go` — fake clock + fake config + fake `dream-state.json` produces expected `MasterLikelyAsleep` (incl. the wrap-around 22:00–06:00 case), `DreamEligible`, `SinceLastDreamSeconds`. Planned-wake path stamps `PlanID` from the active wake file.
 - `cmd/eidos/supervisor/scheduler.go` — fake ticker fires due plans via a fake `wake.Submit`; plan moves to `fired/`; double-fire avoided across two ticks of the same plan ID.
 - `cmd/eidos/forge` — cobra-level table tests for arg parsing, error formatting, RFC3339 vs duration vs unix-seconds handling on `plan add`.
