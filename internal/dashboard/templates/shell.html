@@ -65,7 +65,10 @@
       if (!host) return;
       var el = document.createElement("div");
       el.className = "toast is-" + (kind || "info");
-      el.setAttribute("role", "alert");
+      // role="alert" forces an assertive screen-reader announcement;
+      // reserve it for errors so an info toast stays polite (and doesn't
+      // contradict the parent #toasts region's aria-live=polite).
+      if (kind === "error") el.setAttribute("role", "alert");
       el.textContent = text;
       el.addEventListener("click", function () { el.remove(); });
       host.appendChild(el);
