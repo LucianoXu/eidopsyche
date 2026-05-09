@@ -1,6 +1,6 @@
 # Unified call path for all caller surfaces — design
 
-**Status:** draft, awaiting review
+**Status:** implemented (Phase 1 in PR #25; Phases 2–6 land together as the follow-up PR)
 **Author:** Claude (with Yingte)
 **Date:** 2026-05-09
 **Scope:** `internal/daemon/`, `internal/dashboard/`, `cmd/eidos/gate/`, `internal/ipc/`
@@ -277,4 +277,16 @@ Out of scope: the NIP-46 listener implementation. The shape is the same — a No
 
 ## §13 — Follow-up artifact
 
-A bite-sized implementation plan with TDD-shaped tasks lives in `docs/superpowers/plans/2026-05-09-unified-call-path.md` (to be written when this design is approved). The plan walks Phase 1 in step-by-step detail; later phases will get their own plans as they become next-up.
+Phase 1 had its own bite-sized plan: `docs/superpowers/plans/2026-05-09-unified-call-path-phase-1.md` (PR #25, merged).
+
+Phases 2–6 were executed in a single follow-up branch with one commit per phase. They didn't ship per-phase plan docs — the design doc above (§5 method table, §6 phase-by-phase scope) was specific enough to drive each commit directly.
+
+## §14 — Implementation log
+
+Per-phase landings:
+- **Phase 1** — `(*Daemon).Call` helper, `SendParams`/`SendResult`, `dashboardAdapter.Send`. PR #25.
+- **Phase 2** — `config.get` / `config.set` IPC methods; CLI `runConfigGet`/`runConfigSet` and adapter `ConfigSnapshot`/`ConfigSet` move to Call. The three-way config.toml race is gone (lock lives in the handler).
+- **Phase 3** — `contact.get` / `contact.set-tier`. CLI gains `eidos gate contact set-tier <target> <tier>`.
+- **Phase 4** — `card.scan`, `service.status`, `lifecycle.run`, `lifecycle.status`. New IPC error codes: `LIFECYCLE_BUSY`, `CARD_INVALID`. The optional `eidos gate status --json` from §7 is intentionally skipped: the existing `eidos gate status` is service-manager (systemd / launchd) state, not daemon-runtime, and overloading would surprise operators; the IPC method is in place for future surfaces.
+- **Phase 5** — every remaining adapter method routes through Call. New IPC method `contact.add-from-card` carries the dashboard's upsert semantics. `relay.list` / `contact.list` / `invite.list` / `invite.create` switched to typed shapes (`OwnRelayRow`, `*contacts.Contact`, `*invitedb.Invite`, `InviteCreateMethodResult`); CLI updated to deserialize them. The two relay-error sentinel translation tables collapse into one helper.
+- **Phase 6** — Go AST lint test in `internal/daemon/dashboard_adapter_lint_test.go`. Every `dashboardAdapter` method must contain a `Call` invocation, the `subscribeDashboard` streaming exception, or a doc-comment `adapter-shim:` marker. `OwnPubkey` is the sole shim today (defensive `Key.PublicHex` fallback when `whoami` fails).
