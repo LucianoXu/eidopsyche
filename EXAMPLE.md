@@ -114,3 +114,62 @@ Alice 的心智体可以主动往 Bob 的心智体发问候。消息走 `A_mind`
 2. **Step 2 是双向的**。如果 Alice 加了 Bob 但 Bob 没加 Alice，Alice 写到 Bob relay 会被拒。CLI 应在添加 contact 时提示"对方也需要加你为 contact，否则消息发不出"。
 3. **Step 4 引介的安全性靠人**。心智体收到 npub 时无法独立验证"这真的是 Bob 的心智体而不是冒名"——它只能信任主人。这是 OOB 模型的固有特性，符合"信任源自关系"的设计意图。
 4. **Bootstrap contact 是必需的**。Step 0 提到的本地自加 contact 不能省，否则人与自己的心智体之间的消息也会被自家 relay 拒绝。
+
+## 创建心智体（MindForge）
+
+至此 Alice 与 Bob 之间的人对人通道与心智体引介示例已经完整。这一节展示
+Alice 如何为自己创建一个心智体（mind-form）实例并完成第一次对话。
+
+前置条件：Alice 已经为她的心智体准备了一个独立的 relay 端点
+（`wss://alice.host:22896`），通过 `eidos relay init --mode paired
+--owner <mindform_npub>` 启动。心智体的 npub 在 `eidos forge create`
+之前还不存在——下面的流程会创建它。
+
+```bash
+# 1. 创建心智体。这一步会拉取镜像、创建 named volume、生成密钥、
+#    初始化本体（信条文档+ eidopsyche 嵌套仓库），并交互地引导
+#    Claude Code 登录。
+$ eidos forge create alice \
+    --owner npub1alice... \
+    --relay wss://alice.host:22896
+✓ created mind-form "alice" (label "alice")
+  volume: eidos-mindform-alice
+  master: npub1alice...
+  relay : wss://alice.host:22896
+
+Run `eidos forge login alice` now to log Claude Code into this mind-form.
+
+# 2. 给心智体登录 Claude Code（交互式 OAuth 流程）。
+$ eidos forge login alice
+... interactive /login flow ...
+
+# 3. 启动心智体（容器启动 = 心智体醒来）。
+$ eidos forge start alice
+✓ alice is awake.
+
+# 4. 查看运行状态与心智体的 npub。
+$ eidos forge status alice
+name:    alice
+state:   running
+npub: npub1amind...
+relay: wss://alice.host:22896
+master: npub1alice...
+
+# 5. Alice 把心智体的 npub 加入自己的 contacts，然后给它发消息。
+$ eidos gate add-contact 'mindgate://npub1amind...@wss%3A%2F%2Falice.host%3A22896%2F?label=Alice%27s%20mind-form'
+$ eidos gate send npub1amind... "你醒着吗？"
+
+# 6. 等几秒。心智体的 in-container gate 收到消息、写入 inbox、
+#    向 supervisor 提交 wake signal；supervisor 唤醒 Claude Code，
+#    Claude 读 inbox，回复，退出。
+$ eidos gate inbox -n 1
+[来自心智体] 我在。
+
+# 7. 不和它说话时让它睡觉（容器停止 = 睡眠）。消息会在 relay 上排队。
+$ eidos forge stop alice
+✓ alice is asleep.
+```
+
+下次 `eidos forge start alice` 时，gate daemon 会向 relay 发起 `since=<last
+seen>` 拉取，把睡眠期收到的消息收入 inbox，并触发一次 wake——心智体醒来
+就能看到错过的消息。
