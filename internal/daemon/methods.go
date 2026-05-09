@@ -359,8 +359,12 @@ func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	if err := d.Box.AppendOutbox(pre); err != nil {
 		return nil, internalErr(err)
 	}
-	preCopy := pre
-	d.emitDashEvent(dashboard.Event{Kind: "outbox.message", Sent: &preCopy})
+	// Note: we deliberately do NOT emit `outbox.message` here. The
+	// dashboard's POST /thread/{pubkey}/send response delivers the
+	// initial bubble inline (htmx swaps it `beforeend`). Emitting via
+	// SSE would produce a duplicate bubble in the same thread view.
+	// Tier-2 status updates (✓ → ✓✓) are delivered via OOB swap from
+	// handleInboundAck; see internal/dashboard/sse.go.
 
 	urls, err := d.publishTargets(ctx, c.Relays)
 	if err != nil {
@@ -387,8 +391,9 @@ func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	final.AcceptedBy = accepted
 	final.Final = true
 	_ = d.Box.AppendOutbox(final)
-	finalCopy := final
-	d.emitDashEvent(dashboard.Event{Kind: "outbox.message", Sent: &finalCopy})
+	// No SSE emit here either — the POST /send response already rendered
+	// the ✓ bubble (deps.Send only returns nil when at least one relay
+	// accepted, so the dashboard handler can safely set Status="sent").
 
 	return SendResult{
 		EventID:    wrapBob.ID,

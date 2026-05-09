@@ -97,6 +97,46 @@ func TestRender_Bubble_StatusDelivered(t *testing.T) {
 	}
 }
 
+func TestRender_Bubble_OOBSwap(t *testing.T) {
+	// When OOB is set, the outer div gains hx-swap-oob targeting itself
+	// by data-event-id so the SSE-delivered bubble replaces an existing
+	// bubble in the thread instead of appending a duplicate.
+	r, err := newRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := r.Render("bubble", bubbleData{
+		Self: true, From: "you", Text: "hi", At: time.Now(),
+		EventID: "abc123", Status: "delivered", OOB: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `hx-swap-oob="true"`) {
+		t.Errorf("OOB bubble missing hx-swap-oob attribute: %s", out)
+	}
+	if !strings.Contains(out, `id="bubble-abc123"`) {
+		t.Errorf("OOB bubble missing id for OOB target: %s", out)
+	}
+}
+
+func TestRender_Bubble_NoOOBByDefault(t *testing.T) {
+	r, err := newRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := r.Render("bubble", bubbleData{
+		Self: true, From: "you", Text: "hi", At: time.Now(),
+		EventID: "abc123", Status: "sent",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "hx-swap-oob") {
+		t.Errorf("default bubble should not have hx-swap-oob: %s", out)
+	}
+}
+
 func TestRender_Bubble_StatusEmpty_NoMarker(t *testing.T) {
 	r, err := newRenderer()
 	if err != nil {

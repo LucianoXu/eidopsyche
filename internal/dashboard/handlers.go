@@ -266,12 +266,17 @@ func sendChat(w http.ResponseWriter, req *http.Request, deps DashboardDeps, r *r
 		return
 	}
 
+	// deps.Send only returns nil when at least one relay accepted the
+	// publish (otherwise it returns ErrNoRelaysReachable), so we can
+	// safely render the initial bubble at tier-1 (✓). Tier-2 (✓✓) is
+	// applied later by the SSE OOB-swap path when the peer's ack arrives.
 	out, rerr := r.Render("bubble", bubbleData{
 		Self:    true,
 		From:    "you",
 		Text:    text,
 		At:      time.Now(),
 		EventID: eventID,
+		Status:  "sent",
 	})
 	if rerr != nil {
 		logger.Error("render bubble", "err", rerr)

@@ -91,6 +91,41 @@
     // to surface its own success / info message.
     window.eidosToast = showToast;
   })();
+
+  // OOB swap shim for htmx-ext-sse.
+  //
+  // htmx-ext-sse (v2.2.2) calls htmx's low-level swap which does NOT
+  // process `hx-swap-oob` attributes the way HTTP responses do. Without
+  // this shim, an SSE message like `outbox.message:<peer>` carrying a
+  // single OOB bubble (used by tier-2 ack to flip ✓ → ✓✓) gets appended
+  // by the default beforeend swap instead of replacing the existing
+  // bubble — visible regression: duplicate bubbles per send.
+  //
+  // We hook `htmx:sseBeforeMessage`, parse the data, and if the only
+  // root element carries `hx-swap-oob` and an `id` that matches an
+  // existing element in the document, we replace it ourselves and
+  // preventDefault to suppress the extension's default swap. Falls
+  // through to the default swap when no target exists, which keeps
+  // CLI/MCP-originated bubbles able to appear live (a regular
+  // beforeend append).
+  (function () {
+    document.body.addEventListener("htmx:sseBeforeMessage", function (evt) {
+      var data = evt.detail && evt.detail.event && evt.detail.event.data;
+      if (typeof data !== "string" || data.length === 0) return;
+      var tmpl = document.createElement("template");
+      tmpl.innerHTML = data.trim();
+      var root = tmpl.content.firstElementChild;
+      // Only intercept when the message is exactly one OOB element.
+      if (!root || tmpl.content.children.length !== 1) return;
+      if (!root.hasAttribute("hx-swap-oob")) return;
+      var id = root.getAttribute("id");
+      if (!id) return;
+      var existing = document.getElementById(id);
+      if (!existing) return; // no target → fall through to default append
+      existing.replaceWith(root);
+      evt.preventDefault();
+    });
+  })();
 </script>
 </body>
 </html>{{end}}

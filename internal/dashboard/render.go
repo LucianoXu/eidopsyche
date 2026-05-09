@@ -110,6 +110,13 @@ type bubbleData struct {
 	// is true; renders as ✓ for sent (relay accepted) and ✓✓ for delivered
 	// (peer-confirmed receipt via tier-2 ack).
 	Status string
+	// OOB, when true, renders the outer bubble div with
+	// `hx-swap-oob='outerHTML:[data-event-id="<EventID>"]'` so htmx
+	// REPLACES an existing bubble of the same EventID instead of
+	// appending a new one. Used by the SSE outbox.message channel to
+	// flip ✓ → ✓✓ on the bubble that the form-submit response already
+	// placed in the thread.
+	OOB bool
 }
 
 type messagesData struct {
