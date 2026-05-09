@@ -248,7 +248,7 @@ func (a dashboardAdapter) RevokeInvite(ctx context.Context, idPrefix string) (st
 		FullID string `json:"full_id"`
 	}
 	if err := a.d.Call(ctx, "invite.revoke", map[string]string{"id_prefix": idPrefix}, &out); err != nil {
-		return "", err
+		return "", translateInviteError(err)
 	}
 	return out.FullID, nil
 }
@@ -303,6 +303,29 @@ func (a dashboardAdapter) AddOwnRelay(ctx context.Context, rawURL, role string) 
 func (a dashboardAdapter) RemoveOwnRelay(ctx context.Context, rawURL string) error {
 	err := a.d.Call(ctx, "relay.remove", map[string]string{"url": rawURL}, nil)
 	return translateRelayError(err)
+}
+
+// translateInviteError maps the IPC handler's typed invite codes back
+// onto the invitedb sentinels the dashboard handler errors.Is-checks.
+// Without this, post-Phase-5 the handler's switch would fall through
+// to the generic 502 path because the adapter returns an *ipc.Error
+// rather than the wrapped invitedb sentinel that pre-Phase-5
+// d.InviteRevoke / d.InviteRedeem returned directly.
+func translateInviteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var ipcErr *ipc.Error
+	if !errors.As(err, &ipcErr) {
+		return err
+	}
+	switch ipcErr.Code {
+	case ipc.ErrInviteInvalidToken:
+		return fmt.Errorf("%w: %s", invitedb.ErrNotFound, ipcErr.Message)
+	case ipc.ErrInvitePrefixAmbiguous:
+		return fmt.Errorf("%w: %s", invitedb.ErrPrefixAmbiguous, ipcErr.Message)
+	}
+	return err
 }
 
 // translateRelayError maps the IPC handler's typed codes back onto the
