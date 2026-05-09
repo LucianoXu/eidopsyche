@@ -1,6 +1,9 @@
 package ontology
 
 import (
+	"archive/tar"
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,5 +70,30 @@ func TestScaffoldRefusesIfTargetNonEmpty(t *testing.T) {
 	err := Scaffold(dir, Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d"})
 	if err == nil {
 		t.Errorf("expected refusal on non-empty target")
+	}
+}
+
+func TestTarStreamProducesAllEntries(t *testing.T) {
+	params := Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d"}
+	var buf bytes.Buffer
+	if err := TarStream(&buf, params); err != nil {
+		t.Fatal(err)
+	}
+	tr := tar.NewReader(&buf)
+	seen := map[string]bool{}
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen[h.Name] = true
+	}
+	for _, want := range []string{"CLAUDE.md", "self/identity.md", "memory/mood.md", ".gitignore"} {
+		if !seen[want] {
+			t.Errorf("tar missing %q", want)
+		}
 	}
 }

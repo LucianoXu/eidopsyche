@@ -1,13 +1,16 @@
 package ontology
 
 import (
+	"archive/tar"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
+	"time"
 )
 
 // Params are the substitutions Scaffold makes into .tpl files.
@@ -59,6 +62,61 @@ func Scaffold(dir string, params Params) error {
 		}
 		if err := os.WriteFile(dst, body, 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", dst, err)
+		}
+		return nil
+	})
+}
+
+// TarStream writes a tar of the rendered template tree to w. Used by
+// `eidos forge create` to pipe the template into a one-shot init container
+// over stdin.
+func TarStream(w io.Writer, params Params) error {
+	tw := tar.NewWriter(w)
+	defer tw.Close()
+	now := time.Now()
+	return fs.WalkDir(templateFS, "template", func(srcPath string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel("template", srcPath)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		if d.IsDir() {
+			return tw.WriteHeader(&tar.Header{
+				Name:     rel + "/",
+				Mode:     0o700,
+				Typeflag: tar.TypeDir,
+				ModTime:  now,
+			})
+		}
+		body, err := fs.ReadFile(templateFS, srcPath)
+		if err != nil {
+			return err
+		}
+		name := rel
+		if strings.HasSuffix(name, ".tpl") {
+			name = strings.TrimSuffix(name, ".tpl")
+			rendered, err := renderTemplate(string(body), params)
+			if err != nil {
+				return err
+			}
+			body = []byte(rendered)
+		}
+		if err := tw.WriteHeader(&tar.Header{
+			Name:     name,
+			Mode:     0o600,
+			Size:     int64(len(body)),
+			Typeflag: tar.TypeReg,
+			ModTime:  now,
+		}); err != nil {
+			return err
+		}
+		if _, err := tw.Write(body); err != nil {
+			return err
 		}
 		return nil
 	})
