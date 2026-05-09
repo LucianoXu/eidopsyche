@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **First Contact wizard** (`eidos` first-run, `eidos summon` always) — guided
+  ritual that summons a mind-form with a generated identity, dedicated
+  birth-wake, and private `essence/secret.md`. Bare `eidos` on a fresh
+  install auto-launches the wizard; `eidos summon` runs it for additional
+  mind-forms. Requires `claude` (Claude Code) on PATH and logged in. Lives
+  at `internal/firstcontact/` with a renderer-agnostic state machine that
+  a future WebUI can plug into.
+- **`birth` wake type** — fourth wake reason parallel to mindgate /
+  heartbeat / manual. The supervisor consumes one-shot `birth.json` at
+  most once per mind-form, guarded by `essence/born_at`. The agent's
+  birth boot prompt internalizes identity, generates a private secret,
+  writes the first response, and stamps born_at.
+- Ontology template additions: `journal/`, `essence/` directories.
+  `Params.JournalEntry` lets `TarStream` carry a literal
+  `journal/0000-summoning.md` without running through `text/template`.
+- `identity.Bootstrap` / `BootstrapWithExistingKey` helpers + `eidos gate
+  init --key-from-existing` flag, used by the wizard's keypair-injection
+  path so the operator's summoning book can include the new mind-form's
+  npub before the container exists.
+- `forgectl.PurgeForFailedSummon` and `WriteToVolume` helpers for the
+  wizard's rollback path and small-file volume writes.
+
+### Manual smoke checklist
+
+1. `rm -rf ~/.config/eidos && eidos` → wizard launches.
+2. Pick `zh`, enter label "测试", pick public-station relay default.
+3. Enter character "庄子", confirm derived slug `zhuangzi`.
+4. Watch the typewriter response render.
+5. `eidos forge logs zhuangzi` → see the running container.
+
 ## v0.10.1 — 2026-05-09
 
 ### Fixed
