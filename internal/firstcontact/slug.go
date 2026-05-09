@@ -56,7 +56,7 @@ func Derive(summonedName string, existing []string) string {
 	if !exists(s) {
 		return s
 	}
-	for i := 2; i < 1000; i++ {
+	for i := 2; i < 10000; i++ {
 		suffix := "-" + strconv.Itoa(i)
 		base := s
 		if len(base)+len(suffix) > 30 {
@@ -70,7 +70,16 @@ func Derive(summonedName string, existing []string) string {
 			return cand
 		}
 	}
-	return "mindform-" + strconv.Itoa(len(existing)+1)
+	// Pathological tail: fall back to mindform-<N> where N is the
+	// smallest unused integer, not just len(existing)+1 (which can
+	// collide if existing already contains that exact slug).
+	for i := 1; i < 100000; i++ {
+		cand := "mindform-" + strconv.Itoa(i)
+		if forgectl.ValidateName(cand) == nil && !exists(cand) {
+			return cand
+		}
+	}
+	return "mindform-overflow"
 }
 
 func makeExistsFn(existing []string) func(string) bool {

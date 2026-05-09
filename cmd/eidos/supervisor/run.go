@@ -151,6 +151,12 @@ func watchWakesIn(ctx context.Context, dir string, spawn SpawnAgent) error {
 				}
 				continue
 			}
+			// Pending wakes are also a retry opportunity for a stranded
+			// birth.json (its handler error left it in place; no new fsnotify
+			// event would otherwise fire). Cheap when birth.json is absent.
+			if err := drainBirthIfPresent(ctx, dir, ontologyDir, birthHandlerForProduction); err != nil {
+				log.Printf("birth drain (pending event): %v", err)
+			}
 			if _, err := drainPending(ctx, dir, spawn); err != nil {
 				// Spawn errors (claude exit non-zero, OAuth missing,
 				// transient runtime issues) are runtime conditions, not

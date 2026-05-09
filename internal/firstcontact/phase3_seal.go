@@ -132,13 +132,21 @@ func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	if err := forge.Orchestrate(ctx, d.DockerClient, s.Slug, createOpts); err != nil {
 		return nil, fmt.Errorf("forge.Orchestrate: %w", err)
 	}
+	// purge runs rollback against a fresh, time-bounded context so that
+	// a Ctrl-C / cancelled parent does not also cancel the cleanup —
+	// otherwise the user's interrupt would leak the volume + container.
+	purge := func() {
+		cleanCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		_ = forgectl.PurgeForFailedSummon(cleanCtx, d.DockerClient, s.Slug)
+	}
 
 	// Calling-words.
 	st := r.Status(stringFor(s.Lang, "phase3_words_status"))
 	words, err := c.CallText(ctx, buildCallingWordsPrompt(book, s.Lang))
 	st.Stop()
 	if err != nil {
-		_ = forgectl.PurgeForFailedSummon(ctx, d.DockerClient, s.Slug)
+		purge()
 		return nil, fmt.Errorf("calling-words: %w", err)
 	}
 	s.CallingWords = words
@@ -147,7 +155,7 @@ func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 
 	// Write calling-words and birth.json into the volume.
 	if err := d.WriteVolume(ctx, s.Slug, "ontology/essence/calling-words.md", []byte(words)); err != nil {
-		_ = forgectl.PurgeForFailedSummon(ctx, d.DockerClient, s.Slug)
+		purge()
 		return nil, fmt.Errorf("write calling-words: %w", err)
 	}
 	birth := wake.BirthSignal{
@@ -160,17 +168,17 @@ func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	}
 	birthBody, err := json.MarshalIndent(birth, "", "  ")
 	if err != nil {
-		_ = forgectl.PurgeForFailedSummon(ctx, d.DockerClient, s.Slug)
+		purge()
 		return nil, fmt.Errorf("marshal birth signal: %w", err)
 	}
 	if err := d.WriteVolume(ctx, s.Slug, "run/wake/birth.json", birthBody); err != nil {
-		_ = forgectl.PurgeForFailedSummon(ctx, d.DockerClient, s.Slug)
+		purge()
 		return nil, fmt.Errorf("write birth.json: %w", err)
 	}
 
 	// Start the container; the supervisor sees birth.json and runs the agent.
 	if err := d.ContainerStart(ctx, s.Slug); err != nil {
-		_ = forgectl.PurgeForFailedSummon(ctx, d.DockerClient, s.Slug)
+		purge()
 		return nil, fmt.Errorf("start container: %w", err)
 	}
 
@@ -178,7 +186,7 @@ func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	body, err := d.ResponseWait(ctx, s.Slug, "ontology/journal/0000-response.md", 90*time.Second)
 	st2.Stop()
 	if err != nil {
-		_ = forgectl.PurgeForFailedSummon(ctx, d.DockerClient, s.Slug)
+		purge()
 		return nil, fmt.Errorf("birth response: %w", err)
 	}
 

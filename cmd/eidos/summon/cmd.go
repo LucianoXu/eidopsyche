@@ -22,6 +22,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/firstcontact/render"
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
+	"github.com/LucianoXu/eidopsyche/internal/ipc"
 	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
@@ -144,13 +145,34 @@ func stringFor(lang, key string) string {
 	return "💠 Ritual complete. `eidos forge logs %s` to watch it breathe."
 }
 
-// addContactDirect is the bootstrap-exception ContactAdder: when the
-// host gate daemon is not running (the wizard does not start it),
-// the new MindForm is added to the operator's contacts by writing
-// directly to state.db. Documented as an exception per
-// internal/firstcontact/doc.go and CLAUDE.md "Single Call Path".
+// addContactDirect returns a ContactAdder that prefers the live gate
+// daemon's IPC `contact.add` method when the daemon is reachable, and
+// falls back to a direct state.db write only when the daemon is down
+// (the typical wizard run). The fallback is the second sanctioned
+// bootstrap exception per CLAUDE.md "Single Call Path"; using IPC when
+// available keeps the daemon's `contact.added` event + relay
+// subscription refresh in the loop.
 func addContactDirect(stateDir string) func(context.Context, string, string, string) error {
 	return func(ctx context.Context, npub, label, relay string) error {
+		// Prefer IPC if the daemon is reachable.
+		if cfg, err := config.Load(filepath.Join(stateDir, "config.toml")); err == nil {
+			socket := filepath.Join(stateDir, cfg.Daemon.Socket)
+			if c, dialErr := ipc.Dial(socket); dialErr == nil {
+				defer c.Close()
+				var resp map[string]bool
+				ipcErr, callErr := c.Call("contact.add", map[string]any{
+					"npub":   npub,
+					"relays": []string{relay},
+					"label":  label,
+					"tier":   string(contacts.TierFriend),
+				}, &resp)
+				if callErr == nil && (ipcErr == nil || strings.Contains(ipcErr.Message, "exists") || strings.EqualFold(string(ipcErr.Code), "CONTACT_EXISTS")) {
+					return nil
+				}
+				// IPC failed for some reason — fall through to direct write
+				// rather than block ritual completion.
+			}
+		}
 		hex, err := identity.DecodeNpub(npub)
 		if err != nil {
 			return fmt.Errorf("decode npub: %w", err)
@@ -162,14 +184,14 @@ func addContactDirect(stateDir string) func(context.Context, string, string, str
 		}
 		defer db.Close()
 		repo := contacts.New(db)
-		err = repo.Add(ctx, contacts.Contact{
+		addErr := repo.Add(ctx, contacts.Contact{
 			Pubkey: hex,
 			Label:  label,
 			Tier:   contacts.TierFriend,
 			Relays: []string{relay},
 		})
-		if err != nil && !errors.Is(err, contacts.ErrExists) {
-			return err
+		if addErr != nil && !errors.Is(addErr, contacts.ErrExists) {
+			return addErr
 		}
 		return nil
 	}
