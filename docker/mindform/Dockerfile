@@ -71,8 +71,7 @@ COPY docker/mindform/crontab /var/spool/cron/crontabs/eidos
 RUN chmod +x /usr/local/bin/entrypoint.sh \
  && chown eidos:eidos /var/spool/cron/crontabs/eidos \
  && chmod 0600 /var/spool/cron/crontabs/eidos \
- && rm -f /etc/crontabs/root \
- && chown -R eidos:eidos /opt/eidopsyche-bundle.git
+ && rm -f /etc/crontabs/root
 
 ENV EIDOS_IN_CONTAINER=1
 ENV EIDOS_GATE_HOME=/eidos/gate
