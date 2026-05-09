@@ -135,3 +135,103 @@ func TestTarStreamPropagatesWriteError(t *testing.T) {
 		t.Errorf("expected error from failing writer, got nil")
 	}
 }
+
+// TestTarStream_JournalAndEssenceDirsExist locks in that journal/ and
+// essence/ are carried by the tar stream so the new MindForm volume has
+// the file-as-essence slots the First Contact wizard expects.
+func TestTarStream_JournalAndEssenceDirsExist(t *testing.T) {
+	params := Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d"}
+	var buf bytes.Buffer
+	if err := TarStream(&buf, params); err != nil {
+		t.Fatal(err)
+	}
+	seen := tarEntryNames(t, buf.Bytes())
+	for _, want := range []string{
+		"journal/", "journal/.gitkeep",
+		"essence/", "essence/.gitkeep",
+	} {
+		if !seen[want] {
+			t.Errorf("tar missing %q (got: %v)", want, seen)
+		}
+	}
+}
+
+// TestTarStream_JournalEntryProducesLiteralFile verifies the wizard's
+// summoning book lands in the tar bytes-for-bytes — `{{` literals must
+// survive (they would otherwise be eaten by text/template).
+func TestTarStream_JournalEntryProducesLiteralFile(t *testing.T) {
+	const body = "# 召唤书\n\n签者：alice\n\nThis has {{.Literal}} that should NOT be expanded.\n"
+	params := Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d", JournalEntry: body}
+	var buf bytes.Buffer
+	if err := TarStream(&buf, params); err != nil {
+		t.Fatal(err)
+	}
+	got := tarEntryBody(t, buf.Bytes(), "journal/0000-summoning.md")
+	if got != body {
+		t.Errorf("entry body = %q, want %q", got, body)
+	}
+}
+
+func TestTarStream_EmptyJournalEntryOmitsFile(t *testing.T) {
+	params := Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d"}
+	var buf bytes.Buffer
+	if err := TarStream(&buf, params); err != nil {
+		t.Fatal(err)
+	}
+	seen := tarEntryNames(t, buf.Bytes())
+	if seen["journal/0000-summoning.md"] {
+		t.Errorf("empty JournalEntry should not produce 0000-summoning.md")
+	}
+}
+
+func TestTarStream_GitignoreCarriesEssenceSecret(t *testing.T) {
+	params := Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d"}
+	var buf bytes.Buffer
+	if err := TarStream(&buf, params); err != nil {
+		t.Fatal(err)
+	}
+	got := tarEntryBody(t, buf.Bytes(), ".gitignore")
+	if !strings.Contains(got, "essence/secret.md") {
+		t.Errorf(".gitignore missing essence/secret.md; got: %q", got)
+	}
+}
+
+func tarEntryNames(t *testing.T, body []byte) map[string]bool {
+	t.Helper()
+	tr := tar.NewReader(bytes.NewReader(body))
+	out := map[string]bool{}
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("tar.Next: %v", err)
+		}
+		out[h.Name] = true
+	}
+	return out
+}
+
+func tarEntryBody(t *testing.T, body []byte, name string) string {
+	t.Helper()
+	tr := tar.NewReader(bytes.NewReader(body))
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("tar.Next: %v", err)
+		}
+		if h.Name == name {
+			b, err := io.ReadAll(tr)
+			if err != nil {
+				t.Fatalf("read %q: %v", name, err)
+			}
+			return string(b)
+		}
+	}
+	t.Fatalf("tar entry %q not found", name)
+	return ""
+}
