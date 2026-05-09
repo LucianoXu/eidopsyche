@@ -127,12 +127,12 @@ func TestRoundTripAck(t *testing.T) {
 func TestRejectAck(t *testing.T) {
 	const validRef = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	bad := []string{
-		`{"v":1,"type":"ack"}`,                // missing ref
-		`{"v":1,"type":"ack","ref":"short"}`,  // ref too short
+		`{"v":1,"type":"ack"}`,               // missing ref
+		`{"v":1,"type":"ack","ref":"short"}`, // ref too short
 		`{"v":1,"type":"ack","ref":"0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF"}`, // uppercase
 		`{"v":1,"type":"ack","ref":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdez"}`, // non-hex
-		`{"v":1,"type":"ack","ref":"` + validRef + `","text":"x"}`,                                     // chat field forbidden
-		`{"v":1,"type":"ack","ref":"` + validRef + `","command":{"name":"x","args":{}}}`,               // command field forbidden
+		`{"v":1,"type":"ack","ref":"` + validRef + `","text":"x"}`,                                      // chat field forbidden
+		`{"v":1,"type":"ack","ref":"` + validRef + `","command":{"name":"x","args":{}}}`,                // command field forbidden
 	}
 	for _, c := range bad {
 		if _, err := Decode(c); !errors.Is(err, ErrSchemaViolation) {
