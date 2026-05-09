@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/card"
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/dashboard"
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
@@ -17,6 +19,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/invitedb"
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
 	"github.com/LucianoXu/eidopsyche/internal/nostr"
+	"github.com/LucianoXu/eidopsyche/internal/version"
 )
 
 func init() {
@@ -42,6 +45,167 @@ func init() {
 	register("invite.list", inviteList)
 	register("invite.revoke", inviteRevoke)
 	register("invite.redeem", inviteRedeem)
+	register("config.get", configGet)
+	register("config.set", configSet)
+	register("contact.get", contactGet)
+	register("contact.set-tier", contactSetTier)
+	register("card.scan", cardScan)
+	register("service.status", serviceStatus)
+	register("lifecycle.run", lifecycleRunMethod)
+	register("lifecycle.status", lifecycleStatusMethod)
+	register("contact.add-from-card", contactAddFromCard)
+}
+
+// ContactAddFromCardParams is the parameter shape for the
+// "contact.add-from-card" IPC method. URI is a mindgate:// card; if
+// LabelOverride is empty the embedded card label is used.
+type ContactAddFromCardParams struct {
+	URI           string `json:"uri"`
+	LabelOverride string `json:"label_override"`
+}
+
+// contactAddFromCard parses a card URI and admits its npub as a contact.
+// If the pubkey is already known the row is upserted: label is updated
+// (override > embedded), the card's relay hint is appended if new, and
+// the existing tier is preserved. Strict-add semantics live in
+// contact.add; this method is for the dashboard's "scan & add" flow,
+// where re-presenting the same card refreshes contact metadata
+// instead of failing with CONTACT_EXISTS.
+func contactAddFromCard(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p ContactAddFromCardParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	c, err := card.Parse(strings.TrimSpace(p.URI))
+	if err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrCardInvalid, Message: err.Error()}
+	}
+	pk, err := identity.DecodeNpub(c.Npub)
+	if err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidNpub, Message: err.Error()}
+	}
+	label := strings.TrimSpace(p.LabelOverride)
+	if label == "" {
+		label = strings.TrimSpace(c.Label)
+	}
+	if label == "" {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams,
+			Message: "card has no label and none was provided"}
+	}
+
+	// Upsert path.
+	if existing, err := d.Repo.Get(ctx, pk); err == nil && existing != nil {
+		if err := d.Repo.SetLabel(ctx, pk, label); err != nil {
+			return nil, internalErr(err)
+		}
+		relayAdded := false
+		if c.Relay != "" && !relayListContains(existing.Relays, c.Relay) {
+			if err := d.Repo.AddRelay(ctx, pk, c.Relay); err != nil {
+				return nil, internalErr(err)
+			}
+			relayAdded = true
+		}
+		d.emitDashEvent(dashboard.Event{Kind: "contact.relabeled"})
+		if relayAdded {
+			d.Refresh()
+		}
+		saved, _ := d.Repo.Get(ctx, pk)
+		return saved, nil
+	}
+
+	// New-contact path. Skip the relay hint if empty so subscriptionURLs
+	// doesn't end up with an empty URL (which poisons relay health with
+	// dial failures).
+	contact := contacts.Contact{
+		Pubkey: pk,
+		Label:  label,
+		Tier:   contacts.TierFriend,
+	}
+	if c.Relay != "" {
+		contact.Relays = []string{c.Relay}
+	}
+	if err := d.Repo.Add(ctx, contact); err != nil {
+		return nil, internalErr(err)
+	}
+	d.emitDashEvent(dashboard.Event{Kind: "contact.added"})
+	if c.Relay != "" {
+		d.Refresh()
+	}
+	saved, _ := d.Repo.Get(ctx, pk)
+	return saved, nil
+}
+
+// relayListContains is a local set-membership helper used by
+// contact.add-from-card's relay-hint dedup. Kept here rather than
+// imported because the dashboard-adapter copy of this helper is being
+// removed in Phase 5.
+func relayListContains(s []string, x string) bool {
+	for _, v := range s {
+		if v == x {
+			return true
+		}
+	}
+	return false
+}
+
+// ConfigSetParams is the JSON-stable parameter shape for the "config.set"
+// IPC method. Path is a dotted TOML path registered in
+// internal/config/keys.go (e.g. "log_level"); Value is the string the
+// key's Set parser will validate.
+type ConfigSetParams struct {
+	Path  string `json:"path"`
+	Value string `json:"value"`
+}
+
+// configPath is the canonical location of config.toml inside the daemon
+// state directory. Both configGet and configSet route through it so they
+// always touch the same file.
+func (d *Daemon) configPath() string {
+	return filepath.Join(d.StateDir, "config.toml")
+}
+
+// configGet returns the current on-disk config snapshot. Surfaces use
+// internal/config.KeyByPath/KeyList to extract individual values; the
+// handler returns the full struct so single-key and full-list callers
+// share one round trip.
+func configGet(_ context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
+	cfg, err := config.Load(d.configPath())
+	if err != nil {
+		return nil, internalErr(err)
+	}
+	return cfg, nil
+}
+
+// configSet validates the path/value pair against the config.Key
+// registry, performs a locked read-modify-write of config.toml, and
+// emits config.changed. The lock lives on *Daemon so concurrent calls
+// from any surface (CLI over the socket, dashboard via in-process Call)
+// serialise on the same mutex — fixing the three-way fork that PR #9
+// review caught (CLI direct write + dashboard direct write under a
+// mutex that only protected one writer).
+func configSet(_ context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p ConfigSetParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	key, ok := config.KeyByPath(p.Path)
+	if !ok {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: "unknown config key: " + p.Path}
+	}
+	d.configMu.Lock()
+	defer d.configMu.Unlock()
+	cfg, err := config.Load(d.configPath())
+	if err != nil {
+		return nil, internalErr(err)
+	}
+	if err := key.Set(&cfg, p.Value); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	if err := config.Save(d.configPath(), cfg); err != nil {
+		return nil, internalErr(err)
+	}
+	d.emitDashEvent(dashboard.Event{Kind: "config.changed"})
+	return cfg, nil
 }
 
 // whoami returns our public identity plus configured home relays.
@@ -150,24 +314,154 @@ func contactAdd(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMess
 	return map[string]bool{"ok": true}, nil
 }
 
-// contactList returns all contacts in the repo.
+// contactList returns all contacts in the repo as the typed slice
+// the contacts package owns. CLI and dashboard both decode into the
+// same struct; npub-form rendering is a render-time concern.
 func contactList(ctx context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
 	all, err := d.Repo.List(ctx)
 	if err != nil {
 		return nil, internalErr(err)
 	}
-	out := make([]map[string]any, 0, len(all))
-	for _, c := range all {
-		npub, _ := identity.EncodeNpub(c.Pubkey)
-		out = append(out, map[string]any{
-			"npub":   npub,
-			"pubkey": c.Pubkey,
-			"label":  c.Label,
-			"tier":   string(c.Tier),
-			"relays": c.Relays,
-		})
+	return all, nil
+}
+
+// ContactSetTierParams is the JSON-stable parameter shape for
+// "contact.set-tier". Target accepts npub / hex / label (resolved via
+// resolveTarget); Tier must be one of the four constants in
+// internal/contacts.
+type ContactSetTierParams struct {
+	Target string `json:"target"`
+	Tier   string `json:"tier"`
+}
+
+// contactGet looks up a single contact and returns the full record.
+// Target accepts npub / hex / label; the same resolveTarget rules as
+// every other target-bearing method apply.
+func contactGet(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p struct {
+		Target string `json:"target"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	pk, ipcErr := resolveTarget(ctx, d, p.Target)
+	if ipcErr != nil {
+		return nil, ipcErr
+	}
+	c, err := d.Repo.Get(ctx, pk)
+	if err != nil {
+		if errors.Is(err, contacts.ErrNotFound) {
+			return nil, &ipc.Error{Code: ipc.ErrContactNotFound, Message: pk}
+		}
+		return nil, internalErr(err)
+	}
+	return c, nil
+}
+
+// contactSetTier updates the tier of an existing contact. Validation
+// lives in contacts.Repo.SetTier; invalid tier strings come back as
+// INVALID_PARAMS, missing contacts as CONTACT_NOT_FOUND.
+func contactSetTier(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p ContactSetTierParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	pk, ipcErr := resolveTarget(ctx, d, p.Target)
+	if ipcErr != nil {
+		return nil, ipcErr
+	}
+	if err := d.Repo.SetTier(ctx, pk, contacts.Tier(p.Tier)); err != nil {
+		if errors.Is(err, contacts.ErrNotFound) {
+			return nil, &ipc.Error{Code: ipc.ErrContactNotFound, Message: pk}
+		}
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	d.emitDashEvent(dashboard.Event{Kind: "contact.tier-changed"})
+	return map[string]string{"pubkey": pk, "tier": p.Tier}, nil
+}
+
+// cardScan parses a mindgate:// card URI and reports whether the
+// embedded npub is already in the contacts list. Strict superset of
+// card.parse — that older method stays for callers that don't need the
+// AlreadyContact field; new callers should prefer card.scan.
+func cardScan(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p struct{ URI string }
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	c, err := card.Parse(strings.TrimSpace(p.URI))
+	if err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrCardInvalid, Message: err.Error()}
+	}
+	pk, err := identity.DecodeNpub(c.Npub)
+	if err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidNpub, Message: err.Error()}
+	}
+	already := false
+	if existing, err := d.Repo.Get(ctx, pk); err == nil && existing != nil {
+		already = true
+	}
+	return dashboard.ScanPreview{
+		Pubkey:         pk,
+		Npub:           c.Npub,
+		Label:          c.Label,
+		Relay:          c.Relay,
+		AlreadyContact: already,
+	}, nil
+}
+
+// serviceStatus returns daemon process metadata + the current
+// lifecycle-job snapshot. Surfaces (dashboard Service tab,
+// `eidos gate status --json`) read this method without poking at
+// individual *Daemon fields.
+func serviceStatus(_ context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
+	out := dashboard.ServiceStatus{
+		Version:      version.Version,
+		Commit:       version.Commit,
+		BuildDate:    version.BuildDate,
+		StartedAt:    d.startedAt,
+		StateDir:     d.StateDir,
+		DashboardURL: "http://" + d.Cfg.Dashboard.Listen,
+		IPCSocket:    filepath.Join(d.StateDir, d.Cfg.Daemon.Socket),
+	}
+	if life := d.LifecycleStatusSnapshot(); life.Active {
+		out.ActiveJobID = life.JobID
+		out.ActiveJobArgs = life.Args
+		out.ActiveJobAt = life.Started
 	}
 	return out, nil
+}
+
+// LifecycleRunParams is the JSON-stable parameter shape for
+// "lifecycle.run". Args is the eidos sub-command argv as it would be
+// passed on the command line (e.g. ["gate","reconnect"]).
+type LifecycleRunParams struct {
+	Args []string `json:"args"`
+}
+
+// lifecycleRunMethod kicks off a lifecycle subprocess and returns the
+// job id. The streaming SSE channel keeps the line pump; this method is
+// unary RPC. Concurrent calls return LIFECYCLE_BUSY (mapped by the
+// dashboard handler to HTTP 409).
+func lifecycleRunMethod(_ context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p LifecycleRunParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	id, err := d.LifecycleRun(p.Args)
+	if err != nil {
+		if errors.Is(err, ErrLifecycleBusy) {
+			return nil, &ipc.Error{Code: ipc.ErrLifecycleBusy, Message: err.Error()}
+		}
+		return nil, internalErr(err)
+	}
+	return map[string]string{"job_id": id}, nil
+}
+
+// lifecycleStatusMethod returns the current lifecycle snapshot. Useful
+// for poll callers; SSE subscribers prefer the push channel.
+func lifecycleStatusMethod(_ context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
+	return d.LifecycleStatusSnapshot(), nil
 }
 
 // contactRemove removes a contact by npub, hex pubkey, or label.
@@ -217,25 +511,15 @@ func contactSetLabel(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.Ra
 	return map[string]string{"pubkey": pk, "label": label}, nil
 }
 
-// relayList returns own relays ordered by role then URL.
+// relayList returns own relays ordered by role then URL. Result is
+// the typed OwnRelayRow slice — AddedAt rides along so dashboard and
+// CLI can both decode the same projection. The CLI ignores AddedAt.
 func relayList(ctx context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
 	rows, err := d.ListOwnRelays(ctx)
 	if err != nil {
 		return nil, internalErr(err)
 	}
-	// Return strings only, matching the pre-Phase-4 IPC contract that
-	// the existing CLI (cmd/eidos/gate/relays.go) unmarshals into
-	// []map[string]string. AddedAt is exposed via the typed helper for
-	// dashboard rendering; CLI consumers don't need it. Adding a new
-	// field here would break callers built against the older shape.
-	out := make([]map[string]string, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, map[string]string{
-			"url":  r.URL,
-			"role": r.Role,
-		})
-	}
-	return out, nil
+	return rows, nil
 }
 
 // relayAdd inserts a relay URL with the given role (home|fallback).
@@ -540,7 +824,17 @@ func resolveTarget(ctx context.Context, d *Daemon, input string) (string, *ipc.E
 	return c.Pubkey, nil
 }
 
-// inviteCreate creates a new invite token.
+// InviteCreateMethodResult bundles the persisted invite row with the
+// shareable URI so callers (CLI, dashboard) get both in one round trip
+// without needing a follow-up invite.list to re-fetch the canonical row.
+type InviteCreateMethodResult struct {
+	Invite *invitedb.Invite `json:"invite"`
+	URI    string           `json:"uri"`
+}
+
+// inviteCreate creates a new invite token and returns the canonical
+// invite row + the shareable URI. The dashboard adapter's previous
+// post-create re-read is no longer needed.
 func inviteCreate(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p struct {
 		SingleUse      bool   `json:"single_use"`
@@ -566,15 +860,18 @@ func inviteCreate(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMe
 	if err != nil {
 		return nil, internalErr(err)
 	}
-	return map[string]any{
-		"id":         res.ID,
-		"uri":        res.URI,
-		"expires_at": res.ExpiresAt,
-		"max_uses":   res.MaxUses,
-	}, nil
+	inv, err := d.Invites.Get(ctx, res.ID)
+	if err != nil {
+		return nil, internalErr(err)
+	}
+	return InviteCreateMethodResult{Invite: inv, URI: res.URI}, nil
 }
 
-// inviteList returns invites filtered by status.
+// inviteList returns invites filtered by status. The result is the
+// typed *invitedb.Invite slice; callers needing Unix-second timestamps
+// derive them from the time.Time fields. Pre-Phase-5 the handler
+// returned a flattened map[string]any — switching to the typed shape
+// removes the divergence with the dashboard adapter's projection.
 func inviteList(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p struct {
 		Status string `json:"status"`
@@ -586,24 +883,7 @@ func inviteList(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMess
 	if err != nil {
 		return nil, internalErr(err)
 	}
-	out := make([]map[string]any, 0, len(invites))
-	for _, inv := range invites {
-		var expiresAt int64
-		if !inv.ExpiresAt.IsZero() {
-			expiresAt = inv.ExpiresAt.Unix()
-		}
-		out = append(out, map[string]any{
-			"id":             inv.ID,
-			"created_at":     inv.CreatedAt.Unix(),
-			"expires_at":     expiresAt,
-			"max_uses":       inv.MaxUses,
-			"uses":           inv.Uses,
-			"status":         string(inv.Status),
-			"issuer_label":   inv.IssuerLabel,
-			"redeemer_label": inv.RedeemerLabel,
-		})
-	}
-	return out, nil
+	return invites, nil
 }
 
 // inviteRevoke revokes an invite by id prefix.

@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/LucianoXu/eidopsyche/internal/daemon"
+	"github.com/LucianoXu/eidopsyche/internal/invitedb"
 )
 
 func TestInviteOneTimeFlow(t *testing.T) {
@@ -26,12 +29,7 @@ func TestInviteOneTimeFlow(t *testing.T) {
 	}
 
 	// 1. Alice creates a single-use invite.
-	var inv struct {
-		ID        string `json:"id"`
-		URI       string `json:"uri"`
-		ExpiresAt int64  `json:"expires_at"`
-		MaxUses   int    `json:"max_uses"`
-	}
+	var inv daemon.InviteCreateMethodResult
 	if e, err := aliceIPC.Call("invite.create", map[string]any{
 		"single_use":     true,
 		"issuer_label":   "Alice",
@@ -39,9 +37,9 @@ func TestInviteOneTimeFlow(t *testing.T) {
 	}, &inv); err != nil || e != nil {
 		t.Fatalf("invite.create: %v %+v", err, e)
 	}
-	t.Logf("invite uri len=%d id=%s", len(inv.URI), inv.ID[:12])
-	if inv.MaxUses != 1 {
-		t.Fatalf("expected max_uses=1, got %d", inv.MaxUses)
+	t.Logf("invite uri len=%d id=%s", len(inv.URI), inv.Invite.ID[:12])
+	if inv.Invite.MaxUses != 1 {
+		t.Fatalf("expected max_uses=1, got %d", inv.Invite.MaxUses)
 	}
 
 	// 2. Bob redeems.
@@ -119,11 +117,7 @@ func TestInviteIdempotentReRedeem(t *testing.T) {
 	aliceIPC.Call("inbox.tail", nil, &ack) //nolint:errcheck
 
 	// Alice creates a multi-use invite so exhaustion won't interfere.
-	var inv struct {
-		ID      string `json:"id"`
-		URI     string `json:"uri"`
-		MaxUses int    `json:"max_uses"`
-	}
+	var inv daemon.InviteCreateMethodResult
 	if e, err := aliceIPC.Call("invite.create", map[string]any{
 		"max_uses":     5,
 		"issuer_label": "Alice",
@@ -159,15 +153,12 @@ outer:
 	// Wait a bit then check uses=1.
 	time.Sleep(3 * time.Second)
 
-	var invList []struct {
-		ID   string `json:"id"`
-		Uses int    `json:"uses"`
-	}
+	var invList []*invitedb.Invite
 	if e, err := aliceIPC.Call("invite.list", map[string]string{"status": ""}, &invList); err != nil || e != nil {
 		t.Fatalf("invite.list: %v %+v", err, e)
 	}
 	for _, il := range invList {
-		if il.ID == inv.ID && il.Uses != 1 {
+		if il.ID == inv.Invite.ID && il.Uses != 1 {
 			t.Fatalf("expected uses=1 after idempotent re-redeem, got %d", il.Uses)
 		}
 	}
@@ -190,11 +181,7 @@ func TestInviteExhaustion(t *testing.T) {
 	aliceIPC.Call("inbox.tail", nil, &ack) //nolint:errcheck
 
 	// Alice creates single-use invite.
-	var inv struct {
-		ID      string `json:"id"`
-		URI     string `json:"uri"`
-		MaxUses int    `json:"max_uses"`
-	}
+	var inv daemon.InviteCreateMethodResult
 	if e, err := aliceIPC.Call("invite.create", map[string]any{
 		"single_use":   true,
 		"issuer_label": "Alice",
@@ -264,10 +251,7 @@ func TestInviteRevoke(t *testing.T) {
 	aliceIPC.Call("inbox.tail", nil, &ack) //nolint:errcheck
 
 	// Alice creates invite.
-	var inv struct {
-		ID  string `json:"id"`
-		URI string `json:"uri"`
-	}
+	var inv daemon.InviteCreateMethodResult
 	if e, err := aliceIPC.Call("invite.create", map[string]any{
 		"issuer_label": "Alice",
 	}, &inv); err != nil || e != nil {
@@ -275,7 +259,7 @@ func TestInviteRevoke(t *testing.T) {
 	}
 
 	// Alice revokes.
-	if e, err := aliceIPC.Call("invite.revoke", map[string]string{"id_prefix": inv.ID[:12]}, nil); err != nil || e != nil {
+	if e, err := aliceIPC.Call("invite.revoke", map[string]string{"id_prefix": inv.Invite.ID[:12]}, nil); err != nil || e != nil {
 		t.Fatalf("invite.revoke: %v %+v", err, e)
 	}
 
@@ -319,10 +303,7 @@ func TestInviteExpiry(t *testing.T) {
 	bobIPC := dialIPC(t, bob)
 
 	// Alice creates invite that expires in 1 second.
-	var inv struct {
-		ID  string `json:"id"`
-		URI string `json:"uri"`
-	}
+	var inv daemon.InviteCreateMethodResult
 	if e, err := aliceIPC.Call("invite.create", map[string]any{
 		"expires_seconds": int64(1),
 		"issuer_label":    "Alice",

@@ -2,7 +2,6 @@ package gate
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -34,22 +33,16 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 }
 
-func resolveConfigPath() (string, error) {
-	dir, err := config.ResolveStateDir(globalStateDir)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "config.toml"), nil
-}
-
 func runConfigGet(cmd *cobra.Command, args []string) error {
-	cfgPath, err := resolveConfigPath()
+	c, err := newClient()
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+	defer c.Close()
+
+	var cfg config.Config
+	if err := mustOK(c.Call("config.get", nil, &cfg)); err != nil {
+		return err
 	}
 
 	if len(args) == 1 {
@@ -68,27 +61,14 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 }
 
 func runConfigSet(cmd *cobra.Command, args []string) error {
-	path, value := args[0], args[1]
-	key, ok := config.KeyByPath(path)
-	if !ok {
-		return fmt.Errorf("unknown config key: %s", path)
-	}
-
-	cfgPath, err := resolveConfigPath()
+	c, err := newClient()
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
-	}
+	defer c.Close()
 
-	if err := key.Set(&cfg, value); err != nil {
-		return err
-	}
-
-	if err := config.Save(cfgPath, cfg); err != nil {
-		return fmt.Errorf("saving config: %w", err)
-	}
-	return nil
+	return mustOK(c.Call("config.set", map[string]string{
+		"path":  args[0],
+		"value": args[1],
+	}, nil))
 }

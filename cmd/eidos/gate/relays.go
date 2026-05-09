@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/LucianoXu/eidopsyche/internal/daemon"
 )
 
 var relayAddRole string
@@ -17,12 +19,12 @@ var relaysCmd = &cobra.Command{
 			return err
 		}
 		defer c.Close()
-		var resp []map[string]string
+		var resp []daemon.OwnRelayRow
 		if err := mustOK(c.Call("relay.list", nil, &resp)); err != nil {
 			return err
 		}
 		for _, r := range resp {
-			fmt.Printf("%-9s  %s\n", r["role"], r["url"])
+			fmt.Printf("%-9s  %s\n", r.Role, r.URL)
 		}
 		return nil
 	},

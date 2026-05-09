@@ -4,19 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
-	"strings"
 	"time"
 
-	"github.com/LucianoXu/eidopsyche/internal/card"
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/dashboard"
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
-	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
 	"github.com/LucianoXu/eidopsyche/internal/invitedb"
-	"github.com/LucianoXu/eidopsyche/internal/version"
+	"github.com/LucianoXu/eidopsyche/internal/ipc"
 )
 
 // dashboardAdapter wraps *Daemon to satisfy dashboard.DashboardDeps.
@@ -29,34 +25,93 @@ type dashboardAdapter struct{ d *Daemon }
 // the daemon directly.
 func NewDashboardAdapter(d *Daemon) dashboard.DashboardDeps { return dashboardAdapter{d: d} }
 
-func (a dashboardAdapter) OwnPubkey() string { return a.d.Key.PublicHex }
+// adapter-shim: OwnPubkey() has no error return on dashboard.DashboardDeps;
+// a whoami Call failure (e.g. transient meta read error) still needs to
+// produce a usable string. The Key.PublicHex field is the in-memory
+// canonical pubkey loaded at daemon start, so reading it is a safe
+// last-resort fallback.
+func (a dashboardAdapter) OwnPubkey() string {
+	var w whoamiResult
+	if err := a.d.Call(context.Background(), "whoami", nil, &w); err == nil && w.Pubkey != "" {
+		return w.Pubkey
+	}
+	if a.d.Key != nil {
+		return a.d.Key.PublicHex
+	}
+	return ""
+}
 
 func (a dashboardAdapter) OwnLabel(ctx context.Context) (string, error) {
-	var v string
-	row := a.d.DB.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, "label")
-	if err := row.Scan(&v); err != nil {
+	var w whoamiResult
+	if err := a.d.Call(ctx, "whoami", nil, &w); err != nil {
 		return "", err
 	}
-	return v, nil
+	return w.Label, nil
+}
+
+// whoamiResult mirrors the whoami IPC method's projection so the
+// adapter can decode without an inline anonymous struct.
+type whoamiResult struct {
+	Pubkey     string              `json:"pubkey"`
+	Npub       string              `json:"npub"`
+	Label      string              `json:"label"`
+	HomeRelays []map[string]string `json:"home_relays"`
 }
 
 func (a dashboardAdapter) ListInbox(since *time.Time, from string, limit int) ([]inbox.Message, error) {
-	return a.d.Box.ListInbox(since, from, limit)
+	params := inboxListParams{From: from, Limit: limit}
+	if since != nil {
+		s := since.Unix()
+		params.Since = &s
+	}
+	var out []inbox.Message
+	if err := a.d.Call(context.Background(), "inbox.list", params, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (a dashboardAdapter) ListOutbox(since *time.Time, to string, limit int) ([]inbox.Sent, error) {
-	return a.d.Box.ListOutbox(since, to, limit)
+	params := outboxListParams{To: to, Limit: limit}
+	if since != nil {
+		s := since.Unix()
+		params.Since = &s
+	}
+	var out []inbox.Sent
+	if err := a.d.Call(context.Background(), "outbox.list", params, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// inboxListParams / outboxListParams are typed mirrors of the inline
+// anonymous structs in inboxList / outboxList. The IPC handlers accept
+// the same field set; named types let the adapter avoid map[string]any.
+type inboxListParams struct {
+	Since *int64 `json:"since,omitempty"`
+	From  string `json:"from,omitempty"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+type outboxListParams struct {
+	Since *int64 `json:"since,omitempty"`
+	To    string `json:"to,omitempty"`
+	Limit int    `json:"limit,omitempty"`
 }
 
 func (a dashboardAdapter) ListContacts(ctx context.Context) ([]*contacts.Contact, error) {
-	return a.d.Repo.List(ctx)
+	var out []*contacts.Contact
+	if err := a.d.Call(ctx, "contact.list", nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (a dashboardAdapter) ListRelayHealth() []dashboard.RelayState {
-	if a.d.relayHealth == nil {
+	var snap []RelayHealth
+	if err := a.d.Call(context.Background(), "relays.health", nil, &snap); err != nil {
 		return nil
 	}
-	snap := a.d.relayHealth.snapshot()
 	out := make([]dashboard.RelayState, 0, len(snap))
 	for _, h := range snap {
 		out = append(out, dashboard.RelayState{
@@ -93,265 +148,140 @@ func (a dashboardAdapter) SubscribeEvents() (<-chan dashboard.Event, func()) {
 // ── phase 1: identity + config ─────────────────────────────────────
 
 func (a dashboardAdapter) SetOwnLabel(ctx context.Context, label string) error {
-	label = strings.TrimSpace(label)
-	if label == "" {
-		return fmt.Errorf("label must not be empty")
-	}
-	if err := a.d.DB.SetMeta(ctx, "label", label); err != nil {
-		return err
-	}
-	a.d.emitDashEvent(dashboard.Event{Kind: "identity.label-changed"})
-	return nil
+	return a.d.Call(ctx, "set-label", map[string]string{"label": label}, nil)
 }
 
 func (a dashboardAdapter) OwnCardURI(ctx context.Context) (string, error) {
-	label, _ := a.d.DB.GetMeta(ctx, "label")
-	var homeRelay string
-	if err := a.d.DB.QueryRowContext(ctx,
-		`SELECT relay_url FROM own_relays WHERE role='home' LIMIT 1`).Scan(&homeRelay); err != nil {
-		return "", fmt.Errorf("no home relay configured: %w", err)
+	var out struct {
+		URI string `json:"uri"`
 	}
-	c := card.Card{Npub: a.d.Key.Npub, Relay: homeRelay, Label: label}
-	uri, err := c.URI()
-	if err != nil {
+	if err := a.d.Call(ctx, "card.export", nil, &out); err != nil {
 		return "", err
 	}
-	return uri, nil
+	return out.URI, nil
 }
 
-// configPath is the canonical location of config.toml inside the gate
-// state directory. Both ConfigSnapshot and ConfigSet route through this
-// helper so they always read and write the same file.
-func (a dashboardAdapter) configPath() string {
-	return filepath.Join(a.d.StateDir, "config.toml")
-}
-
+// ConfigSnapshot routes through the IPC config.get handler so the
+// adapter and CLI surface read the on-disk file by the exact same code
+// path. See SPEC.md "调用路径统一".
 func (a dashboardAdapter) ConfigSnapshot() (config.Config, error) {
-	return config.Load(a.configPath())
+	var cfg config.Config
+	if err := a.d.Call(context.Background(), "config.get", nil, &cfg); err != nil {
+		return config.Config{}, err
+	}
+	return cfg, nil
 }
 
+// ConfigSet routes through the IPC config.set handler. The lock that
+// serialises read-modify-write of config.toml lives on the handler now;
+// before unification the lock guarded only the dashboard writer while
+// the CLI wrote the file directly without taking it.
 func (a dashboardAdapter) ConfigSet(ctx context.Context, path, value string) error {
-	key, ok := config.KeyByPath(path)
-	if !ok {
-		return fmt.Errorf("unknown config key: %s", path)
-	}
-	// Serialise read-modify-write so two concurrent rows-set calls
-	// (e.g. operator clicking Set on two rows in quick succession, or
-	// two open tabs writing different keys) cannot overwrite each
-	// other's update. Validation runs inside the lock too so the
-	// rejection of an invalid value reflects the on-disk state at
-	// the moment of the attempt.
-	a.d.configMu.Lock()
-	defer a.d.configMu.Unlock()
-
-	cfg, err := config.Load(a.configPath())
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	if err := key.Set(&cfg, value); err != nil {
-		return err
-	}
-	if err := config.Save(a.configPath(), cfg); err != nil {
-		return fmt.Errorf("save config: %w", err)
-	}
-	a.d.emitDashEvent(dashboard.Event{Kind: "config.changed"})
-	return nil
+	return a.d.Call(ctx, "config.set", ConfigSetParams{Path: path, Value: value}, nil)
 }
 
 // ── phase 2: contacts ──────────────────────────────────────────────
 
 func (a dashboardAdapter) GetContact(ctx context.Context, pubkey string) (*contacts.Contact, error) {
-	return a.d.Repo.Get(ctx, pubkey)
-}
-
-// AddContact admits a contact described by a mindgate:// card. If the
-// contact's pubkey is already known, the call upserts: label is
-// updated to whatever the operator typed (or the card's embedded
-// label, in that order), and the card's relay hint is appended to
-// contact_relays if not already present. The tier is preserved on
-// upsert so a refresh doesn't accidentally widen trust.
-func (a dashboardAdapter) AddContact(ctx context.Context, cardURI, labelOverride string) (*contacts.Contact, error) {
-	c, err := card.Parse(strings.TrimSpace(cardURI))
-	if err != nil {
-		return nil, fmt.Errorf("parse card: %w", err)
-	}
-	pubHex, err := identity.DecodeNpub(c.Npub)
-	if err != nil {
-		return nil, fmt.Errorf("decode npub: %w", err)
-	}
-	label := strings.TrimSpace(labelOverride)
-	if label == "" {
-		label = strings.TrimSpace(c.Label)
-	}
-	if label == "" {
-		return nil, fmt.Errorf("card has no label and none was provided")
-	}
-
-	// Refresh path: contact already exists — update label, ensure the
-	// card's relay hint is present, leave tier alone.
-	if existing, err := a.d.Repo.Get(ctx, pubHex); err == nil && existing != nil {
-		if err := a.d.Repo.SetLabel(ctx, pubHex, label); err != nil {
-			return nil, fmt.Errorf("refresh label: %w", err)
-		}
-		relayAdded := false
-		if c.Relay != "" && !contains(existing.Relays, c.Relay) {
-			if err := a.d.Repo.AddRelay(ctx, pubHex, c.Relay); err != nil {
-				return nil, fmt.Errorf("refresh relay: %w", err)
-			}
-			relayAdded = true
-		}
-		a.d.emitDashEvent(dashboard.Event{Kind: "contact.relabeled"})
-		// Kick the subscriber so the new relay enters the subscription
-		// set immediately — otherwise the daemon stays bound to the
-		// old set until restart and may miss inbound from the
-		// just-refreshed peer.
-		if relayAdded {
-			a.d.Refresh()
-		}
-		saved, _ := a.d.Repo.Get(ctx, pubHex)
-		return saved, nil
-	}
-
-	// New contact path. Only persist a relay hint if the card carried
-	// one; an empty string would later end up in subscriptionURLs and
-	// poison relay health with dial failures.
-	contact := contacts.Contact{
-		Pubkey: pubHex,
-		Label:  label,
-		Tier:   contacts.TierFriend,
-	}
-	if c.Relay != "" {
-		contact.Relays = []string{c.Relay}
-	}
-	if err := a.d.Repo.Add(ctx, contact); err != nil {
+	var c contacts.Contact
+	if err := a.d.Call(ctx, "contact.get", map[string]string{"target": pubkey}, &c); err != nil {
 		return nil, err
 	}
-	a.d.emitDashEvent(dashboard.Event{Kind: "contact.added"})
-	// Same reason as the refresh branch: a fresh contact's relay
-	// joins our subscription set; kick so we pick it up now.
-	if c.Relay != "" {
-		a.d.Refresh()
-	}
-	saved, _ := a.d.Repo.Get(ctx, pubHex)
-	return saved, nil
+	return &c, nil
 }
 
-// contains reports whether s contains x. Used for the relay-hint
-// dedup in AddContact's refresh path.
-func contains(s []string, x string) bool {
-	for _, v := range s {
-		if v == x {
-			return true
-		}
+// AddContact admits a contact described by a mindgate:// card via the
+// IPC contact.add-from-card method. Upsert semantics live in the
+// handler so the dashboard and any future surface share them.
+func (a dashboardAdapter) AddContact(ctx context.Context, cardURI, labelOverride string) (*contacts.Contact, error) {
+	var c contacts.Contact
+	if err := a.d.Call(ctx, "contact.add-from-card",
+		ContactAddFromCardParams{URI: cardURI, LabelOverride: labelOverride}, &c); err != nil {
+		return nil, err
 	}
-	return false
+	return &c, nil
 }
 
 func (a dashboardAdapter) RemoveContact(ctx context.Context, pubkey string) error {
-	if err := a.d.Repo.Remove(ctx, pubkey); err != nil {
-		return err
-	}
-	a.d.emitDashEvent(dashboard.Event{Kind: "contact.removed"})
-	// Symmetrical with AddContact: the removed contact's relay hints
-	// drop out of the union, so kick the subscriber to recompute and
-	// release any connection that's no longer in the set. Otherwise
-	// the daemon stays bound to the old set (and the relay-health
-	// panel keeps reporting the now-orphaned URL) until restart.
-	a.d.Refresh()
-	return nil
+	return a.d.Call(ctx, "contact.remove", map[string]string{"npub": pubkey}, nil)
 }
 
 func (a dashboardAdapter) SetContactLabel(ctx context.Context, pubkey, label string) error {
-	label = strings.TrimSpace(label)
-	if label == "" {
-		return fmt.Errorf("label must not be empty")
-	}
-	if err := a.d.Repo.SetLabel(ctx, pubkey, label); err != nil {
-		return err
-	}
-	a.d.emitDashEvent(dashboard.Event{Kind: "contact.relabeled"})
-	return nil
+	return a.d.Call(ctx, "contact.set-label", map[string]string{
+		"target": pubkey,
+		"label":  label,
+	}, nil)
 }
 
 func (a dashboardAdapter) SetContactTier(ctx context.Context, pubkey string, tier contacts.Tier) error {
-	if err := a.d.Repo.SetTier(ctx, pubkey, tier); err != nil {
-		return err
-	}
-	a.d.emitDashEvent(dashboard.Event{Kind: "contact.tier-changed"})
-	return nil
+	return a.d.Call(ctx, "contact.set-tier", ContactSetTierParams{Target: pubkey, Tier: string(tier)}, nil)
 }
 
 // ── phase 3: invites ───────────────────────────────────────────────
 
 func (a dashboardAdapter) ListInvites(ctx context.Context, status string) ([]*invitedb.Invite, error) {
-	return a.d.InviteList(ctx, status)
+	var out []*invitedb.Invite
+	if err := a.d.Call(ctx, "invite.list", map[string]string{"status": status}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (a dashboardAdapter) CreateInvite(ctx context.Context, opts dashboard.InviteCreateOpts) (*invitedb.Invite, string, error) {
-	res, err := a.d.InviteCreate(ctx, InviteCreateOptions{
-		SingleUse:      opts.SingleUse,
-		Unlimited:      opts.Unlimited,
-		MaxUses:        opts.MaxUses,
-		ExpiresSeconds: opts.ExpiresSeconds,
-		IssuerLabel:    opts.IssuerLabel,
-		RedeemerLabel:  opts.RedeemerLabel,
-	})
+	var out InviteCreateMethodResult
+	err := a.d.Call(ctx, "invite.create", map[string]any{
+		"single_use":      opts.SingleUse,
+		"unlimited":       opts.Unlimited,
+		"max_uses":        opts.MaxUses,
+		"expires_seconds": opts.ExpiresSeconds,
+		"issuer_label":    opts.IssuerLabel,
+		"redeemer_label":  opts.RedeemerLabel,
+	}, &out)
 	if err != nil {
 		return nil, "", err
 	}
-	// Re-read so the row reflects the post-insert canonical state
-	// (status='active', uses=0). This avoids the renderer needing to
-	// reconstruct the timestamps from InviteCreateResult.
-	inv, err := a.d.Invites.Get(ctx, res.ID)
-	if err != nil {
-		return nil, "", fmt.Errorf("read back invite: %w", err)
-	}
-	return inv, res.URI, nil
+	return out.Invite, out.URI, nil
 }
 
 func (a dashboardAdapter) RevokeInvite(ctx context.Context, idPrefix string) (string, error) {
-	return a.d.InviteRevoke(ctx, idPrefix)
+	var out struct {
+		FullID string `json:"full_id"`
+	}
+	if err := a.d.Call(ctx, "invite.revoke", map[string]string{"id_prefix": idPrefix}, &out); err != nil {
+		return "", translateInviteError(err)
+	}
+	return out.FullID, nil
 }
 
 func (a dashboardAdapter) RedeemInvite(ctx context.Context, token string) (dashboard.RedeemResult, error) {
-	res, err := a.d.InviteRedeem(ctx, token)
-	if err != nil {
+	var out struct {
+		IssuerNpub  string   `json:"issuer_npub"`
+		IssuerRelay string   `json:"issuer_relay"`
+		AcceptedBy  []string `json:"accepted_by"`
+	}
+	if err := a.d.Call(ctx, "invite.redeem", map[string]string{"token": token}, &out); err != nil {
 		return dashboard.RedeemResult{}, err
 	}
 	return dashboard.RedeemResult{
-		IssuerNpub:  res.IssuerNpub,
-		IssuerRelay: res.IssuerRelay,
-		AcceptedBy:  res.AcceptedBy,
+		IssuerNpub:  out.IssuerNpub,
+		IssuerRelay: out.IssuerRelay,
+		AcceptedBy:  out.AcceptedBy,
 	}, nil
 }
 
 func (a dashboardAdapter) ScanCard(ctx context.Context, cardURI string) (dashboard.ScanPreview, error) {
-	c, err := card.Parse(strings.TrimSpace(cardURI))
-	if err != nil {
-		return dashboard.ScanPreview{}, fmt.Errorf("parse card: %w", err)
+	var preview dashboard.ScanPreview
+	if err := a.d.Call(ctx, "card.scan", map[string]string{"uri": cardURI}, &preview); err != nil {
+		return dashboard.ScanPreview{}, err
 	}
-	pubHex, err := identity.DecodeNpub(c.Npub)
-	if err != nil {
-		return dashboard.ScanPreview{}, fmt.Errorf("decode npub: %w", err)
-	}
-	already := false
-	if existing, err := a.d.Repo.Get(ctx, pubHex); err == nil && existing != nil {
-		already = true
-	}
-	return dashboard.ScanPreview{
-		Pubkey:         pubHex,
-		Npub:           c.Npub,
-		Label:          c.Label,
-		Relay:          c.Relay,
-		AlreadyContact: already,
-	}, nil
+	return preview, nil
 }
 
 // ── phase 4: own relays ────────────────────────────────────────────
 
 func (a dashboardAdapter) ListOwnRelays(ctx context.Context) ([]dashboard.OwnRelay, error) {
-	rows, err := a.d.ListOwnRelays(ctx)
-	if err != nil {
+	var rows []OwnRelayRow
+	if err := a.d.Call(ctx, "relay.list", nil, &rows); err != nil {
 		return nil, err
 	}
 	out := make([]dashboard.OwnRelay, 0, len(rows))
@@ -365,31 +295,66 @@ func (a dashboardAdapter) ListOwnRelays(ctx context.Context) ([]dashboard.OwnRel
 	return out, nil
 }
 
-// AddOwnRelay forwards to the daemon helper and translates the daemon's
-// internal sentinels into dashboard-facing ones so the handler doesn't
-// have to grep error strings to map onto HTTP status codes.
 func (a dashboardAdapter) AddOwnRelay(ctx context.Context, rawURL, role string) error {
-	err := a.d.AddOwnRelay(ctx, rawURL, role)
-	switch {
-	case errors.Is(err, errOwnRelayInvalidURL):
-		return fmt.Errorf("%w: %v", dashboard.ErrRelayInvalidURL, err)
-	case errors.Is(err, errOwnRelayInvalidRole):
-		return fmt.Errorf("%w: %v", dashboard.ErrRelayInvalidRole, err)
-	case errors.Is(err, errOwnRelayDuplicate):
-		return fmt.Errorf("%w: %v", dashboard.ErrRelayDuplicate, err)
+	err := a.d.Call(ctx, "relay.add", map[string]string{"url": rawURL, "role": role}, nil)
+	return translateRelayError(err)
+}
+
+func (a dashboardAdapter) RemoveOwnRelay(ctx context.Context, rawURL string) error {
+	err := a.d.Call(ctx, "relay.remove", map[string]string{"url": rawURL}, nil)
+	return translateRelayError(err)
+}
+
+// translateInviteError maps the IPC handler's typed invite codes back
+// onto the invitedb sentinels the dashboard handler errors.Is-checks.
+// Without this, post-Phase-5 the handler's switch would fall through
+// to the generic 502 path because the adapter returns an *ipc.Error
+// rather than the wrapped invitedb sentinel that pre-Phase-5
+// d.InviteRevoke / d.InviteRedeem returned directly.
+func translateInviteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var ipcErr *ipc.Error
+	if !errors.As(err, &ipcErr) {
+		return err
+	}
+	switch ipcErr.Code {
+	case ipc.ErrInviteInvalidToken:
+		return fmt.Errorf("%w: %s", invitedb.ErrNotFound, ipcErr.Message)
+	case ipc.ErrInvitePrefixAmbiguous:
+		return fmt.Errorf("%w: %s", invitedb.ErrPrefixAmbiguous, ipcErr.Message)
 	}
 	return err
 }
 
-func (a dashboardAdapter) RemoveOwnRelay(ctx context.Context, rawURL string) error {
-	err := a.d.RemoveOwnRelay(ctx, rawURL)
+// translateRelayError maps the IPC handler's typed codes back onto the
+// dashboard sentinel set. The handler today returns INVALID_PARAMS for
+// the whole sentinel range with the original message preserved; the
+// adapter pattern-matches on the message so the dashboard's HTTP layer
+// keeps its existing errors.Is checks. If a future refactor introduces
+// dedicated IPC codes for each sentinel (RELAY_INVALID_URL etc.), this
+// function should be updated to switch on Code instead of substring.
+func translateRelayError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var ipcErr *ipc.Error
+	if !errors.As(err, &ipcErr) {
+		return err
+	}
+	msg := ipcErr.Message
 	switch {
-	case errors.Is(err, errOwnRelayInvalidURL):
-		return fmt.Errorf("%w: %v", dashboard.ErrRelayInvalidURL, err)
-	case errors.Is(err, errOwnRelayNotFound):
-		return fmt.Errorf("%w: %v", dashboard.ErrRelayNotFound, err)
-	case errors.Is(err, errOwnRelayHomeRequired):
-		return fmt.Errorf("%w: %v", dashboard.ErrRelayHomeRequired, err)
+	case msg == errOwnRelayInvalidURL.Error():
+		return fmt.Errorf("%w: %s", dashboard.ErrRelayInvalidURL, msg)
+	case msg == errOwnRelayInvalidRole.Error():
+		return fmt.Errorf("%w: %s", dashboard.ErrRelayInvalidRole, msg)
+	case msg == errOwnRelayDuplicate.Error():
+		return fmt.Errorf("%w: %s", dashboard.ErrRelayDuplicate, msg)
+	case msg == errOwnRelayNotFound.Error():
+		return fmt.Errorf("%w: %s", dashboard.ErrRelayNotFound, msg)
+	case msg == errOwnRelayHomeRequired.Error():
+		return fmt.Errorf("%w: %s", dashboard.ErrRelayHomeRequired, msg)
 	}
 	return err
 }
@@ -397,27 +362,27 @@ func (a dashboardAdapter) RemoveOwnRelay(ctx context.Context, rawURL string) err
 // ── phase 5: service control ───────────────────────────────────────
 
 func (a dashboardAdapter) Status() dashboard.ServiceStatus {
-	out := dashboard.ServiceStatus{
-		Version:      version.Version,
-		Commit:       version.Commit,
-		BuildDate:    version.BuildDate,
-		StartedAt:    a.d.startedAt,
-		StateDir:     a.d.StateDir,
-		DashboardURL: "http://" + a.d.Cfg.Dashboard.Listen,
-		IPCSocket:    filepath.Join(a.d.StateDir, a.d.Cfg.Daemon.Socket),
-	}
-	if life := a.d.LifecycleStatusSnapshot(); life.Active {
-		out.ActiveJobID = life.JobID
-		out.ActiveJobArgs = life.Args
-		out.ActiveJobAt = life.Started
-	}
-	return out
+	var st dashboard.ServiceStatus
+	// Status() has no error return on the dashboard interface, so a
+	// JSON / handler failure surfaces as a zero-value snapshot rather
+	// than crashing the request. Daemons in any callable state can
+	// always satisfy service.status (it reads only in-memory fields),
+	// so this fallback is essentially defensive.
+	_ = a.d.Call(context.Background(), "service.status", nil, &st)
+	return st
 }
 
 func (a dashboardAdapter) LifecycleRun(args []string) (string, error) {
-	id, err := a.d.LifecycleRun(args)
-	if errors.Is(err, ErrLifecycleBusy) {
-		return "", dashboard.ErrLifecycleBusy
+	var out struct {
+		JobID string `json:"job_id"`
 	}
-	return id, err
+	err := a.d.Call(context.Background(), "lifecycle.run", LifecycleRunParams{Args: args}, &out)
+	if err != nil {
+		var ipcErr *ipc.Error
+		if errors.As(err, &ipcErr) && ipcErr.Code == ipc.ErrLifecycleBusy {
+			return "", dashboard.ErrLifecycleBusy
+		}
+		return "", err
+	}
+	return out.JobID, nil
 }
