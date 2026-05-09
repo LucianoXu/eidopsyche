@@ -17,6 +17,17 @@ type Config struct {
 	Dashboard DashboardConfig `toml:"dashboard"`
 	Wake      WakeConfig      `toml:"wake"`
 	MindForm  MindFormConfig  `toml:"mindform"`
+	Heartbeat HeartbeatConfig `toml:"heartbeat"`
+}
+
+// HeartbeatConfig is the in-container gate's mind-form heartbeat cadence.
+// Lives in /eidos/gate/config.toml. Host gates leave Heartbeat at its
+// zero value because the [heartbeat] block is absent from their config.
+type HeartbeatConfig struct {
+	// Interval is a Go duration string like "4h" or "30m". Empty = use
+	// DefaultHeartbeatInterval. Must be in the supported set; see
+	// ValidateHeartbeatInterval.
+	Interval string `toml:"interval"`
 }
 
 // MindFormConfig is the in-container gate's mind-form-runtime settings.
@@ -30,6 +41,18 @@ type MindFormConfig struct {
 	// surfaces at the next wake when claude rejects it, not at
 	// gate-daemon startup.
 	Model string `toml:"model"`
+
+	// Quiet hours feed agent-runner's wake-context computation: when
+	// [now in TZ] falls in [QuietStart, QuietEnd), the wake context
+	// surfaces master_likely_asleep=true. Both must be set or neither.
+	// HH:MM 24-hour form; wrap-around (start > end) is supported.
+	QuietStart string `toml:"quiet_start"`
+	QuietEnd   string `toml:"quiet_end"`
+	TZ         string `toml:"tz"`
+
+	// DreamMinInterval is the floor for "you may dream now". Empty =
+	// DefaultDreamMinInterval (12h). A Go duration ≥ 1h.
+	DreamMinInterval string `toml:"dream_min_interval"`
 }
 
 // WakeConfig controls the optional wake-signal output used by the in-container
