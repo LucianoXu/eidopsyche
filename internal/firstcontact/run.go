@@ -10,6 +10,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/firstcontact/render"
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
+	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
 // Deps is the full input to Run. Production wiring lives in
@@ -110,6 +111,31 @@ func loadOperatorIntoSummoning(stateDir string, s *Summoning) error {
 		return fmt.Errorf("load operator key: %w", err)
 	}
 	s.OperatorNpub = k.Npub
+
+	// Restore the rest of the operator profile from state.db. Without
+	// this, subsequent runs reach phase 3 with empty Label / HomeRelay
+	// and forge.Orchestrate hands init-volume blank EIDOS_FORGE_LABEL /
+	// EIDOS_FORGE_RELAY env vars, which the in-container init refuses
+	// (cmd/eidos/forge/init_volume.go:71).
+	dbPath := filepath.Join(stateDir, "state.db")
+	db, err := store.Open(dbPath, true) // read-only is enough
+	if err != nil {
+		return fmt.Errorf("open state.db: %w", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	label, err := db.GetMeta(ctx, "label")
+	if err != nil {
+		return fmt.Errorf("read label meta: %w", err)
+	}
+	s.OperatorLabel = label
+	var home string
+	err = db.QueryRowContext(ctx,
+		`SELECT relay_url FROM own_relays WHERE role='home' LIMIT 1`).Scan(&home)
+	if err != nil {
+		return fmt.Errorf("read home relay: %w", err)
+	}
+	s.HomeRelay = home
 	s.Lang = "zh"
 	return nil
 }
