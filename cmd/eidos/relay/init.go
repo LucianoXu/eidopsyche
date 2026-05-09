@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -61,8 +62,12 @@ func runInit(o initOpts) error {
 	}
 
 	cfgPath := filepath.Join(o.dir, relaycfg.FileName)
-	if _, err := os.Stat(cfgPath); err == nil && !o.force {
-		return fmt.Errorf("relay already initialized at %s (re-run with --force to overwrite)", cfgPath)
+	if _, err := os.Stat(cfgPath); err == nil {
+		if !o.force {
+			return fmt.Errorf("relay already initialized at %s (re-run with --force to overwrite)", cfgPath)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stat %s: %w", cfgPath, err)
 	}
 	if err := os.MkdirAll(o.dir, 0o700); err != nil {
 		return fmt.Errorf("mkdir %s: %w", o.dir, err)
