@@ -66,3 +66,26 @@ func TestKeyByPath_DashboardListen_Empty(t *testing.T) {
 		t.Errorf("empty error should redirect to dashboard.enabled toggle, got: %v", err)
 	}
 }
+
+func TestKeyByPath_MindFormModel(t *testing.T) {
+	cfg := Defaults()
+	k, ok := KeyByPath("mindform.model")
+	if !ok {
+		t.Fatal("mindform.model should be registered")
+	}
+	if err := k.Set(&cfg, ""); err != nil {
+		t.Errorf("empty value should be accepted: %v", err)
+	}
+	if got := k.Get(&cfg); got != "" {
+		t.Errorf("Get after Set(\"\") = %q, want \"\"", got)
+	}
+	if err := k.Set(&cfg, "claude-sonnet-4-7"); err != nil {
+		t.Fatalf("valid id should be accepted: %v", err)
+	}
+	if got := k.Get(&cfg); got != "claude-sonnet-4-7" {
+		t.Errorf("Get = %q, want %q", got, "claude-sonnet-4-7")
+	}
+	if err := k.Set(&cfg, "not-a-claude-model"); err == nil {
+		t.Error("invalid id should be rejected")
+	}
+}

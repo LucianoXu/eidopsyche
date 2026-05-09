@@ -143,6 +143,19 @@ func init() {
 			return nil
 		},
 	})
+	register(Key{
+		Path:        "mindform.model",
+		Description: "Pin the claude model used by agent-runner (e.g. claude-sonnet-4-7). Empty lets claude pick its subscription default.",
+		Get:         func(c *Config) string { return c.MindForm.Model },
+		Set: func(c *Config, v string) error {
+			v = strings.TrimSpace(v)
+			if err := ValidateModelID(v); err != nil {
+				return err
+			}
+			c.MindForm.Model = v
+			return nil
+		},
+	})
 }
 
 // isLoopbackHost mirrors internal/dashboard's isLoopback; duplicated here
