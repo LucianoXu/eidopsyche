@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
@@ -119,7 +120,7 @@ func (r *realClient) VolumeExists(ctx context.Context, name string) (bool, error
 	if err == nil {
 		return true, nil
 	}
-	if client.IsErrNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		return false, nil
 	}
 	return false, err
@@ -148,7 +149,7 @@ func (r *realClient) ContainerExists(ctx context.Context, name string) (bool, er
 func (r *realClient) ContainerInspectState(ctx context.Context, name string) (string, error) {
 	resp, err := r.c.ContainerInspect(ctx, name)
 	if err != nil {
-		if client.IsErrNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			return "absent", nil
 		}
 		return "", err
@@ -191,8 +192,8 @@ func (r *realClient) ContainerRemove(ctx context.Context, name string) error {
 }
 
 func (r *realClient) ImageExists(ctx context.Context, ref string) (bool, error) {
-	if _, _, err := r.c.ImageInspectWithRaw(ctx, ref); err != nil {
-		if client.IsErrNotFound(err) {
+	if _, err := r.c.ImageInspect(ctx, ref); err != nil {
+		if cerrdefs.IsNotFound(err) {
 			return false, nil
 		}
 		return false, err
