@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/fiatjaf/eventstore/sqlite3"
 	"github.com/fiatjaf/khatru"
 	gnostr "github.com/nbd-wtf/go-nostr"
 )
@@ -17,12 +18,13 @@ const (
 )
 
 type Config struct {
-	Mode      Mode
-	Listen    string
-	OwnerHex  string
-	Whitelist *WhitelistSource
-	TLS       TLSConfig
-	Auth      AuthConfig
+	Mode           Mode
+	Listen         string
+	OwnerHex       string
+	Whitelist      *WhitelistSource
+	TLS            TLSConfig
+	Auth           AuthConfig
+	EventStorePath string // Empty = ephemeral (default); non-empty enables sqlite persistence.
 }
 
 // AuthConfig governs NIP-42 AUTH enforcement. Required defaults to false
@@ -43,9 +45,10 @@ type TLSConfig struct {
 }
 
 type Server struct {
-	cfg  Config
-	r    *khatru.Relay
-	http *http.Server
+	cfg        Config
+	r          *khatru.Relay
+	http       *http.Server
+	eventStore *sqlite3.SQLite3Backend
 }
 
 func New(cfg Config) (*Server, error) {
@@ -90,6 +93,20 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	srv := &Server{cfg: cfg, r: r}
+
+	if cfg.EventStorePath != "" {
+		evStore, err := OpenSQLiteStore(cfg.EventStorePath)
+		if err != nil {
+			return nil, err
+		}
+		r.StoreEvent = append(r.StoreEvent, evStore.SaveEvent)
+		r.QueryEvents = append(r.QueryEvents, evStore.QueryEvents)
+		r.CountEvents = append(r.CountEvents, evStore.CountEvents)
+		r.DeleteEvent = append(r.DeleteEvent, evStore.DeleteEvent)
+		r.ReplaceEvent = append(r.ReplaceEvent, evStore.ReplaceEvent)
+		srv.eventStore = evStore
+	}
+
 	srv.http = &http.Server{Addr: cfg.Listen, Handler: r}
 	return srv, nil
 }
@@ -150,11 +167,23 @@ func (s *Server) ListenAndServe() error {
 	}
 	return s.http.ListenAndServe()
 }
-func (s *Server) Shutdown(ctx context.Context) error { return s.http.Shutdown(ctx) }
+func (s *Server) Shutdown(ctx context.Context) error {
+	err := s.http.Shutdown(ctx)
+	if s.eventStore != nil {
+		s.eventStore.Close()
+	}
+	return err
+}
 
 // Close forces an immediate stop: the listener closes and all active
 // connections (including upgraded WebSockets) are terminated. Use when
 // graceful drain isn't appropriate — chiefly tests that simulate a relay
 // disappearing under a daemon's feet.
-func (s *Server) Close() error { return s.http.Close() }
+func (s *Server) Close() error {
+	err := s.http.Close()
+	if s.eventStore != nil {
+		s.eventStore.Close()
+	}
+	return err
+}
 func (s *Server) Addr() string { return s.http.Addr }
