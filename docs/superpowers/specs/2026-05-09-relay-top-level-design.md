@@ -73,7 +73,7 @@ eidos relay service {install|start|stop|status|uninstall} [--system | --user]
 - `[relay]` section of gate's `config.toml` — moved entirely to relay's own config; gate config schema drops it.
 - `cfg.RelayEnabled()` and all branch points in `cmd/eidos/gate/{start,stop,status,purge,init}.go` that checked it. The relay's existence is now a separate-process concern, not a gate config concern.
 - `--with-local-relay` and `--listen` flags on `eidos gate init` (introduced by the 2026-05-07 doc). Local-relay setup is now `eidos relay init`, run separately.
-- `relay_whitelist` table in `internal/store` schema; `relayd_owner_pubkey` meta key.
+- `relay_whitelist` view in `internal/store/schema.go` (derived from `contacts` + `owner_pubkey` meta).
 
 ### 4.3 Unchanged
 
@@ -86,7 +86,7 @@ eidos relay service {install|start|stop|status|uninstall} [--system | --user]
 ```
 ~/.config/eidos/
 ├── config.toml            # gate config (no [relay] section)
-├── state.db               # gate state (no relay_whitelist, no relayd_owner_pubkey)
+├── state.db               # gate state (relay_whitelist view dropped; owner_pubkey meta retained for gate's own use)
 └── relay/
     ├── config.toml        # all [relay] / [relay.tls] / [relay.auth] sections
     └── events.db          # sqlite event store via fiatjaf/eventstore/sqlite3
@@ -137,7 +137,7 @@ service_url = ""                   # optional; overrides khatru's auto-derived U
 - `cmd/eidos/gate/relay.go` (the run command).
 - `internal/relayd/whitelist.go` (whitelist dropped).
 - Whitelist field of `relayd.Config` and the paired-mode check that requires it (`internal/relayd/relayd.go:62-64`).
-- `relay_whitelist` table from `internal/store/migrations`; the `relayd_owner_pubkey` meta key migration.
+- `relay_whitelist` view from `internal/store/schema.go`. (Gate's own `owner_pubkey` meta key stays; only the relay-side dependency on it goes.)
 
 ### 6.3 Modified
 
