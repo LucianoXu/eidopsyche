@@ -46,6 +46,47 @@ func TestReasonValues(t *testing.T) {
 	}
 }
 
+func TestReasonPlannedConstant(t *testing.T) {
+	if ReasonPlanned != "planned" {
+		t.Errorf("ReasonPlanned = %q, want \"planned\"", ReasonPlanned)
+	}
+}
+
+func TestContextNewFieldsRoundTrip(t *testing.T) {
+	in := Signal{
+		Reason:      ReasonPlanned,
+		TriggeredAt: 1715284800,
+		Context: Context{
+			InboxUnread:           0,
+			SinceLastWakeSeconds:  3600,
+			MasterLikelyAsleep:    true,
+			SinceLastDreamSeconds: 30 * 3600,
+			DreamEligible:         true,
+			PlanID:                "20260509T123000Z-plan-7f2e",
+		},
+	}
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out Signal
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.Context.MasterLikelyAsleep {
+		t.Error("MasterLikelyAsleep round-trip lost")
+	}
+	if out.Context.SinceLastDreamSeconds != 30*3600 {
+		t.Errorf("SinceLastDreamSeconds = %d", out.Context.SinceLastDreamSeconds)
+	}
+	if !out.Context.DreamEligible {
+		t.Error("DreamEligible round-trip lost")
+	}
+	if out.Context.PlanID != "20260509T123000Z-plan-7f2e" {
+		t.Errorf("PlanID = %q", out.Context.PlanID)
+	}
+}
+
 func TestWritePendingCreatesAndReads(t *testing.T) {
 	dir := t.TempDir()
 	sig := Signal{V: 1, ID: "abc", Reason: ReasonHeartBeat, TriggeredAt: 100}
