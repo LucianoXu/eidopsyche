@@ -3,6 +3,7 @@ package ontology
 import (
 	"archive/tar"
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -95,5 +96,42 @@ func TestTarStreamProducesAllEntries(t *testing.T) {
 		if !seen[want] {
 			t.Errorf("tar missing %q", want)
 		}
+	}
+}
+
+func TestTarStreamUsesForwardSlashes(t *testing.T) {
+	params := Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d"}
+	var buf bytes.Buffer
+	if err := TarStream(&buf, params); err != nil {
+		t.Fatal(err)
+	}
+	tr := tar.NewReader(&buf)
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(h.Name, "\\") {
+			t.Errorf("tar entry %q contains backslash; tar names must use forward slashes", h.Name)
+		}
+	}
+}
+
+type errWriter struct{ failNow bool }
+
+func (e *errWriter) Write(p []byte) (int, error) {
+	if e.failNow {
+		return 0, errors.New("simulated write failure")
+	}
+	return len(p), nil
+}
+
+func TestTarStreamPropagatesWriteError(t *testing.T) {
+	err := TarStream(&errWriter{failNow: true}, Params{Label: "a", OwnerNpub: "n", CreatedDate: "d"})
+	if err == nil {
+		t.Errorf("expected error from failing writer, got nil")
 	}
 }

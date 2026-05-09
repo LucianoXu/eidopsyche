@@ -72,22 +72,20 @@ func Scaffold(dir string, params Params) error {
 // over stdin.
 func TarStream(w io.Writer, params Params) error {
 	tw := tar.NewWriter(w)
-	defer tw.Close()
 	now := time.Now()
-	return fs.WalkDir(templateFS, "template", func(srcPath string, d fs.DirEntry, err error) error {
+	walkErr := fs.WalkDir(templateFS, "template", func(srcPath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel("template", srcPath)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
+		// embed.FS paths always use forward slashes (io/fs contract), so
+		// TrimPrefix is correct on every platform, unlike filepath.Rel.
+		name := strings.TrimPrefix(srcPath, "template/")
+		if name == "template" || name == "" {
 			return nil
 		}
 		if d.IsDir() {
 			return tw.WriteHeader(&tar.Header{
-				Name:     rel + "/",
+				Name:     name + "/",
 				Mode:     0o700,
 				Typeflag: tar.TypeDir,
 				ModTime:  now,
@@ -97,7 +95,6 @@ func TarStream(w io.Writer, params Params) error {
 		if err != nil {
 			return err
 		}
-		name := rel
 		if strings.HasSuffix(name, ".tpl") {
 			name = strings.TrimSuffix(name, ".tpl")
 			rendered, err := renderTemplate(string(body), params)
@@ -120,6 +117,11 @@ func TarStream(w io.Writer, params Params) error {
 		}
 		return nil
 	})
+	if walkErr != nil {
+		tw.Close() //nolint:errcheck // best-effort; return the walk error
+		return walkErr
+	}
+	return tw.Close()
 }
 
 func assertEmpty(dir string) error {
