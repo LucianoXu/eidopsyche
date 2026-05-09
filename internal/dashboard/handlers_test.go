@@ -12,6 +12,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
+	"github.com/LucianoXu/eidopsyche/internal/ipc"
 )
 
 func newTestServer(t *testing.T, deps DashboardDeps) http.Handler {
@@ -202,6 +203,42 @@ func TestHandler_Send_RelayFailure_Returns502(t *testing.T) {
 	// Use a plain substring check; http.Error appends a newline.
 	if !strings.Contains(rec.Body.String(), "send failed: stub: no relay accepted") {
 		t.Errorf("502 body must include human-readable error for the toast layer; got: %q",
+			rec.Body.String())
+	}
+}
+
+// TestHandler_Compose_SendToUnknown_ReturnsContactNotFound asserts that
+// the dashboard refuses sends to an npub that is not in contacts. The
+// check itself lives in the IPC send handler (resolveTarget plus
+// repo.Get); this test verifies the dashboard surface routes through
+// that handler and surfaces CONTACT_NOT_FOUND back to the operator
+// instead of silently going through fallback relays.
+//
+// Pins the fix from
+// docs/superpowers/specs/2026-05-09-unified-call-path-design.md
+// (Phase 1: dashboard.Send routes through *Daemon.Call).
+func TestHandler_Compose_SendToUnknown_ReturnsContactNotFound(t *testing.T) {
+	deps := fakeDeps{
+		pubkey: "selfpubkey",
+		sendErr: &ipc.Error{
+			Code:    ipc.ErrContactNotFound,
+			Message: "deadbeef",
+		},
+	}
+	srv := newTestServer(t, deps)
+	rec := httptest.NewRecorder()
+	form := strings.NewReader("to=deadbeef&text=hi")
+	req := httptest.NewRequest("POST", "/compose/send", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://"+req.Host)
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d body %s", rec.Code, rec.Body.String())
+	}
+	// The body must include CONTACT_NOT_FOUND so the toast layer surfaces
+	// the typed code (operator can act on it: "add this npub first").
+	if !strings.Contains(rec.Body.String(), "CONTACT_NOT_FOUND") {
+		t.Errorf("502 body must contain CONTACT_NOT_FOUND for the toast layer; got: %q",
 			rec.Body.String())
 	}
 }
