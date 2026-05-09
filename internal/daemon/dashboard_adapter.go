@@ -119,43 +119,23 @@ func (a dashboardAdapter) OwnCardURI(ctx context.Context) (string, error) {
 	return uri, nil
 }
 
-// configPath is the canonical location of config.toml inside the gate
-// state directory. Both ConfigSnapshot and ConfigSet route through this
-// helper so they always read and write the same file.
-func (a dashboardAdapter) configPath() string {
-	return filepath.Join(a.d.StateDir, "config.toml")
-}
-
+// ConfigSnapshot routes through the IPC config.get handler so the
+// adapter and CLI surface read the on-disk file by the exact same code
+// path. See SPEC.md "调用路径统一".
 func (a dashboardAdapter) ConfigSnapshot() (config.Config, error) {
-	return config.Load(a.configPath())
+	var cfg config.Config
+	if err := a.d.Call(context.Background(), "config.get", nil, &cfg); err != nil {
+		return config.Config{}, err
+	}
+	return cfg, nil
 }
 
+// ConfigSet routes through the IPC config.set handler. The lock that
+// serialises read-modify-write of config.toml lives on the handler now;
+// before unification the lock guarded only the dashboard writer while
+// the CLI wrote the file directly without taking it.
 func (a dashboardAdapter) ConfigSet(ctx context.Context, path, value string) error {
-	key, ok := config.KeyByPath(path)
-	if !ok {
-		return fmt.Errorf("unknown config key: %s", path)
-	}
-	// Serialise read-modify-write so two concurrent rows-set calls
-	// (e.g. operator clicking Set on two rows in quick succession, or
-	// two open tabs writing different keys) cannot overwrite each
-	// other's update. Validation runs inside the lock too so the
-	// rejection of an invalid value reflects the on-disk state at
-	// the moment of the attempt.
-	a.d.configMu.Lock()
-	defer a.d.configMu.Unlock()
-
-	cfg, err := config.Load(a.configPath())
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	if err := key.Set(&cfg, value); err != nil {
-		return err
-	}
-	if err := config.Save(a.configPath(), cfg); err != nil {
-		return fmt.Errorf("save config: %w", err)
-	}
-	a.d.emitDashEvent(dashboard.Event{Kind: "config.changed"})
-	return nil
+	return a.d.Call(ctx, "config.set", ConfigSetParams{Path: path, Value: value}, nil)
 }
 
 // ── phase 2: contacts ──────────────────────────────────────────────
