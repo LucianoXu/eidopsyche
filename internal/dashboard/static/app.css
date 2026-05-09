@@ -1529,5 +1529,67 @@ p.lifecycle-log-foot {
 p.lifecycle-log-foot a { color: var(--fg-mute); text-decoration: none; }
 p.lifecycle-log-foot a:hover { color: var(--seal); }
 
+/* ---------------------------------------------------------------- *
+ * Global toasts — surfaces every htmx error response (4xx/5xx) and
+ * network-level failure so the operator sees a visible notification
+ * for actions that previously dropped silently (htmx 2.x default
+ * doesn't swap on non-2xx). Stacked top-right, click to dismiss,
+ * auto-fade after 4s (info) / 8s (error).
+ * ---------------------------------------------------------------- */
+
+.toasts {
+  position: fixed; top: 16px; right: 20px;
+  display: flex; flex-direction: column; gap: 10px;
+  z-index: 100;
+  max-width: min(520px, calc(100vw - 40px));
+  pointer-events: none;     /* let clicks pass through gaps */
+}
+
+.toast {
+  pointer-events: auto;
+  padding: 12px 16px 10px 18px;
+  font-family: var(--serif); font-size: 14px; line-height: 1.5;
+  color: var(--fg);
+  background: var(--bg-2);
+  border-top: 2px solid var(--rule-2);
+  border-right: 1px solid var(--rule-2);
+  border-bottom: 1px solid var(--rule-2);
+  border-left: 1px solid var(--rule-2);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.3);
+  animation: toast-rise 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  cursor: pointer;
+  word-break: break-word;
+}
+
+.toast.is-info  { border-top-color: var(--fg-dim); }
+.toast.is-error {
+  border-top-color: var(--seal);
+  background: var(--seal-mute);
+  color: var(--fg);
+}
+.toast.is-error::before {
+  content: "✕  ";
+  color: var(--seal);
+  font-family: var(--mono); font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.toast.is-fading {
+  animation: toast-fade 600ms ease-out forwards;
+}
+
+@media (prefers-color-scheme: light) {
+  .toast { box-shadow: 0 12px 28px rgba(26, 22, 17, 0.14); }
+}
+
+@keyframes toast-rise {
+  from { opacity: 0; transform: translateY(-6px) scale(0.99); }
+  to   { opacity: 1; transform: translateY(0)   scale(1); }
+}
+@keyframes toast-fade {
+  from { opacity: 1; }
+  to   { opacity: 0; transform: translateY(-4px); }
+}
+
 /* ---------------------------------------------------------------- */
 

@@ -30,5 +30,59 @@
        hx-trigger="load, sse:relay.state from:body"
        hx-swap="innerHTML"></aside>
 <div id="modal"></div>
+<!--
+  Toast region. The inline script below catches every htmx request that
+  fails (HTTP 4xx/5xx via htmx:responseError) and every network-level
+  error (htmx:sendError — daemon unreachable, IPC drop). Without this,
+  htmx 2.x silently drops the response on any non-2xx status: the
+  operator clicks Send / Remove / Revoke and gets no visible feedback
+  even though the daemon has logged a failure. Bug found post-v0.7.0
+  when a stale-relay send returned 502 with `<div class="error">…</div>`
+  and nothing rendered.
+-->
+<div id="toasts" class="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
+<script>
+  (function () {
+    var ERR_LIFETIME_MS  = 8000;
+    var INFO_LIFETIME_MS = 4000;
+    var BUSY_PATH_RE     = /\/(events|relays|topbar|sidebar\/)/;
+    function toastMessage(xhr) {
+      var t = (xhr && xhr.responseText) || "";
+      // The body is usually a small HTML fragment or plain text; strip
+      // tags for the toast (we only want the human message). For empty
+      // bodies fall back to the status line.
+      var stripped = t.replace(/<[^>]+>/g, "").trim();
+      if (stripped) return stripped;
+      return "HTTP " + (xhr && xhr.status || "0");
+    }
+    function showToast(text, kind) {
+      var host = document.getElementById("toasts");
+      if (!host) return;
+      var el = document.createElement("div");
+      el.className = "toast is-" + (kind || "info");
+      el.setAttribute("role", "alert");
+      el.textContent = text;
+      el.addEventListener("click", function () { el.remove(); });
+      host.appendChild(el);
+      var ttl = (kind === "error") ? ERR_LIFETIME_MS : INFO_LIFETIME_MS;
+      setTimeout(function () { el.classList.add("is-fading"); }, ttl - 600);
+      setTimeout(function () { el.remove(); }, ttl);
+    }
+    document.body.addEventListener("htmx:responseError", function (evt) {
+      // Skip background polls that the operator didn't initiate — a
+      // momentary 5xx on the relays panel SSE refresh shouldn't interrupt
+      // the foreground.
+      var path = evt.detail && evt.detail.requestConfig && evt.detail.requestConfig.path || "";
+      if (BUSY_PATH_RE.test(path)) return;
+      showToast(toastMessage(evt.detail.xhr), "error");
+    });
+    document.body.addEventListener("htmx:sendError", function () {
+      showToast("Network error — could not reach the daemon. Reload to retry.", "error");
+    });
+    // Expose for use from inline hx-on:: handlers when a handler wants
+    // to surface its own success / info message.
+    window.eidosToast = showToast;
+  })();
+</script>
 </body>
 </html>{{end}}
