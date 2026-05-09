@@ -54,8 +54,8 @@ curl -fsSL https://raw.githubusercontent.com/LucianoXu/eidopsyche/main/install.s
 curl -fsSL https://raw.githubusercontent.com/LucianoXu/eidopsyche/main/install.sh | EIDOS_VERSION=v0.1.0 sh
 ```
 
-Full options (build-from-source, packaging, systemd / launchd units,
-backup) live in [`docs/INSTALL.md`](docs/INSTALL.md).
+Full options (build-from-source, packaging, systemd / launchd / Windows-SCM
+units, backup) live in [`docs/INSTALL.md`](docs/INSTALL.md).
 
 ## Updating
 
@@ -98,9 +98,9 @@ eidos gate init --label alice --home ws://127.0.0.1:22895 \
 Then:
 
 ```sh
-# 1. Start the gate as OS services (systemd on Linux, launchd on macOS).
-#    Only the daemon unit is installed unless --with-local-relay was set
-#    at init.
+# 1. Start the gate as OS services (systemd on Linux, launchd on macOS,
+#    Windows Service Control Manager on Windows). Only the daemon unit
+#    is installed unless --with-local-relay was set at init.
 eidos gate start
 eidos gate status
 
@@ -138,7 +138,7 @@ contacts. See [`docs/USAGE.md`](docs/USAGE.md) for the full walkthrough.
 |---|---|
 | [`SPEC.md`](SPEC.md) | Design intent — the philosophical and architectural source of truth |
 | [`EXAMPLE.md`](EXAMPLE.md) | Minimum two-user, two-mind-form deployment story |
-| [`docs/INSTALL.md`](docs/INSTALL.md) | Install script, build-from-source, systemd / launchd unit details, backup, reset |
+| [`docs/INSTALL.md`](docs/INSTALL.md) | Install script, build-from-source, systemd / launchd / Windows-SCM unit details, backup, reset |
 | [`docs/USAGE.md`](docs/USAGE.md) | All `eidos gate` subcommands and common flows |
 | `docs/superpowers/specs/` | Design specs for individual features (release pipeline, invites, etc.) |
 
@@ -177,7 +177,7 @@ eidopsyche/
 │   ├── inbox/                 # Inbox query & filter helpers
 │   ├── store/                 # SQLite schema and migrations
 │   ├── config/                # Config + state-dir resolution
-│   ├── service/               # OS service manager (systemd on Linux, launchd on macOS)
+│   ├── service/               # OS service manager (systemd on Linux, launchd on macOS, SCM on Windows)
 │   ├── update/                # Update check + prompt + cache
 │   └── version/               # Build-time ldflags vars
 ├── install.sh                 # One-line installer / self-update target

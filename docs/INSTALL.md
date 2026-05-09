@@ -130,18 +130,23 @@ eidos gate stop     # stop without uninstalling
 `start` writes the appropriate unit files for your OS and asks the OS
 service manager to enable + start them. Both units restart on non-zero
 exit (`Restart=on-failure` on systemd; `KeepAlive`+`SuccessfulExit=false`
-on launchd) so a clean `eidos gate stop` actually stops, while a crash
-brings the service back automatically.
+on launchd; SCM's default service-failure recovery on Windows) so a
+clean `eidos gate stop` actually stops, while a crash brings the
+service back automatically.
 
 | OS | Service manager | User-mode unit path | System-mode unit path |
 |---|---|---|---|
 | Linux | systemd | `~/.config/systemd/user/eidos-gate-{daemon,relay}.service` | `/etc/systemd/system/eidos-gate-{daemon,relay}.service` |
 | macOS | launchd | `~/Library/LaunchAgents/eidos-gate-{daemon,relay}.plist` | `/Library/LaunchDaemons/eidos-gate-{daemon,relay}.plist` |
+| Windows | SCM (`services.msc`) | `eidos-gate-{daemon,relay}` (host-wide; LocalSystem account) | same — SCM has no per-user database |
 
 On Linux user-mode, services survive your shell exiting; for a full
 logout-survives experience on a headless host, run
 `loginctl enable-linger <username>` once. macOS LaunchAgents auto-start at
-GUI login.
+GUI login. On Windows the SCM service is configured with `StartType =
+Automatic` so it comes back at boot; `eidos gate start / stop / purge`
+must be run from an elevated PowerShell (Administrator) because SCM
+mutations require Administrator privileges.
 
 By default, `eidos gate init` creates a daemon-only install: no embedded
 relay process is started and only the daemon unit is registered with
@@ -267,6 +272,10 @@ eidos gate start
   plist redirects stdout / stderr to
   `<state-dir>/logs/eidos-gate-{daemon,relay}.log`. Tail with
   `tail -f ~/.eidos/gate/logs/eidos-gate-daemon.log`.
+- Windows: SCM captures the daemon's stdout/stderr only when explicitly
+  redirected. Run `Get-EventLog -LogName Application -Source eidos-gate-daemon`
+  for SCM lifecycle events; for daemon-internal logs, use the foreground
+  mode (`eidos.exe gate daemon` from PowerShell) for live tailing.
 
 ### System-wide install
 
@@ -287,7 +296,12 @@ least-privilege.
 
 The original `eidos gate daemon` and `eidos gate relay` commands still
 work and run in the foreground — useful for debugging or on hosts without
-systemd / launchd. They are exactly what `eidos gate start`'s units invoke.
+a service manager. They are exactly what `eidos gate start`'s units invoke.
+On Windows, when the binary is launched by SCM (`svc.IsWindowsService()`
+returns true), the same subcommands transparently dispatch through
+`golang.org/x/sys/windows/svc` so SCM's Stop / Shutdown control messages
+become a context cancellation; on a normal command-line invocation the
+ctrl-C / SIGTERM path is used as on linux/darwin.
 
 ## Backup
 
@@ -308,10 +322,11 @@ eidos gate purge --yes    # for scripts / CI
 ```
 
 `purge` stops the services, removes the OS service unit files (systemd
-.service or launchd .plist depending on platform), reloads the service
-manager where applicable, and deletes the gate state directory (key,
-state.db, config.toml, relay/, and the launchd `logs/` directory). It is
-idempotent on partially-installed setups, so it is safe to run as a
+.service, launchd .plist, or SCM service entry depending on platform),
+reloads the service manager where applicable, and deletes the gate
+state directory (key, state.db, config.toml, relay/, and the launchd
+`logs/` directory). It is idempotent on partially-installed setups, so
+it is safe to run as a
 teardown step in test harnesses.
 
 ## Resetting to a fresh identity

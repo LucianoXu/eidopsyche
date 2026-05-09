@@ -4,11 +4,25 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"log/slog"
 	"os/exec"
 	"sync"
 	"syscall"
 )
+
+// shortLifecycleHex returns 8 hex chars used as a transient systemd-run
+// unit suffix. We tolerate a `rand.Read` failure here because the worst
+// case is a unit-name collision, which `--collect` cleans up on exit —
+// strictly better than the spawner failing outright.
+func shortLifecycleHex() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "00000000"
+	}
+	return hex.EncodeToString(b[:])
+}
 
 // loggedFallbackOnce makes the "systemd-run not on PATH" warning fire
 // at most once per process — printing on every lifecycle action would

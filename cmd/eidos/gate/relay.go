@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/LucianoXu/eidopsyche/internal/relayd"
+	"github.com/LucianoXu/eidopsyche/internal/service"
 	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
@@ -63,16 +64,22 @@ to enable: eidos gate config set relay.enabled true && eidos gate config set rel
 			return err
 		}
 		fmt.Fprintf(os.Stderr, "eidos-gate-relay listening %s mode=%s\n", listen, mode)
-		errc := make(chan error, 1)
-		go func() { errc <- srv.ListenAndServe() }()
-		select {
-		case err := <-errc:
-			return err
-		case <-ctx.Done():
-			shutdown, scancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer scancel()
-			return srv.Shutdown(shutdown)
-		}
+		// service.RunSupervised dispatches via Windows SCM when launched
+		// by SCM, and is a pass-through everywhere else. The closure
+		// listens until the (possibly SCM-cancelled) context is Done,
+		// then triggers a graceful shutdown.
+		return service.RunSupervised(ctx, service.RelayUnitName, func(ctx context.Context) error {
+			errc := make(chan error, 1)
+			go func() { errc <- srv.ListenAndServe() }()
+			select {
+			case err := <-errc:
+				return err
+			case <-ctx.Done():
+				shutdown, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer scancel()
+				return srv.Shutdown(shutdown)
+			}
+		})
 	},
 }
 
