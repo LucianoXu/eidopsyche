@@ -41,7 +41,11 @@ func newRunCmd() *cobra.Command {
 // Returns the first non-nil error so the caller can abort before entering
 // the wake loop.
 func startChildren(ctx context.Context, sp ChildSpawner) error {
-	if err := sp.Spawn(ctx, "crond", "-f", "-c", "/etc/crontabs"); err != nil {
+	// busybox crond reads each file in the spool dir as a user's
+	// crontab keyed by filename. We use /var/spool/cron/crontabs
+	// (the per-user spool); the image installs the heartbeat
+	// crontab as eidos's spool entry.
+	if err := sp.Spawn(ctx, "crond", "-f", "-c", "/var/spool/cron/crontabs"); err != nil {
 		return err
 	}
 	return sp.Spawn(ctx, "eidos", "gate", "daemon", "--state-dir", gateDir)
