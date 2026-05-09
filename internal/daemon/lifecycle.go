@@ -173,6 +173,32 @@ func (d *Daemon) LifecycleStatusSnapshot() LifecycleStatus {
 	}
 }
 
+// lifecycleSSEWireDelay is the time pumpLifecycle waits before emitting
+// its first SSE event. It exists to give the dashboard's browser-side
+// htmx-ext-sse extension time to addEventListener for
+// `lifecycle.line:<jobID>` and `lifecycle.done:<jobID>` on the freshly-
+// swapped lifecycle pane. EventSource.addEventListener has no event
+// replay — events that fire before the listener attaches are lost.
+//
+// The race manifests for fast-completing children like `eidos gate
+// reconnect` (~10 ms): without this delay, the daemon emits all of
+// {line, done} before the browser has wired up listeners, the pill
+// stays stuck on `is-running`, and the lifecycle log shows only the
+// initial "(waiting for output)" placeholder.
+//
+// 300 ms is empirically enough for headless Chromium under playwright
+// on selene to wire listeners after the POST response. Real users
+// experience this as a brief pause before lines start streaming, which
+// is comfortably below noticeable-latency thresholds.
+//
+// A test seam (testLifecycleSSEWireDelay) lets unit tests force this
+// to zero so they don't pay the wallclock cost.
+const lifecycleSSEWireDelay = 300 * time.Millisecond
+
+// testLifecycleSSEWireDelay, if non-nil, overrides lifecycleSSEWireDelay
+// for unit tests. Production code path leaves it nil.
+var testLifecycleSSEWireDelay *time.Duration
+
 // pumpLifecycle reads the child's stdout one line at a time and emits
 // each as a content-bearing SSE event. When cmd.Wait returns, the rc is
 // rendered into a status pill and emitted as the lifecycle.done event,
@@ -181,9 +207,33 @@ func (d *Daemon) LifecycleStatusSnapshot() LifecycleStatus {
 // The function runs in its own goroutine; cmd.Wait must run here, not
 // in the HTTP handler, so the request returns immediately. The job.done
 // channel is closed last so shutdownLifecycle can wait on it.
+//
+// pumpLifecycle waits lifecycleSSEWireDelay before the scanner loop —
+// see that constant's comment for the SSE-listener race it papers over.
 func (d *Daemon) pumpLifecycle(job *lifecycleJob, stdout io.ReadCloser) {
 	defer close(job.done)
 	defer d.clearActiveLife(job)
+
+	delay := lifecycleSSEWireDelay
+	if testLifecycleSSEWireDelay != nil {
+		delay = *testLifecycleSSEWireDelay
+	}
+	if delay > 0 {
+		select {
+		case <-time.After(delay):
+		case <-d.lifeCtx.Done():
+			// Daemon shutting down — drain stdout so the child doesn't
+			// block on a full pipe, then emit done with rc=-1 and exit.
+			_, _ = io.Copy(io.Discard, stdout)
+			_ = job.cmd.Wait()
+			d.emitDashEvent(dashboard.Event{
+				Kind: "lifecycle.done:" + job.id,
+				HTML: lifecycleDoneHTML(job.id, -1),
+			})
+			return
+		}
+	}
+
 	scanner := bufio.NewScanner(stdout)
 	// Allow long lines (some self-update output can include progress
 	// blocks or long tracebacks). The default 64 KiB cap is too tight.

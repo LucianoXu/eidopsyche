@@ -24,6 +24,15 @@ func fakeSpawner(snippet string) LifecycleSpawner {
 
 func newLifecycleTestDaemon(t *testing.T, spawner LifecycleSpawner) *Daemon {
 	t.Helper()
+	// Force the SSE-listener wire delay to zero so unit tests don't pay
+	// the 300 ms wallclock cost. The delay only matters in the browser
+	// pipeline; the in-memory subscribeDashboard channel used by these
+	// tests has no listener-attach race.
+	zero := time.Duration(0)
+	prev := testLifecycleSSEWireDelay
+	testLifecycleSSEWireDelay = &zero
+	t.Cleanup(func() { testLifecycleSSEWireDelay = prev })
+
 	d := &Daemon{}
 	d.installLifecycle(spawner)
 	t.Cleanup(d.shutdownLifecycle)
@@ -52,6 +61,55 @@ func drainLifecycleEvents(t *testing.T, d *Daemon, jobID string, timeout time.Du
 			}
 		case <-deadline.C:
 			t.Fatalf("timed out waiting for lifecycle.done:%s; got %d lines", jobID, len(lines))
+		}
+	}
+}
+
+// TestLifecycleRun_HonorsSSEWireDelay pins the dashboard-race
+// workaround: pumpLifecycle MUST hold off emitting events for at
+// least lifecycleSSEWireDelay so the browser's htmx-ext-sse extension
+// has time to addEventListener for `lifecycle.line:<jobID>` and
+// `lifecycle.done:<jobID>` on the freshly-swapped lifecycle pane.
+// EventSource.addEventListener has no replay; events that fire before
+// the listener attaches are silently dropped — the symptom on PR #29's
+// deploy test was the pill stuck on `is-running`.
+//
+// Override the package-level testLifecycleSSEWireDelay (which the
+// helper sets to zero by default) to a measurable value and assert
+// the first line event lands no earlier than that.
+func TestLifecycleRun_HonorsSSEWireDelay(t *testing.T) {
+	d := newLifecycleTestDaemon(t, fakeSpawner(`echo immediate-line`))
+
+	delay := 200 * time.Millisecond
+	prev := testLifecycleSSEWireDelay
+	testLifecycleSSEWireDelay = &delay
+	t.Cleanup(func() { testLifecycleSSEWireDelay = prev })
+
+	ch, cancel := d.subscribeDashboard()
+	t.Cleanup(cancel)
+
+	start := time.Now()
+	jobID, err := d.LifecycleRun([]string{"gate", "reconnect"})
+	if err != nil {
+		t.Fatalf("LifecycleRun: %v", err)
+	}
+
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	for {
+		select {
+		case ev := <-ch:
+			if ev.Kind != "lifecycle.line:"+jobID {
+				continue
+			}
+			elapsed := time.Since(start)
+			if elapsed < delay {
+				t.Fatalf("first lifecycle.line fired after %v, want >= %v (the SSE-wire delay)",
+					elapsed, delay)
+			}
+			return
+		case <-deadline.C:
+			t.Fatal("timed out waiting for first lifecycle.line event")
 		}
 	}
 }
