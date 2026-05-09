@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/fiatjaf/eventstore/sqlite3"
+	"github.com/fiatjaf/eventstore/badger"
 	"github.com/fiatjaf/khatru"
 	gnostr "github.com/nbd-wtf/go-nostr"
 )
@@ -24,7 +24,7 @@ type Config struct {
 	Whitelist      *WhitelistSource
 	TLS            TLSConfig
 	Auth           AuthConfig
-	EventStorePath string // Empty = ephemeral (default); non-empty enables sqlite persistence.
+	EventStorePath string // Empty = ephemeral (default); non-empty enables badger persistence.
 }
 
 // AuthConfig governs NIP-42 AUTH enforcement. Required defaults to false
@@ -48,7 +48,7 @@ type Server struct {
 	cfg        Config
 	r          *khatru.Relay
 	http       *http.Server
-	eventStore *sqlite3.SQLite3Backend
+	eventStore *badger.BadgerBackend
 }
 
 func New(cfg Config) (*Server, error) {
@@ -95,7 +95,7 @@ func New(cfg Config) (*Server, error) {
 	srv := &Server{cfg: cfg, r: r}
 
 	if cfg.EventStorePath != "" {
-		evStore, err := OpenSQLiteStore(cfg.EventStorePath)
+		evStore, err := OpenEventStore(cfg.EventStorePath)
 		if err != nil {
 			return nil, err
 		}

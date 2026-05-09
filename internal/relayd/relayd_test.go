@@ -481,7 +481,7 @@ func TestPersistenceAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	eventsPath := filepath.Join(dir, "events.db")
+	eventsPath := filepath.Join(dir, "events")
 	addr := freePort(t)
 
 	// First run: publish a kind:1059 event addressed to owner.

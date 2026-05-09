@@ -114,8 +114,10 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// EventStorePath returns the canonical events.db path for a config dir.
-func EventStorePath(dir string) string { return filepath.Join(dir, "events.db") }
+// EventStorePath returns the canonical event-store directory path for
+// a relay config dir. The path is a directory (badger-backed), not a
+// single file.
+func EventStorePath(dir string) string { return filepath.Join(dir, "events") }
 
 // DefaultDir returns the conventional relay config dir under
 // XDG_CONFIG_HOME/eidos/relay (or $HOME/.config/eidos/relay if the
