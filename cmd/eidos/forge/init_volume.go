@@ -2,6 +2,7 @@ package forge
 
 import (
 	"archive/tar"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,8 +10,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/LucianoXu/eidopsyche/internal/contacts"
+	"github.com/LucianoXu/eidopsyche/internal/identity"
+	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
 // newInitVolumeCmd is invoked by the host's `eidos forge create` flow as
@@ -73,13 +79,16 @@ func runInitVolume(stdout, stderr io.Writer, stdin io.Reader) error {
 		return fmt.Errorf("gate init: %w", err)
 	}
 
-	if err := runCmd(stderr, "eidos", "gate", "add-contact",
-		"--state-dir", gateDir,
-		owner,
-		"--relay", relay,
-		"--label", "master",
-		"--tier", "master",
-	); err != nil {
+	// Add the master contact directly to state.db. We bypass `eidos gate
+	// add-contact` here on purpose: per the SPEC's single-call-path rule,
+	// every operator action goes through the gate daemon's methodTable —
+	// but during init-volume there is no daemon socket yet (the supervisor
+	// will start the daemon at first boot). The SPEC's exception clause
+	// names exactly this case ("Only when daemon does not exist or is not
+	// reachable... directly read/write state files") and requires the
+	// exception to be explicitly noted at the call site. This is that
+	// note.
+	if err := addMasterContactDirect(stderr, gateDir, owner, relay); err != nil {
 		return fmt.Errorf("gate add-contact (master): %w", err)
 	}
 
@@ -137,6 +146,52 @@ func extractTar(r io.Reader, target string) error {
 			}
 		}
 	}
+}
+
+// addMasterContactDirect opens state.db and inserts the owner as a
+// master-tier contact, using the relay URL as the contact's relay hint.
+// Accepts owner as either a bech32 npub or a 64-char hex pubkey, since
+// the host's `eidos forge create` flag-validates an npub but operators
+// could conceivably override.
+func addMasterContactDirect(stderr io.Writer, gateDir, ownerNpubOrHex, relay string) error {
+	hex, err := decodeNpubOrHex(ownerNpubOrHex)
+	if err != nil {
+		return fmt.Errorf("decode owner: %w", err)
+	}
+	dbPath := filepath.Join(gateDir, "state.db")
+	db, err := store.Open(dbPath, false)
+	if err != nil {
+		return fmt.Errorf("open state.db: %w", err)
+	}
+	defer db.Close()
+	repo := contacts.New(db)
+	ctx := context.Background()
+	if err := repo.Add(ctx, contacts.Contact{
+		Pubkey: hex,
+		Label:  "master",
+		Tier:   contacts.TierMaster,
+		Relays: []string{relay},
+	}); err != nil {
+		// Duplicate is OK (idempotent re-init).
+		if errors.Is(err, contacts.ErrExists) {
+			fmt.Fprintln(stderr, "master contact already present, skipping")
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// decodeNpubOrHex normalizes an owner identifier to lowercase 64-char hex.
+func decodeNpubOrHex(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "npub1") {
+		return identity.DecodeNpub(s)
+	}
+	if len(s) != 64 {
+		return "", fmt.Errorf("owner must be a 64-char hex pubkey or an npub1… string (got %d chars)", len(s))
+	}
+	return strings.ToLower(s), nil
 }
 
 func runCmd(stderr io.Writer, name string, args ...string) error {

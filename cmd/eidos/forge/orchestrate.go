@@ -87,6 +87,19 @@ func orchestrate(ctx context.Context, c forgectl.Client, name string, o createOp
 		_ = c.VolumeRemove(ctx, vol)
 		return fmt.Errorf("init-volume: %w (stderr: %s)", err, string(res.Stderr))
 	}
+
+	// Create the persistent container in stopped state. `forge start` is
+	// then a thin docker-start. Using the image's default entrypoint
+	// (tini → entrypoint.sh → eidos supervisor run); no Cmd / Entrypoint
+	// override needed.
+	if err := c.ContainerCreate(ctx, forgectl.CreateOpts{
+		Name:  cont,
+		Image: image,
+		Mount: forgectl.Mount{VolumeName: vol, Target: "/eidos"},
+	}); err != nil {
+		_ = c.VolumeRemove(ctx, vol)
+		return fmt.Errorf("create container: %w", err)
+	}
 	return nil
 }
 

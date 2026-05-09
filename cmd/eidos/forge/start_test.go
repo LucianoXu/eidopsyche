@@ -48,8 +48,12 @@ func TestStartHappyPath(t *testing.T) {
 func TestStartRefusesIfAbsent(t *testing.T) {
 	f := &startStopFake{state: "absent"}
 	err := startMindform(context.Background(), f, "alice")
-	if err == nil || !strings.Contains(err.Error(), "not found") {
-		t.Errorf("want not-found error, got %v", err)
+	// Post-fix: forge create now provisions the persistent container in
+	// stopped state, so reaching "absent" at start time means the
+	// container was removed out of band. Error should still surface
+	// clearly.
+	if err == nil || !strings.Contains(err.Error(), "no container") {
+		t.Errorf("want no-container error, got %v", err)
 	}
 }
 

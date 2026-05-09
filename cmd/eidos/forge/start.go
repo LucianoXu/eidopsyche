@@ -39,7 +39,11 @@ func startMindform(ctx context.Context, c forgectl.Client, name string) error {
 	}
 	switch state {
 	case "absent":
-		return fmt.Errorf("mind-form %q not found (run `eidos forge create %s` first)", name, name)
+		// `forge create` provisions both volume and container (stopped),
+		// so reaching this branch implies the container was removed out
+		// of band (manual `docker rm`, partial purge, or a v0 install
+		// from before forge create created the persistent container).
+		return fmt.Errorf("mind-form %q has no container (the volume may still exist; try `eidos forge purge %s --yes` then re-create)", name, name)
 	case "running":
 		return nil
 	}
