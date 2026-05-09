@@ -45,6 +45,10 @@ func newTestDaemon(t *testing.T) *Daemon {
 		kick:        make(chan struct{}, 1),
 		dedupe:      map[string]struct{}{},
 		selfWrapIDs: map[string]struct{}{},
+		// Default ack-emit to a silent no-op so unit tests don't try to
+		// publish over a nil/empty Pool with synthetic rumor IDs that
+		// fail envelope validation. Tests asserting ack behavior override.
+		testEmitAck: func(context.Context, string, string) {},
 	}
 }
 

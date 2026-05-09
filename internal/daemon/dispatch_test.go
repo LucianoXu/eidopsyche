@@ -145,6 +145,10 @@ func TestDashboardHub_FanOutOnInbox(t *testing.T) {
 	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ev-hub"}, makeRumor(from, content))
 
 	for i, ch := range []<-chan dashboard.Event{ch1, ch2} {
+		// Each subscriber may receive both an inbox.message (from
+		// broadcastInbox) and an outbox.message (from emitAck's ack
+		// publish — but only if Pool.Publish reaches a real relay; in
+		// this unit test, no Pool is wired, so just take the first).
 		select {
 		case ev := <-ch:
 			if ev.Kind != "inbox.message" {
@@ -156,5 +160,69 @@ func TestDashboardHub_FanOutOnInbox(t *testing.T) {
 		case <-time.After(500 * time.Millisecond):
 			t.Errorf("subscriber %d did not receive event", i)
 		}
+	}
+}
+
+func TestDispatch_ChatFromContact_EmitsAck(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	from := "bob-pubkey-hex"
+	if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: from, Tier: contacts.TierFriend}); err != nil {
+		t.Fatal(err)
+	}
+
+	var (
+		ackTo  string
+		ackRef string
+		called int
+	)
+	d.testEmitAck = func(_ context.Context, to, ref string) {
+		called++
+		ackTo, ackRef = to, ref
+	}
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeChat, Text: "hi"}
+	content, _ := envelope.Encode(env)
+	rumor := makeRumor(from, content)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ev"}, rumor)
+
+	if called != 1 || ackTo != from || ackRef != rumor.ID {
+		t.Errorf("ack call: count=%d to=%q ref=%q; want 1, %q, %q", called, ackTo, ackRef, from, rumor.ID)
+	}
+}
+
+func TestDispatch_SelfCopy_NoAck(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+
+	called := 0
+	d.testEmitAck = func(context.Context, string, string) { called++ }
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeChat, Text: "self-note"}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ev-self"}, makeRumor(d.Key.PublicHex, content))
+
+	if called != 0 {
+		t.Errorf("ack emitted for self-copy: count=%d", called)
+	}
+}
+
+func TestDispatch_BlockedSender_NoAck(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	from := "mallory-pubkey-hex"
+	if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: from, Tier: contacts.TierBlocked}); err != nil {
+		t.Fatal(err)
+	}
+
+	called := 0
+	d.testEmitAck = func(context.Context, string, string) { called++ }
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeChat, Text: "rude"}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ev-blk"}, makeRumor(from, content))
+
+	if called != 0 {
+		t.Errorf("ack emitted for blocked sender: count=%d", called)
 	}
 }

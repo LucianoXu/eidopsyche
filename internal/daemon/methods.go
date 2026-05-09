@@ -360,27 +360,7 @@ func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 		return nil, internalErr(err)
 	}
 
-	targets := map[string]struct{}{}
-	rows, err := d.DB.QueryContext(ctx, `SELECT relay_url FROM own_relays`)
-	if err != nil {
-		return nil, internalErr(err)
-	}
-	for rows.Next() {
-		var u string
-		_ = rows.Scan(&u)
-		targets[u] = struct{}{}
-	}
-	rows.Close()
-	for _, u := range c.Relays {
-		targets[u] = struct{}{}
-	}
-	for _, u := range d.Cfg.Publish.FallbackRelays {
-		targets[u] = struct{}{}
-	}
-	urls := make([]string, 0, len(targets))
-	for u := range targets {
-		urls = append(urls, u)
-	}
+	urls := d.publishTargets(ctx, c.Relays)
 
 	publishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

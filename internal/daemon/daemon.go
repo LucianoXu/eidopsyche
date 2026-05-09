@@ -76,6 +76,10 @@ type Daemon struct {
 	// testSendChatReply, if non-nil, replaces sendChatReply during tests
 	// to avoid actual NIP-17 publish over the network.
 	testSendChatReply func(ctx context.Context, toPubkey string, text string) error
+
+	// testEmitAck, if non-nil, replaces emitAck during tests to avoid
+	// actual NIP-17 publish over the network.
+	testEmitAck func(ctx context.Context, toPubkey string, ref string)
 }
 
 // Start loads state from stateDir and initialises the daemon without yet
@@ -403,12 +407,14 @@ func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *
 	case envelope.TypeChat:
 		// Chats from self (e.g., command replies, self-notes) bypass the
 		// contact filter — self is always trusted.
+		var senderContact *contacts.Contact
 		if rumor.PubKey != d.Key.PublicHex {
 			c, err := d.Repo.Get(ctx, rumor.PubKey)
 			if err != nil || c.Tier == contacts.TierBlocked {
 				d.Log.Debug("dropped non-contact / blocked", "from", rumor.PubKey)
 				return
 			}
+			senderContact = c
 		}
 		msg := inbox.Message{
 			EventID:    ev.ID,
@@ -429,6 +435,11 @@ func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *
 			}
 		}
 		d.broadcastInbox(msg)
+		// Tier-2: emit ack to non-self whitelisted senders. senderContact is
+		// nil only for self-copies (rumor.PubKey == self), which we skip.
+		if senderContact != nil {
+			d.emitAck(ctx, rumor.PubKey, senderContact.Relays, rumor.ID)
+		}
 
 	case envelope.TypeCommand:
 		if rumor.PubKey != d.Key.PublicHex {
@@ -541,6 +552,65 @@ func (d *Daemon) ownRelayURLs(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("iterate own_relays: %w", err)
 	}
 	return urls, nil
+}
+
+// publishTargets returns the union of own_relays, the recipient's known
+// relays, and configured fallback relays, deduplicated. Used by both the
+// initial send path and the tier-2 ack emit path.
+func (d *Daemon) publishTargets(ctx context.Context, recipientRelays []string) []string {
+	targets := map[string]struct{}{}
+	if rows, err := d.DB.QueryContext(ctx, `SELECT relay_url FROM own_relays`); err == nil {
+		for rows.Next() {
+			var u string
+			_ = rows.Scan(&u)
+			targets[u] = struct{}{}
+		}
+		rows.Close()
+	}
+	for _, u := range recipientRelays {
+		targets[u] = struct{}{}
+	}
+	for _, u := range d.Cfg.Publish.FallbackRelays {
+		targets[u] = struct{}{}
+	}
+	urls := make([]string, 0, len(targets))
+	for u := range targets {
+		urls = append(urls, u)
+	}
+	return urls
+}
+
+// emitAck builds an envelope-v1 type=ack and publishes it as a NIP-17 wrap
+// to the original sender. Best-effort: no retry, no self-copy, no Sent row.
+// In tests, d.testEmitAck takes precedence to avoid network I/O.
+func (d *Daemon) emitAck(ctx context.Context, toPubkey string, recipientRelays []string, ref string) {
+	if d.testEmitAck != nil {
+		d.testEmitAck(ctx, toPubkey, ref)
+		return
+	}
+	env := envelope.Envelope{
+		V:    envelope.SchemaVersion,
+		Type: envelope.TypeAck,
+		Ref:  ref,
+	}
+	content, err := envelope.Encode(env)
+	if err != nil {
+		d.Log.Warn("encode ack envelope", "err", err, "ref", ref)
+		return
+	}
+	wrap, _, err := nostr.Wrap(d.Key.PrivateHex, toPubkey, content)
+	if err != nil {
+		d.Log.Warn("wrap ack envelope", "err", err, "ref", ref)
+		return
+	}
+	urls := d.publishTargets(ctx, recipientRelays)
+	if len(urls) == 0 {
+		d.Log.Debug("emit ack: no relay targets", "to", toPubkey)
+		return
+	}
+	pubCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	_ = d.Pool.Publish(pubCtx, urls, wrap)
 }
 
 // handleInviteRedemption processes an incoming kind:25001 invite-redemption rumor.
