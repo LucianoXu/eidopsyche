@@ -22,7 +22,7 @@
 // caller will be doing anyway.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createConnection } from 'node:net';
@@ -167,14 +167,25 @@ export async function spawnDaemon(opts = {}) {
     //    asked, and the dashboard is fine with an unreachable home relay.
     runEidos(binary, stateDir, ['gate', 'init', '--label', label, '--home', home]);
 
-    // 2. Pin the dashboard listen port to the one we just chose. We don't
-    //    touch daemon.socket — it defaults to <stateDir>/sock which is
-    //    already unique per state-dir.
-    runEidos(binary, stateDir, [
-      'gate', 'config', 'set', 'dashboard.listen', `127.0.0.1:${dashboardPort}`,
-    ]);
-    // Embedded relay off — we only need the dashboard surface.
-    runEidos(binary, stateDir, ['gate', 'config', 'set', 'relay.enabled', 'false']);
+    // 2. Pin the dashboard listen port to the one we just chose. The
+    //    daemon isn't running yet — `eidos gate config set` would refuse
+    //    to dial a missing IPC socket — so write the TOML directly. This
+    //    is the bootstrap exception the unified-call-path rule allows
+    //    (CLAUDE.md "Single Call Path"): operate on local files when the
+    //    daemon is *guaranteed* to be down. The embedded relay is no
+    //    longer a gate-config concern (commit 80bd0bf dropped the
+    //    [relay] block); the transient daemon never starts a relay
+    //    because it doesn't run `eidos relay init`.
+    const cfgPath = join(stateDir, 'config.toml');
+    const existing = readFileSync(cfgPath, 'utf8');
+    const patched = existing.replace(
+      /listen\s*=\s*"[^"]*"/,
+      `listen = "127.0.0.1:${dashboardPort}"`,
+    );
+    if (patched === existing) {
+      throw new Error(`spawnDaemon: failed to patch dashboard.listen in ${cfgPath}`);
+    }
+    writeFileSync(cfgPath, patched);
 
     // 3. Spawn the daemon.
     child = spawn(binary, ['gate', 'daemon'], {

@@ -49,8 +49,8 @@ function parseArgs(argv) {
 const REQUIRED_CONFIG_ROWS = [
   'log_level',
   'daemon.socket',
-  'relay.enabled',
-  'relay.mode',
+  'dashboard.enabled',
+  'dashboard.listen',
 ];
 
 function logStep(n, msg)   { console.log(`STEP ${n}: ${msg}`); }
