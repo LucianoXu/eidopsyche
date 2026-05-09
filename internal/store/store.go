@@ -38,6 +38,9 @@ func (db *DB) Migrate(ctx context.Context) error {
 	if _, err := db.ExecContext(ctx, schemaV2); err != nil {
 		return fmt.Errorf("apply schema v2: %w", err)
 	}
+	if _, err := db.ExecContext(ctx, schemaV3); err != nil {
+		return fmt.Errorf("apply schema v3: %w", err)
+	}
 	if err := db.SetMeta(ctx, "schema_version", strconv.Itoa(SchemaVersion)); err != nil {
 		return fmt.Errorf("write schema_version: %w", err)
 	}
