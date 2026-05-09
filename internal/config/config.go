@@ -15,6 +15,16 @@ type Config struct {
 	Publish   PublishConfig   `toml:"publish"`
 	Subscribe SubscribeConfig `toml:"subscribe"`
 	Dashboard DashboardConfig `toml:"dashboard"`
+	Wake      WakeConfig      `toml:"wake"`
+}
+
+// WakeConfig controls the optional wake-signal output used by the in-container
+// gate daemon. When Dir is non-empty the daemon writes a wake signal to
+// Dir/pending.json after each persisted inbound message so the supervisor's
+// wake-watch loop can spawn the agent. Host-side gate instances leave Dir
+// empty (the default) and the hook is a no-op.
+type WakeConfig struct {
+	Dir string `toml:"dir"`
 }
 
 type DashboardConfig struct {
