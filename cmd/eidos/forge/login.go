@@ -11,22 +11,31 @@ import (
 
 // newLoginCmd authenticates Claude Code inside the mind-form's volume.
 //
-// Prior versions invoked `claude /login` (the in-TUI slash command). That
-// flow spins up a localhost OAuth callback server in the container and
-// expects a browser running on the same host to reach it — which never
-// works for `docker run -it` over SSH and frequently emits an OAuth URL
-// missing the redirect_uri parameter, leaving operators stranded with
-// "Invalid OAuth Request — Missing redirect_uri parameter".
+// Auth-method ergonomics in a headless container are subtle. Empirically
+// (Claude Code 2.1.138 against the eidopsyche-mindform image):
 //
-// The headless-friendly equivalents are:
-//   - `claude setup-token`   — long-lived token, ideal for unattended
-//     daemons; requires a Claude Pro/Max subscription.
-//   - `claude auth login`    — interactive OAuth, designed for the CLI
-//     (browser opens locally; the user pastes the resulting code back).
+//   - `claude /login`           — in-TUI slash command. Spins up a
+//     localhost callback server in the container and tries to open a
+//     browser. Fails over `docker run -it`/SSH; URLs emitted often lack
+//     the redirect_uri param, producing "Invalid OAuth Request —
+//     Missing redirect_uri parameter" at Anthropic's auth gateway.
+//   - `claude setup-token`      — long-lived token; also TUI-driven and
+//     also relies on browser-open + localhost callback. Same failure
+//     mode in containers.
+//   - `claude auth login`       — defaults to the Claude subscription
+//     flow, which is also browser+localhost-callback. Same failure.
+//   - `claude auth login --console` — Anthropic Console (API billing)
+//     OAuth. Prints a clean URL whose redirect_uri points at
+//     platform.claude.com's hosted callback page. The operator opens
+//     the URL, authorizes, copies the code from the resulting page, and
+//     pastes it back in the TTY. Works under `docker run -it` from any
+//     SSH session.
 //
-// Flag --method picks between them. Default is `setup-token` because
-// long-lived tokens match the mind-form's "wake unattended forever"
-// shape; --method auth-login falls back to the OAuth path.
+// We default to --method=console because it is the only one that
+// actually works in this deployment shape. The other paths remain
+// reachable for operators with environments where they do work
+// (e.g., a desktop-installed eidos invoking forge login on a local
+// container with a real browser).
 func newLoginCmd() *cobra.Command {
 	var image, method string
 	cmd := &cobra.Command{
@@ -45,12 +54,14 @@ func newLoginCmd() *cobra.Command {
 
 			var claudeArgv []string
 			switch method {
+			case "console":
+				claudeArgv = []string{"claude", "auth", "login", "--console"}
+			case "subscription":
+				claudeArgv = []string{"claude", "auth", "login"}
 			case "setup-token":
 				claudeArgv = []string{"claude", "setup-token"}
-			case "auth-login":
-				claudeArgv = []string{"claude", "auth", "login"}
 			default:
-				return fmt.Errorf(`--method must be "setup-token" or "auth-login" (got %q)`, method)
+				return fmt.Errorf(`--method must be "console" | "subscription" | "setup-token" (got %q)`, method)
 			}
 
 			argv := append([]string{
@@ -67,6 +78,9 @@ func newLoginCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&image, "image", "", "override container image")
-	cmd.Flags().StringVar(&method, "method", "setup-token", "auth method: setup-token (long-lived token, requires Claude subscription) | auth-login (browser OAuth)")
+	cmd.Flags().StringVar(&method, "method", "console",
+		`auth method: "console" (Console OAuth, hosted callback — works under SSH; default) | `+
+			`"subscription" (Claude Pro/Max OAuth — needs a real browser on the same host) | `+
+			`"setup-token" (long-lived token — same browser requirement)`)
 	return cmd
 }
