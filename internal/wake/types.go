@@ -21,6 +21,9 @@ const (
 	ReasonManual    Reason = "manual"
 )
 
+// String returns the wake reason as a string. Useful in tests and logs.
+func (r Reason) String() string { return string(r) }
+
 // Context is the situational snapshot the agent receives.
 type Context struct {
 	InboxUnread          int    `json:"inbox_unread"`

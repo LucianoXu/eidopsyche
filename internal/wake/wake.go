@@ -104,6 +104,31 @@ func ClearActive(dir string) error {
 	return err
 }
 
+// Merge folds `next` into the existing pending slot's `prev` (which may be
+// nil if there is no pending slot). The result adopts `next`'s primary
+// fields (id, reason, triggered_at, hint, context) and increments
+// coalesced_count, appending `prev`'s reason to coalesced_from.
+//
+// This is the merge rule named in the spec §6.3.
+func Merge(prev *Signal, next Signal) Signal {
+	if next.V == 0 {
+		next.V = SchemaVersion
+	}
+	if prev == nil {
+		if next.CoalescedFrom == nil {
+			next.CoalescedFrom = []Reason{}
+		}
+		return next
+	}
+	out := next
+	out.CoalescedCount = prev.CoalescedCount + 1
+	from := make([]Reason, 0, len(prev.CoalescedFrom)+1)
+	from = append(from, prev.CoalescedFrom...)
+	from = append(from, prev.Reason)
+	out.CoalescedFrom = from
+	return out
+}
+
 func readSlot(path string) (*Signal, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {

@@ -86,3 +86,42 @@ func TestWritePendingIsAtomic(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeIntoNilProducesIdentity(t *testing.T) {
+	in := Signal{V: 1, ID: "a", Reason: ReasonHeartBeat, TriggeredAt: 100}
+	got := Merge(nil, in)
+	if got.ID != "a" || got.CoalescedCount != 0 || len(got.CoalescedFrom) != 0 {
+		t.Errorf("merge into nil: %+v", got)
+	}
+}
+
+func TestMergeAppendsAndIncrements(t *testing.T) {
+	prev := Signal{V: 1, ID: "a", Reason: ReasonHeartBeat, TriggeredAt: 100, CoalescedCount: 0}
+	next := Signal{V: 1, ID: "b", Reason: ReasonMindGate, TriggeredAt: 200, Hint: "alice"}
+	got := Merge(&prev, next)
+	if got.ID != "b" || got.Reason != ReasonMindGate || got.TriggeredAt != 200 || got.Hint != "alice" {
+		t.Errorf("merge did not adopt next: %+v", got)
+	}
+	if got.CoalescedCount != 1 {
+		t.Errorf("count = %d, want 1", got.CoalescedCount)
+	}
+	if len(got.CoalescedFrom) != 1 || got.CoalescedFrom[0] != ReasonHeartBeat {
+		t.Errorf("coalesced_from = %v, want [heartbeat]", got.CoalescedFrom)
+	}
+}
+
+func TestMergeChainsAcrossManyArrivals(t *testing.T) {
+	cur := (*Signal)(nil)
+	reasons := []Reason{ReasonHeartBeat, ReasonMindGate, ReasonMindGate, ReasonManual}
+	for i, r := range reasons {
+		next := Signal{V: 1, ID: r.String(), Reason: r, TriggeredAt: int64(i)}
+		merged := Merge(cur, next)
+		cur = &merged
+	}
+	if cur.CoalescedCount != 3 {
+		t.Errorf("count after 4 wakes = %d, want 3", cur.CoalescedCount)
+	}
+	if len(cur.CoalescedFrom) != 3 {
+		t.Errorf("coalesced_from len = %d, want 3", len(cur.CoalescedFrom))
+	}
+}
