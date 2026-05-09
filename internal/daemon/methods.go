@@ -287,14 +287,26 @@ func relaysHealth(_ context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) 
 	return d.relayHealth.snapshot(), nil
 }
 
+// SendParams is the JSON-stable parameter shape for the "send" IPC method.
+// Callers (CLI ipc.Client.Call, dashboard adapter via *Daemon.Call, future
+// MCP server) build this struct rather than ad-hoc maps so the schema is
+// explicit at every surface.
+type SendParams struct {
+	To       string             `json:"to"`
+	Envelope *envelope.Envelope `json:"envelope"`
+}
+
+// SendResult is the JSON-stable result shape for the "send" IPC method.
+type SendResult struct {
+	EventID    string   `json:"event_id"`
+	AcceptedBy []string `json:"accepted_by"`
+}
+
 // sendMessage NIP-17 gift-wraps an envelope-v1 payload and publishes it to
 // the recipient's relays plus our own. It also publishes a self-copy for
 // archive purposes.
 func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
-	var p struct {
-		To       string             `json:"to"`
-		Envelope *envelope.Envelope `json:"envelope"`
-	}
+	var p SendParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
 	}
@@ -391,9 +403,9 @@ func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	final.Final = true
 	_ = d.Box.AppendOutbox(final)
 
-	return map[string]any{
-		"event_id":    wrapBob.ID,
-		"accepted_by": accepted,
+	return SendResult{
+		EventID:    wrapBob.ID,
+		AcceptedBy: accepted,
 	}, nil
 }
 
