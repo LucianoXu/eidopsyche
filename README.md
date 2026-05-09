@@ -44,14 +44,33 @@ The script detects your OS and CPU, downloads the matching archive from the
 latest GitHub Release, **verifies SHA256** against `checksums.txt` (mandatory;
 aborts on mismatch), and installs the binary to `~/.local/bin/eidos`.
 
+One-line install (native Windows PowerShell — no mingw / cygwin needed):
+
+```powershell
+iex (irm https://raw.githubusercontent.com/LucianoXu/eidopsyche/main/install.ps1)
+```
+
+Same SHA256 verification, same default install location (`%USERPROFILE%\.local\bin\eidos.exe`),
+and the user-scope `PATH` is updated automatically. Run from an elevated
+shell only if you also plan to run `eidos gate start` (SCM operations
+require Administrator); the install itself does not.
+
 Common knobs:
 
 ```sh
-# system-wide install
+# system-wide install (Linux / macOS)
 curl -fsSL https://raw.githubusercontent.com/LucianoXu/eidopsyche/main/install.sh | sudo PREFIX=/usr/local sh
 
-# pin a specific version
+# pin a specific version (Linux / macOS)
 curl -fsSL https://raw.githubusercontent.com/LucianoXu/eidopsyche/main/install.sh | EIDOS_VERSION=v0.1.0 sh
+```
+
+```powershell
+# pin a specific version (Windows)
+$env:EIDOS_VERSION = 'v0.8.0'; iex (irm https://raw.githubusercontent.com/LucianoXu/eidopsyche/main/install.ps1)
+
+# custom install prefix (Windows)
+$env:EIDOS_PREFIX = "$env:USERPROFILE\Apps\eidos"; iex (irm https://raw.githubusercontent.com/LucianoXu/eidopsyche/main/install.ps1)
 ```
 
 Full options (build-from-source, packaging, systemd / launchd / Windows-SCM
@@ -71,6 +90,9 @@ already on it, the command exits as a no-op. Otherwise it re-runs the
 install script (single source of truth for upgrade logic). Pass `--force`
 to reinstall the current version (useful for repairing a corrupted binary
 or pinning via `EIDOS_VERSION=...`).
+
+On Windows, `eidos self-update` is not yet wired to `install.ps1`; rerun
+the install one-liner above to upgrade.
 
 Disable update notifications with `EIDOS_NO_UPDATE_CHECK=1`, by setting
 `[update] check = false` in `~/.config/eidos/config.toml`, or by running in
