@@ -107,9 +107,9 @@ func renderEvent(r *renderer, ev Event, logger *slog.Logger) (string, string) {
 		// across the rest of the signal-only family.
 		return ev.Kind, "(refresh)"
 	case "relay.state":
-		// The relay panel renders the full table on every transition —
-		// the panel is small and per-event diffing is more code than it
-		// saves. Browser-side, the <aside id="relays-panel"> in
+		// The relay strip renders the full row list on every transition —
+		// the strip is small and per-event diffing is more code than it
+		// saves. Browser-side, the <footer id="relays-strip"> in
 		// templates/shell.html re-fetches /relays via hx-get on
 		// sse:relay.state and swaps the rendered partial as innerHTML.
 		return ev.Kind, "(refresh)"
