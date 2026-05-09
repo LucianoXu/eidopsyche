@@ -8,6 +8,7 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/cmd/eidos/forge"
 	"github.com/LucianoXu/eidopsyche/cmd/eidos/gate"
+	"github.com/LucianoXu/eidopsyche/cmd/eidos/relay"
 	"github.com/LucianoXu/eidopsyche/cmd/eidos/supervisor"
 	"github.com/LucianoXu/eidopsyche/internal/update"
 )
@@ -21,6 +22,7 @@ The single eidos binary delivers three component roles via subcommands:
   eidos forge       MindForge: mind-form lifecycle and self-reflection
   eidos gate        MindGate: decentralized comms over Nostr
   eidos supervisor  Container PID 1: cron + gate daemon + agent spawn
+  eidos relay       Stand-alone Nostr relay (infrastructure, not an entity)
 
 See https://github.com/LucianoXu/eidopsyche for documentation.`,
 	SilenceUsage:  true,
@@ -31,6 +33,7 @@ func init() {
 	rootCmd.AddCommand(gate.Command())
 	rootCmd.AddCommand(forge.Command())
 	rootCmd.AddCommand(supervisor.Command())
+	rootCmd.AddCommand(relay.Command())
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(selfUpdateCmd)
 }
