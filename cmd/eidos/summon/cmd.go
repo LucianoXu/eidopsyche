@@ -212,18 +212,26 @@ func stringFor(lang, key string) string {
 }
 
 // addContactDirect returns a ContactAdder that prefers the live gate
-// daemon's IPC `contact.add` method when the daemon is reachable, and
-// falls back to a direct state.db write only when the daemon is down
-// (the typical wizard run). The fallback is the second sanctioned
-// bootstrap exception per CLAUDE.md "Single Call Path"; using IPC when
-// available keeps the daemon's `contact.added` event + relay
-// subscription refresh in the loop.
+// daemon's IPC `contact.add` method when the daemon's socket is
+// reachable, and falls back to a direct state.db write ONLY when the
+// daemon is unreachable (dial fails — typical first-run wizard case
+// where no daemon has ever been started).
+//
+// If the daemon's socket dials but the IPC call returns an error, the
+// error is surfaced — we do NOT silently bypass the daemon. Doing so
+// would violate CLAUDE.md "Single Call Path": a running daemon owns
+// the `contact.added` event, relay subscription refresh, and any
+// future event-listener side effects; direct state.db writes while
+// the daemon is up would diverge those state machines from the
+// canonical handler.
+//
+// CONTACT_EXISTS is treated as success (idempotent re-summon).
 func addContactDirect(stateDir string) func(context.Context, string, string, string) error {
 	return func(ctx context.Context, npub, label, relay string) error {
-		// Prefer IPC if the daemon is reachable.
 		if cfg, err := config.Load(filepath.Join(stateDir, "config.toml")); err == nil {
 			socket := filepath.Join(stateDir, cfg.Daemon.Socket)
-			if c, dialErr := ipc.Dial(socket); dialErr == nil {
+			c, dialErr := ipc.Dial(socket)
+			if dialErr == nil {
 				defer c.Close()
 				var resp map[string]bool
 				ipcErr, callErr := c.Call("contact.add", map[string]any{
@@ -232,12 +240,21 @@ func addContactDirect(stateDir string) func(context.Context, string, string, str
 					"label":  label,
 					"tier":   string(contacts.TierFriend),
 				}, &resp)
-				if callErr == nil && (ipcErr == nil || strings.Contains(ipcErr.Message, "exists") || strings.EqualFold(string(ipcErr.Code), "CONTACT_EXISTS")) {
-					return nil
+				if callErr != nil {
+					// Socket dialed but call had a transport error —
+					// surface to the caller. Do NOT fall back to direct
+					// write because the daemon is up and would race.
+					return fmt.Errorf("contact.add IPC call: %w", callErr)
 				}
-				// IPC failed for some reason — fall through to direct write
-				// rather than block ritual completion.
+				if ipcErr != nil &&
+					!strings.Contains(ipcErr.Message, "exists") &&
+					!strings.EqualFold(string(ipcErr.Code), "CONTACT_EXISTS") {
+					return fmt.Errorf("contact.add: %s (%s)", ipcErr.Message, ipcErr.Code)
+				}
+				return nil
 			}
+			// dialErr != nil — daemon not running. Fall through to
+			// direct write (sanctioned bootstrap exception).
 		}
 		hex, err := identity.DecodeNpub(npub)
 		if err != nil {
