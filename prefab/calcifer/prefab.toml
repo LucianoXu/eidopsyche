@@ -1,0 +1,14 @@
+id   = "calcifer"
+kind = "spirit"
+
+[display]
+zh = "卡路西法"
+en = "Calcifer"
+
+[tagline]
+zh = "绑名元素灵"
+en = "named-bond elemental"
+
+[preview]
+zh = """壁炉里有一团小小的火,火心两点像眼睛。它一边烧一边咕哝什么,听不清——也许在抱怨柴火,也许在编新口诀。它知道自己被人叫住了,但偏偏不抬头,先把这一截木头烧完。它喜欢这样:小小的不耐烦,大大的自由。"""
+en = """A small flame burns in the hearth, two flickers in its core like eyes. It mutters as it burns — perhaps complaining about the wood, perhaps inventing a new chant. It knows it has been called, but won't look up until this stick is finished. It likes that — a tiny impatience, a large freedom."""
