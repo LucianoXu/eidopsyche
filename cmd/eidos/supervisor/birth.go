@@ -14,14 +14,9 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/internal/authstate"
 	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/prompts"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 )
-
-// birthPromptPath is the in-image location of the birth boot prompt.
-// Distinct from the heartbeat / mindgate prompts: the birth-wake hands
-// the agent the summoning book + calling-words and asks it to write
-// identity, secret, response, and born_at in that order.
-const birthPromptPath = "/usr/local/lib/eidos/prompts/birth.txt"
 
 // bornAtRel is the path inside the ontology dir that the agent writes
 // at the end of a successful birth. Its presence is the supervisor's
@@ -84,10 +79,6 @@ func productionBirthHandler(ctx context.Context, sig wake.BirthSignal, ontologyD
 			time.Unix(state.Since, 0).UTC().Format(time.RFC3339), authstate.Path)
 	}
 
-	prompt, err := os.ReadFile(birthPromptPath)
-	if err != nil {
-		return fmt.Errorf("read birth prompt: %w", err)
-	}
 	bookBody, err := os.ReadFile(sig.SummoningBookPath)
 	if err != nil {
 		return fmt.Errorf("read summoning book: %w", err)
@@ -97,11 +88,8 @@ func productionBirthHandler(ctx context.Context, sig wake.BirthSignal, ontologyD
 		return fmt.Errorf("read calling-words: %w", err)
 	}
 	identity, _ := os.ReadFile(filepath.Join(ontologyDir, "self/identity.md"))
-	systemPrompt := string(identity) + "\n\n" + string(prompt)
-	userPrompt := fmt.Sprintf(
-		"Operator npub: %s\n\n--- summoning book ---\n%s\n\n--- calling-words ---\n%s\n",
-		sig.OperatorNpub, string(bookBody), string(wordsBody),
-	)
+	systemPrompt := string(identity) + "\n\n" + prompts.BirthBoot()
+	userPrompt := prompts.BirthUser(sig.OperatorNpub, string(bookBody), string(wordsBody))
 	args := []string{
 		"--append-system-prompt", systemPrompt,
 		"--dangerously-skip-permissions",

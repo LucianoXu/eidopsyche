@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/LucianoXu/eidopsyche/internal/firstcontact/render"
+	"github.com/LucianoXu/eidopsyche/internal/prompts"
 )
 
 // Phase3BookDeps are the inputs Phase 3 (the summoning-book core)
@@ -30,14 +31,21 @@ func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, d P
 
 	// Step 2: research.
 	st := r.Status(stringFor(s.Lang, "phase3_research_status"))
-	if err := c.Call(ctx, buildResearchPrompt(s.CharacterPrompt, s.Lang), &s.Profile); err != nil {
+	if err := c.Call(ctx, prompts.Research(s.CharacterPrompt, s.Lang), &s.Profile); err != nil {
 		st.Stop()
 		return fmt.Errorf("phase3 research: %w", err)
 	}
 	st.Update(stringFor(s.Lang, "phase3_displaying_status"))
 
 	// Step 3: displaying paragraph.
-	displaying, err := c.CallText(ctx, buildDisplayingPrompt(s.Profile, s.Lang))
+	displaying, err := c.CallText(ctx, prompts.Displaying(prompts.DisplayingInput{
+		Archetype:   s.Profile.Archetype,
+		Temperament: s.Profile.Temperament,
+		World:       s.Profile.World,
+		Settings:    s.Profile.Settings,
+		Imagery:     s.Profile.Imagery,
+		Lang:        s.Lang,
+	}))
 	if err != nil {
 		st.Stop()
 		return fmt.Errorf("phase3 displaying: %w", err)
@@ -54,34 +62,4 @@ func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, d P
 	s.SummonedName = name
 	s.Slug = Derive(name, d.ExistingSlugs)
 	return nil
-}
-
-func buildResearchPrompt(userText, lang string) string {
-	return fmt.Sprintf(`You are the dramaturge of a summoning ritual. The operator described a character:
-
-%s
-
-Research it (use WebSearch if helpful). Return a JSON object with these keys exactly:
-  archetype (string), temperament (string), world (string),
-  settings (string array of typical scenes), imagery (string array of recurring motifs),
-  sources (string array of works/franchises this archetype draws from — debug only, not shown).
-
-Return ONLY the JSON object, no prose. Language for archetype/temperament/world: %s.`, userText, lang)
-}
-
-func buildDisplayingPrompt(p CharacterProfile, lang string) string {
-	return fmt.Sprintf(`The operator just described a character they want to summon. Write 3 to 5 sentences sketching this character — what they look like, where they are, what they happen to be doing. Write the way one person might quietly tell another what they are seeing.
-
-Constraints (HARD):
-- The figure does NOT speak yet; they have not arrived.
-- Do NOT name any source work or original character.
-- No attribute lists, no bold, no headings.
-- Settings to draw on: %v
-- Imagery to draw on: %v
-- Temperament: %s. World: %s. Archetype: %s.
-
-Language: %s.
-
-Tone: plain and sincere, the way a real person speaks. No "宛如 / 仿佛 / 朦胧 / 缥缈" stacking, no archaic register, no elevated diction, no theatrical solemnity. Short sentences are fine. If a line sounds like it was written for a poetry recital, rewrite it. The reader should feel they could meet this person on a Tuesday afternoon, not only in a dream.`,
-		p.Settings, p.Imagery, p.Temperament, p.World, p.Archetype, lang)
 }

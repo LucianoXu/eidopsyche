@@ -13,6 +13,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/cmd/eidos/forge"
 	"github.com/LucianoXu/eidopsyche/internal/firstcontact/render"
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
+	"github.com/LucianoXu/eidopsyche/internal/prompts"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 )
 
@@ -188,7 +189,7 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	// generation + the post-orchestrate write entirely.
 	if s.PrefabID == "" {
 		st := r.Status(stringFor(s.Lang, "phase4_words_status"))
-		words, err := c.CallText(ctx, buildCallingWordsPrompt(book, s.Lang))
+		words, err := c.CallText(ctx, prompts.CallingWords(book, s.Lang))
 		st.Stop()
 		if err != nil {
 			purge()
@@ -302,21 +303,4 @@ func awaitReady(ctx context.Context, r render.Renderer, lang string, ch <-chan R
 			}
 		}
 	}
-}
-
-func buildCallingWordsPrompt(book, lang string) string {
-	return fmt.Sprintf(`You are writing the very first words the operator will say to the mind-form they have just summoned. Speak as the operator — a real person greeting another being for the first time.
-
-The summoning book the operator wrote:
-
-%s
-
-Constraints:
-- 1 to 2 sentences only.
-- Address the mind-form directly ("你" / "you").
-- Pick up one image or feeling from the summoning book, but do NOT quote it verbatim.
-- Plain, sincere, human. No "I summon thee", no archaic register, no theatrical solemnity, no "宛如 / 仿佛 / 朦胧" pile-ups. The way one might quietly say to a friend they have long wanted to meet: "你来了" — direct, warm, unadorned.
-- Language: %s.
-
-Return ONLY the words themselves; no preamble.`, book, lang)
 }
