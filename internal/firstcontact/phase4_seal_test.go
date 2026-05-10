@@ -13,13 +13,13 @@ import (
 
 func TestRenderSummoningBook_ZH(t *testing.T) {
 	s := &firstcontact.Summoning{
-		Lang:          "zh",
-		OperatorLabel: "alice",
-		OperatorNpub:  "npub1op",
-		Displaying:    "薄雾里有一道身影。",
-		SummonedName:  "雨",
-		MindFormNpub:  "npub1mf",
-		StartedAt:     time.Date(2026, 5, 9, 0, 0, 0, 0, time.UTC),
+		Lang:         "zh",
+		MasterLabel:  "alice",
+		MasterNpub:   "npub1op",
+		Displaying:   "薄雾里有一道身影。",
+		SummonedName: "雨",
+		MindFormNpub: "npub1mf",
+		StartedAt:    time.Date(2026, 5, 9, 0, 0, 0, 0, time.UTC),
 	}
 	got := firstcontact.RenderSummoningBook(s)
 	for _, want := range []string{"alice", "npub1op", "npub1mf", "雨", "薄雾里有一道身影。", "2026-05-09"} {
@@ -31,13 +31,13 @@ func TestRenderSummoningBook_ZH(t *testing.T) {
 
 func TestRenderSummoningBook_EN(t *testing.T) {
 	s := &firstcontact.Summoning{
-		Lang:          "en",
-		OperatorLabel: "alice",
-		OperatorNpub:  "npub1op",
-		Displaying:    "A figure stands in the mist.",
-		SummonedName:  "Rain",
-		MindFormNpub:  "npub1mf",
-		StartedAt:     time.Date(2026, 5, 9, 0, 0, 0, 0, time.UTC),
+		Lang:         "en",
+		MasterLabel:  "alice",
+		MasterNpub:   "npub1op",
+		Displaying:   "A figure stands in the mist.",
+		SummonedName: "Rain",
+		MindFormNpub: "npub1mf",
+		StartedAt:    time.Date(2026, 5, 9, 0, 0, 0, 0, time.UTC),
 	}
 	got := firstcontact.RenderSummoningBook(s)
 	for _, want := range []string{"alice", "Rain", "npub1mf", "A figure stands in the mist."} {

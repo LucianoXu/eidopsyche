@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/firstcontact"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/store"
 )
@@ -32,20 +33,42 @@ func init() {
 	initCmd.Flags().BoolVar(&initService, "service", false, "after initializing, install and start the gate daemon service in one step")
 	initCmd.Flags().BoolVar(&initFromExistingKey, "key-from-existing", false, "use an already-written <state-dir>/key (the caller wrote it; skip key generation). Used by the First Contact wizard's keypair-injection path.")
 	addSystemFlag(initCmd) // --system writes to the same useSystemServices var as start/stop/etc.
-	if err := initCmd.MarkFlagRequired("label"); err != nil {
-		panic(err) // Cobra returns nil for known flags; surfacing a panic here is appropriate for a setup bug.
-	}
+	// --label and --home are validated inside runInit *after* the
+	// idempotent initialized-state check, so a second invocation of
+	// `eidos gate init` with no flags prints the no-op message instead
+	// of being rejected by cobra's required-flag enforcement first.
 	rootCmd.AddCommand(initCmd)
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
-	if initHome == "" {
-		return errors.New("--home is required (the inbound relay URL peers will dial); see docs/USAGE.md for topology choices")
-	}
-
 	dir, err := config.ResolveStateDir(globalStateDir)
 	if err != nil {
 		return err
+	}
+
+	// Idempotent guard runs FIRST, before flag validation, so a bare
+	// `eidos gate init` against an already-initialized state dir
+	// prints the no-op message and exits 0 — no need to re-supply the
+	// old --label / --home flags. Spec § 4.3.
+	if firstcontact.IsIdentityInitialized(dir) {
+		label, _ := readGateLabel(dir)
+		if label == "" {
+			label = "(unset)"
+		}
+		fmt.Fprintf(cmd.OutOrStdout(),
+			"this host already has a gate identity at %s (label: %s)\nnothing to do\n", dir, label)
+		return nil
+	}
+
+	// Past the idempotent guard: this is a fresh init, so --label and
+	// --home are required. (We can't use cobra's MarkFlagRequired
+	// because it runs before our guard above — we want the no-op path
+	// to work without re-supplying flags.)
+	if initLabel == "" {
+		return errors.New("--label is required for a fresh `gate init` (how peers see your card by default; change later with `eidos gate set-label`)")
+	}
+	if initHome == "" {
+		return errors.New("--home is required (the inbound relay URL peers will dial); see docs/USAGE.md for topology choices")
 	}
 
 	var npub string

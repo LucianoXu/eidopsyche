@@ -49,6 +49,23 @@ func EncodeNpub(hexPub string) (string, error) {
 	return nip19.EncodePublicKey(hexPub)
 }
 
+// DecodeNsec returns the hex private key for a bech32 nsec string.
+// Mirror of DecodeNpub for the wizard's identity-import branch.
+func DecodeNsec(s string) (string, error) {
+	prefix, data, err := nip19.Decode(s)
+	if err != nil {
+		return "", err
+	}
+	if prefix != "nsec" {
+		return "", fmt.Errorf("expected nsec prefix, got %s", prefix)
+	}
+	priv, ok := data.(string)
+	if !ok {
+		return "", fmt.Errorf("unexpected nip19 payload type %T", data)
+	}
+	return priv, nil
+}
+
 // FromHex constructs a Keypair from an existing hex-encoded private key.
 func FromHex(privHex string) (*Keypair, error) {
 	return fromPrivate(privHex)

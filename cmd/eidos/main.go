@@ -77,9 +77,10 @@ func main() {
 // no flags) should auto-launch the First Contact wizard. Triggers when
 // argv has no subcommand AND the state directory is not yet
 // initialized. "Initialized" uses the same predicate the wizard itself
-// uses to decide subsequent-run mode (firstcontact.IsSubsequentRun) so
-// the two layers cannot drift: an operator with a complete identity
-// always sees cobra's help on bare `eidos`, never the wizard.
+// uses to decide whether the host is identity-initialized
+// (firstcontact.IsIdentityInitialized) so the two layers cannot drift:
+// an operator with a complete identity always sees cobra's help on
+// bare `eidos`, never the wizard.
 func shouldDispatchToWizard() bool {
 	if len(os.Args) != 1 {
 		return false
@@ -88,5 +89,5 @@ func shouldDispatchToWizard() bool {
 	if err != nil {
 		return false
 	}
-	return !firstcontact.IsSubsequentRun(dir)
+	return !firstcontact.IsIdentityInitialized(dir)
 }

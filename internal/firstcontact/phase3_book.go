@@ -7,46 +7,47 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/firstcontact/render"
 )
 
-// Phase2Deps are the inputs Phase2 cannot derive from Summoning.
-type Phase2Deps struct {
+// Phase3BookDeps are the inputs Phase 3 (the summoning-book core)
+// cannot derive from Summoning.
+type Phase3BookDeps struct {
 	// ExistingSlugs is the list of slugs already in use (i.e. existing
 	// MindForm volumes), used by Derive to avoid collisions.
 	ExistingSlugs []string
 }
 
-// Phase2 runs the three-step summoning-book core: character question
+// Phase3 runs the three-step summoning-book core: character question
 // → claude research → claude displaying paragraph (typewriter) →
 // naming. The system handle (slug) is auto-derived from the name so
 // the ritual's high point — naming the to-be-summoned — is not
 // followed by a second, prosaic prompt.
-func Phase2(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, d Phase2Deps) error {
+func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, d Phase3BookDeps) error {
 	// Step 1: character question (multiline).
-	prompt, err := r.Prompt(stringFor(s.Lang, "phase2_character_q"), render.PromptOpts{Multiline: true})
+	prompt, err := r.Prompt(stringFor(s.Lang, "phase3_character_q"), render.PromptOpts{Multiline: true})
 	if err != nil {
 		return err
 	}
 	s.CharacterPrompt = prompt
 
 	// Step 2: research.
-	st := r.Status(stringFor(s.Lang, "phase2_research_status"))
+	st := r.Status(stringFor(s.Lang, "phase3_research_status"))
 	if err := c.Call(ctx, buildResearchPrompt(s.CharacterPrompt, s.Lang), &s.Profile); err != nil {
 		st.Stop()
-		return fmt.Errorf("phase2 research: %w", err)
+		return fmt.Errorf("phase3 research: %w", err)
 	}
-	st.Update(stringFor(s.Lang, "phase2_displaying_status"))
+	st.Update(stringFor(s.Lang, "phase3_displaying_status"))
 
 	// Step 3: displaying paragraph.
 	displaying, err := c.CallText(ctx, buildDisplayingPrompt(s.Profile, s.Lang))
 	if err != nil {
 		st.Stop()
-		return fmt.Errorf("phase2 displaying: %w", err)
+		return fmt.Errorf("phase3 displaying: %w", err)
 	}
 	s.Displaying = displaying
 	st.Stop()
 	r.Typewriter(ctx, displaying)
 
 	// Step 4: naming. Slug is derived silently; we never ask for it.
-	name, err := r.Prompt(stringFor(s.Lang, "phase2_naming_q"), render.PromptOpts{})
+	name, err := r.Prompt(stringFor(s.Lang, "phase3_naming_q"), render.PromptOpts{})
 	if err != nil {
 		return err
 	}

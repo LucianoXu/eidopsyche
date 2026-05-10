@@ -26,95 +26,134 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
+// Flags wired by Command(); read by Run().
+var (
+	flagMasterCard string
+	flagKeyFile    string
+)
+
 // Command returns the cobra command. Registered in cmd/eidos/main.go.
+// Bare `eidos` auto-dispatches via RunBare (different EntryMode).
 func Command() *cobra.Command {
-	return &cobra.Command{
+	c := &cobra.Command{
 		Use:   "summon",
 		Short: "Summon a mind-form via the First Contact ritual",
 		Long: `Summon walks you through the First Contact ritual:
 
-  1. Pick a language and your operator label
-  2. Describe the character you want to summon
-  3. Watch a displaying paragraph take shape, name the to-be-summoned
-  4. Seal the summoning book; the new mind-form awakens and replies
+  1. Identity stage  (first run only): create / import / skip
+  2. Mind-form stage: choose master source (your local identity, or a card)
+  3. Describe the character you want to summon
+  4. Watch a displaying paragraph take shape, name the to-be-summoned
+  5. Seal the summoning book; the new mind-form awakens and replies
 
 The ritual is one-shot: failure or interruption discards in-flight
-state and you start over. claude (Claude Code) must be on PATH.`,
+state and you start over. claude (Claude Code) must be on PATH.
+
+Flags:
+  --master-card <path>   Use the holder of this v1 TOML card as the
+                         new mind-form's master, regardless of any
+                         local identity. Skips Phase 2's prompt.
+  --key-file <path>      Read the operator's nsec1... or 32-byte hex
+                         private key from a file (for the import
+                         branch of Phase 1, when no local identity
+                         exists yet). Avoids pasting nsec on stdin.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return Run(cmd.Context())
+			return run(cmd.Context(), firstcontact.EntrySummon)
 		},
 	}
+	c.Flags().StringVar(&flagMasterCard, "master-card", "", "path to the master's identity card (overrides any local identity)")
+	c.Flags().StringVar(&flagKeyFile, "key-file", "", "path to a file containing the operator's nsec1... or 32-byte hex private key (used in the import-identity branch)")
+	return c
 }
 
-// Run is the entry point both Command() and bare-eidos dispatch call.
+// Run is the entry point bare-eidos dispatch (cmd/eidos/main.go) calls.
+// It runs the wizard with EntryBareEidos so Phase 2 keeps the 退出
+// option (the mindgate-only flow needs to be reachable from `eidos`).
+//
+// `eidos summon` (the cobra command) goes through Command() → RunE →
+// run() with EntrySummon so Phase 2 suppresses 退出 (the user already
+// committed to summoning by typing `summon`).
 func Run(ctx context.Context) error {
-	if _, err := exec.LookPath("claude"); err != nil {
-		return errors.New("the `claude` command is not on PATH; install Claude Code (https://docs.anthropic.com/claude/claude-code) and run `claude /login`")
-	}
+	return run(ctx, firstcontact.EntryBareEidos)
+}
 
+// run is the shared body, parameterised by entry mode.
+//
+// Note on dependency resolution: claude on PATH and the docker client
+// are summon-only prerequisites. They are NOT validated up front,
+// because the new decoupled wizard supports a mindgate-only flow
+// (Phase 1 = create / import, Phase 2 = exit) on hosts that may not
+// have claude or docker installed yet. We pass an EnsureSummonReady
+// callback into the wizard; firstcontact.Run invokes it only after
+// Phase 2 returns a summon action, populating Claude / DockerClient /
+// the volume helpers in place.
+func run(ctx context.Context, entry firstcontact.EntryMode) error {
 	stateDir, err := config.ResolveStateDir("")
 	if err != nil {
 		return err
 	}
 
-	dock, err := forgectl.New()
-	if err != nil {
-		return fmt.Errorf("docker client: %w", err)
-	}
-
 	rend := render.NewAuto(os.Stdin, os.Stdout, firstcontact.TypewriterCPS)
-	cl := &firstcontact.Claude{Run: firstcontact.ProductionRunner}
-	image := forge.DefaultImage
 
 	deps := firstcontact.Deps{
-		StateDir:     stateDir,
-		Renderer:     rend,
-		Claude:       cl,
-		DockerClient: dock,
-		Image:        image,
-		WriteVolume: func(ctx context.Context, slug, relPath string, body []byte) error {
-			return forgectl.WriteToVolume(ctx, dock, image, slug, relPath, body)
-		},
-		StartContainer: func(ctx context.Context, slug string) error {
-			return dock.ContainerStart(ctx, forgectl.ContainerName(slug))
-		},
-		ResponseWait: (&volumeTailer{client: dock, image: image}).Wait,
-		AddContact:   addContactDirect(stateDir),
-		ExistingSlugs: func() ([]string, error) {
-			vols, err := dock.VolumeList(ctx, forgectl.VolumePrefix)
+		StateDir:        stateDir,
+		Renderer:        rend,
+		EntryMode:       entry,
+		MasterCardPath:  flagMasterCard,
+		OperatorKeyPath: flagKeyFile,
+		AddContact:      addContactDirect(stateDir),
+		EnsureSummonReady: func(d *firstcontact.Deps) error {
+			if _, err := exec.LookPath("claude"); err != nil {
+				return errors.New("the `claude` command is not on PATH; install Claude Code (https://docs.anthropic.com/claude/claude-code) and run `claude /login`")
+			}
+			dock, err := forgectl.New()
 			if err != nil {
-				return nil, err
+				return fmt.Errorf("docker client: %w", err)
 			}
-			out := make([]string, 0, len(vols))
-			for _, v := range vols {
-				out = append(out, strings.TrimPrefix(v, forgectl.VolumePrefix))
+			image := forge.DefaultImage
+			d.Claude = &firstcontact.Claude{Run: firstcontact.ProductionRunner}
+			d.DockerClient = dock
+			d.Image = image
+			d.WriteVolume = func(ctx context.Context, slug, relPath string, body []byte) error {
+				return forgectl.WriteToVolume(ctx, dock, image, slug, relPath, body)
 			}
-			return out, nil
-		},
-		ReadyDeps: firstcontact.ReadyDeps{
-			PullImage: func(ctx context.Context) error {
-				if exists, _ := dock.ImageExists(ctx, image); exists {
-					return nil
-				}
-				return dock.ImagePull(ctx, image, os.Stderr)
-			},
-			GenerateKey: func() (string, string, error) {
-				k, err := identity.Generate()
+			d.StartContainer = func(ctx context.Context, slug string) error {
+				return dock.ContainerStart(ctx, forgectl.ContainerName(slug))
+			}
+			d.ResponseWait = (&volumeTailer{client: dock, image: image}).Wait
+			d.ExistingSlugs = func() ([]string, error) {
+				vols, err := dock.VolumeList(ctx, forgectl.VolumePrefix)
 				if err != nil {
-					return "", "", err
+					return nil, err
 				}
-				return k.Npub, k.PrivateHex, nil
-			},
-			ProbeRelay: func(ctx context.Context, _ string) error {
-				// Accept any reachable ws/wss URL by treating relay
-				// reachability as advisory (the real probe is wired
-				// post-merge once we have an internal/relay/probe
-				// helper). For now: rely on user-supplied URL being
-				// well-formed; the gate daemon will surface dial
-				// failures at first publish.
-				return nil
-			},
-			HomeRelayURL: firstcontact.PublicHomeRelay,
+				out := make([]string, 0, len(vols))
+				for _, v := range vols {
+					out = append(out, strings.TrimPrefix(v, forgectl.VolumePrefix))
+				}
+				return out, nil
+			}
+			d.ReadyDeps = firstcontact.ReadyDeps{
+				PullImage: func(ctx context.Context) error {
+					if exists, _ := dock.ImageExists(ctx, image); exists {
+						return nil
+					}
+					return dock.ImagePull(ctx, image, os.Stderr)
+				},
+				GenerateKey: func() (string, string, error) {
+					k, err := identity.Generate()
+					if err != nil {
+						return "", "", err
+					}
+					return k.Npub, k.PrivateHex, nil
+				},
+				ProbeRelay: func(ctx context.Context, _ string) error {
+					// Relay reachability is advisory in v1; the gate
+					// daemon will surface dial failures at first publish.
+					return nil
+				},
+				HomeRelayURL: firstcontact.PublicHomeRelay,
+			}
+			return nil
 		},
 	}
 	if tui, ok := rend.(render.TUIRenderer); ok {
@@ -137,7 +176,7 @@ func Run(ctx context.Context) error {
 					r.Typewriter(ctx, string(body))
 				}
 				r.Show("")
-				r.Show(fmt.Sprintf(stringFor(s.Lang, "phase3_done"), s.Slug))
+				r.Show(fmt.Sprintf(stringFor(s.Lang, "phase4_done"), s.Slug))
 			}
 			return nil
 		})
@@ -156,7 +195,7 @@ func Run(ctx context.Context) error {
 		rend.Typewriter(ctx, string(body))
 		rend.Show("")
 		fmt.Fprintln(os.Stdout)
-		fmt.Fprintf(os.Stdout, stringFor(s.Lang, "phase3_done"), s.Slug)
+		fmt.Fprintf(os.Stdout, stringFor(s.Lang, "phase4_done"), s.Slug)
 		fmt.Fprintln(os.Stdout)
 	}
 	return nil
@@ -166,7 +205,7 @@ func Run(ctx context.Context) error {
 // wrapping cmd-level summary respects language. Kept tiny here
 // rather than exporting from internal/firstcontact.
 func stringFor(lang, key string) string {
-	if lang == "zh" && key == "phase3_done" {
+	if lang == "zh" && key == "phase4_done" {
 		return "💠 仪式完成。`eidos forge logs %s` 看它呼吸。"
 	}
 	return "💠 Ritual complete. `eidos forge logs %s` to watch it breathe."

@@ -119,13 +119,22 @@ first mind-form:
 eidos
 ```
 
-The wizard collects your operator label and home relay, asks you to
-describe the character you want to summon, generates a displaying
-paragraph and a calling-words incantation via Claude Code, and brings
-the new mind-form online with its own private secret. Run
-`eidos summon` to summon a 2nd, 3rd, ... mind-form once your operator
-state exists. The wizard requires `claude` (Claude Code) to be on
-PATH and logged in.
+The wizard goes through two stages, each independently skippable:
+
+1. **Local identity** — create a new one, import an existing `nsec`, or
+   skip (run only mind-forms on this host).
+2. **Mind-form** — exit with just an identity, summon a mind-form using
+   your local identity as master, or summon one whose master comes from
+   a `--master-card`. This means you can deploy `eidos` in three modes:
+   *mindgate-only* (talk to other people / mind-forms), *mindform-only*
+   (host a mind-form for someone else), or both.
+
+When summoning, the wizard asks you to describe the character you want,
+generates a displaying paragraph and a calling-words incantation via
+Claude Code, and brings the new mind-form online with its own private
+secret. Run `eidos summon` to summon a 2nd, 3rd, ... mind-form once
+your operator state exists. The wizard requires `claude` (Claude Code)
+to be on PATH and logged in.
 
 If you'd rather drive everything by hand (scripted setups, advanced
 topologies), the two-command bootstrap path below remains supported.
