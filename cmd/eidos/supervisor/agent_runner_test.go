@@ -29,6 +29,51 @@ func TestBuildWakeMessage(t *testing.T) {
 	}
 }
 
+func TestBuildWakeMessage_FirstWakeOfNewSession_AfterDream(t *testing.T) {
+	msg := buildWakeMessage(wakePromptInput{
+		Reason:                  "heartbeat",
+		IsFirstWakeOfNewSession: true,
+		DreamCount:              5,
+		LastDreamFinishedAt:     1700000000,
+	})
+	if !strings.Contains(msg, "first wake of a new session") {
+		t.Fatalf("want first-wake prefix, got %q", msg)
+	}
+	if !strings.Contains(msg, "dream #5") {
+		t.Fatalf("want dream #N reference, got %q", msg)
+	}
+	if !strings.Contains(msg, "Reason: heartbeat") {
+		t.Fatalf("want status snapshot after prefix, got %q", msg)
+	}
+}
+
+func TestBuildWakeMessage_FirstWakeNoPriorDream(t *testing.T) {
+	msg := buildWakeMessage(wakePromptInput{
+		Reason:                  "heartbeat",
+		IsFirstWakeOfNewSession: true,
+		DreamCount:              0,
+		LastDreamFinishedAt:     0,
+	})
+	if !strings.Contains(msg, "no prior dream") {
+		t.Fatalf("want no-prior-dream variant, got %q", msg)
+	}
+	if !strings.Contains(msg, "Reason: heartbeat") {
+		t.Fatalf("want status snapshot after prefix, got %q", msg)
+	}
+}
+
+func TestBuildWakeMessage_NotFirstWake_NoPrefix(t *testing.T) {
+	msg := buildWakeMessage(wakePromptInput{
+		Reason:                  "heartbeat",
+		IsFirstWakeOfNewSession: false,
+		DreamCount:              5,
+		LastDreamFinishedAt:     1700000000,
+	})
+	if strings.Contains(msg, "first wake of a new session") {
+		t.Fatalf("must not include prefix for non-first wake, got %q", msg)
+	}
+}
+
 func TestAcquireLockExcludes(t *testing.T) {
 	dir := t.TempDir()
 	lockPath := filepath.Join(dir, "agent.lock")
