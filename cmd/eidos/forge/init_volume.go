@@ -45,20 +45,33 @@ func newInitVolumeCmd() *cobra.Command {
 	}
 }
 
+// initVolumeDirs are the per-mind-form volume directories the init pass
+// creates as root and the final chownTree below transfers to
+// eidos:eidos. /eidos/run must be in this list so the supervisor /
+// agent-runner / gate daemon running as user 1000 can write into it
+// without EACCES on the parent (transcripts/, agent.lock,
+// dream-state.json, wake/, plans/...). Without this, /eidos/run gets
+// created later — by entrypoint.sh, by the gate daemon's wake-dir
+// setup, or by a sudo'd cron child — at a moment when it can land
+// root-owned 0755, and the failure mode is silent: agent-runner's
+// transcripts/transcript-list/transcript-tail all fail-soft and the
+// operator just sees an empty `forge watch` with no error.
+var initVolumeDirs = []string{
+	"/eidos/ontology",
+	"/eidos/gate",
+	"/eidos/claude",
+	"/eidos/run",
+}
+
 func runInitVolume(stdout, stderr io.Writer, stdin io.Reader) error {
+	const bundlePath = "/opt/eidopsyche-bundle.git"
 	const ontologyDir = "/eidos/ontology"
 	const gateDir = "/eidos/gate"
-	const claudeDir = "/eidos/claude"
-	const bundlePath = "/opt/eidopsyche-bundle.git"
 
-	if err := os.MkdirAll(ontologyDir, 0o700); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(gateDir, 0o700); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(claudeDir, 0o700); err != nil {
-		return err
+	for _, d := range initVolumeDirs {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			return fmt.Errorf("mkdir %s: %w", d, err)
+		}
 	}
 
 	if err := extractTar(stdin, ontologyDir); err != nil {

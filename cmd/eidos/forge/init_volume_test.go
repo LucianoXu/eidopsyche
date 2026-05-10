@@ -10,6 +10,23 @@ import (
 	"testing"
 )
 
+// TestInitVolumeDirsIncludesRunDir is the regression guard for the
+// "agent-runner can't write transcripts" bug: if a refactor drops
+// /eidos/run from the volume-init list, the chownTree pass at the end
+// of runInitVolume will skip it, and any later mkdir of /eidos/run by
+// a process running as eidos (uid 1000) gets foreshadowed by some
+// other process landing it root-owned. The fail mode is silent — the
+// transcript fall-back swallows the EACCES — so this list-membership
+// test is the cheapest way to anchor the contract.
+func TestInitVolumeDirsIncludesRunDir(t *testing.T) {
+	for _, d := range initVolumeDirs {
+		if d == "/eidos/run" {
+			return
+		}
+	}
+	t.Errorf("/eidos/run must appear in initVolumeDirs so chownTree transfers it to eidos:eidos at volume bootstrap; got %v", initVolumeDirs)
+}
+
 func TestExtractTarRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
