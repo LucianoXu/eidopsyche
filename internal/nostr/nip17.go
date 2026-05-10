@@ -3,12 +3,24 @@ package nostr
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	gnostr "github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip44"
 	"github.com/nbd-wtf/go-nostr/nip59"
 )
+
+// ErrNotGiftWrap is returned by Unwrap when the supplied event is missing
+// or has a Kind other than 1059 (the NIP-17 gift-wrap kind). Relays are
+// untrusted; helpers fail closed before any decryption is attempted.
+var ErrNotGiftWrap = errors.New("event is not a NIP-17 gift wrap (kind 1059)")
+
+// ErrGiftWrapNotForReceiver is returned by Unwrap when the gift wrap's
+// outer "p" tag does not match the receiver's pubkey. Stops a malicious
+// relay from coaxing us to decrypt wraps addressed elsewhere.
+var ErrGiftWrapNotForReceiver = errors.New("gift wrap is not addressed to this receiver")
 
 // Wrap produces a recipient-addressed gift wrap (kind 1059) for the given
 // content. Internally it builds a kind-14 chat rumor and a kind-13 seal per
@@ -67,9 +79,36 @@ func WrapKind(senderSK, recipientPK, content string, kind int) (wrap *gnostr.Eve
 // Unwrap opens a kind-1059 gift wrap addressed to receiverSK and returns the
 // inner kind-14 rumor. The returned rumor's PubKey is the sender's public key
 // (extracted from the seal's signature).
+//
+// Validates the wrap envelope before any decryption is attempted:
+//   - ev must be non-nil with Kind == 1059, else returns ErrNotGiftWrap
+//   - ev must carry a "p" tag matching the receiver's pubkey, else returns
+//     ErrGiftWrapNotForReceiver
+//
+// Subscription filters already constrain inbound traffic to kind=1059 with
+// `#p=self`, but Unwrap is reused from other call paths (e.g. invite/card
+// flows) and relays are untrusted, so the helper self-validates.
 func Unwrap(receiverSK string, ev *gnostr.Event) (*gnostr.Event, error) {
 	ctx := context.Background()
 	_ = ctx // kept for potential future use
+
+	if ev == nil || ev.Kind != 1059 {
+		return nil, ErrNotGiftWrap
+	}
+	receiverPK, err := gnostr.GetPublicKey(receiverSK)
+	if err != nil {
+		return nil, fmt.Errorf("derive receiver pubkey: %w", err)
+	}
+	matched := false
+	for _, tag := range ev.Tags {
+		if len(tag) >= 2 && tag[0] == "p" && strings.EqualFold(tag[1], receiverPK) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return nil, ErrGiftWrapNotForReceiver
+	}
 
 	// decryptFn decrypts the seal using receiver's private key and the
 	// ephemeral nonce key found in the gift-wrap's PubKey field.
