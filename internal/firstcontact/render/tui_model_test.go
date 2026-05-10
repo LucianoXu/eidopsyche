@@ -233,3 +233,72 @@ func TestModel_View_ContainsHeader_AndSectionRule(t *testing.T) {
 		t.Errorf("view missing section rule: %q", out)
 	}
 }
+
+// TestModel_WrapLongShowBody pins the long-line wrap fix: a Show body
+// wider than the terminal must be word-wrapped before landing in the
+// transcript, otherwise the right edge truncates on terminals without
+// auto-wrap.
+func TestModel_WrapLongShowBody(t *testing.T) {
+	asks := make(chan askMsg, 1)
+	replies := make(chan replyMsg, 1)
+	m := newModel(modelDeps{asks: asks, replies: replies})
+	m.width = 50
+
+	long := strings.Repeat("word ", 40)
+	_, _ = m.Update(askMsg{kind: kindShow, body: long})
+
+	if len(m.transcript) != 1 {
+		t.Fatalf("transcript = %v entries", len(m.transcript))
+	}
+	got := m.transcript[0]
+	if !strings.Contains(got, "\n") {
+		t.Errorf("expected newlines from wrap; got single-line entry: %q", got)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		// Drop ANSI escape sequences before counting length.
+		visible := stripANSI(line)
+		if len(visible) > m.width {
+			t.Errorf("wrapped line exceeds width %d: %q (len=%d)", m.width, visible, len(visible))
+		}
+	}
+}
+
+// TestModel_LogoIsSingleLine pins the design change: the logo is now
+// a one-line stylized title rather than the multi-line letter circle.
+func TestModel_LogoIsSingleLine(t *testing.T) {
+	asks := make(chan askMsg, 1)
+	replies := make(chan replyMsg, 1)
+	m := newModel(modelDeps{asks: asks, replies: replies})
+
+	logo := m.renderLogo()
+	visible := stripANSI(logo)
+	if strings.Contains(visible, "\n") {
+		t.Errorf("logo should be single-line; got %q", visible)
+	}
+	for _, letter := range "EIDOPSYCHE" {
+		if !strings.ContainsRune(visible, letter) {
+			t.Errorf("logo missing letter %q in %q", letter, visible)
+		}
+	}
+}
+
+// stripANSI is a tiny helper for tests that need to compare visible
+// width — strips bytes between ESC and 'm' (covers SGR styling).
+func stripANSI(s string) string {
+	var out []rune
+	in := false
+	for _, r := range s {
+		if r == 0x1b {
+			in = true
+			continue
+		}
+		if in {
+			if r == 'm' {
+				in = false
+			}
+			continue
+		}
+		out = append(out, r)
+	}
+	return string(out)
+}

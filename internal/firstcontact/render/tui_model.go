@@ -10,6 +10,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/wordwrap"
 )
 
 // modelDeps groups the bridge channels the Model talks to. Exposed so
@@ -168,7 +170,7 @@ func (m *model) handleAsk(msg askMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case kindShow, kindFrame:
-		m.transcript = append(m.transcript, StyleBody.Render(msg.body))
+		m.transcript = append(m.transcript, StyleBody.Render(m.wrap(msg.body)))
 		m.activeAsk = nil
 		m.deps.replies <- replyMsg{}
 		return m, waitForAsk(m.deps.asks)
@@ -177,10 +179,14 @@ func (m *model) handleAsk(msg askMsg) (tea.Model, tea.Cmd) {
 		body := msg.body
 		if msg.opts.HelpText == "markdown" {
 			if rendered, err := renderMarkdown(body, m.width); err == nil {
-				body = rendered
+				// glamour already word-wraps at the width we passed.
+				m.transcript = append(m.transcript, rendered)
+				m.activeAsk = nil
+				m.deps.replies <- replyMsg{}
+				return m, waitForAsk(m.deps.asks)
 			}
 		}
-		m.transcript = append(m.transcript, StyleBody.Render(body))
+		m.transcript = append(m.transcript, StyleBody.Render(m.wrap(body)))
 		m.activeAsk = nil
 		m.deps.replies <- replyMsg{}
 		return m, waitForAsk(m.deps.asks)
@@ -273,7 +279,11 @@ func (m *model) View() string {
 	var b strings.Builder
 	b.WriteString(StyleAccent.Render("eidos summon"))
 	b.WriteString("\n")
-	b.WriteString(SectionRule(min(m.width, 60)))
+	ruleWidth := m.width
+	if ruleWidth <= 0 {
+		ruleWidth = 60
+	}
+	b.WriteString(SectionRule(ruleWidth))
 	b.WriteString("\n")
 	for _, line := range m.transcript {
 		b.WriteString(line)
@@ -283,17 +293,17 @@ func (m *model) View() string {
 		switch m.activeAsk.kind {
 		case kindPrompt:
 			b.WriteString("\n")
-			b.WriteString(StyleBody.Render(m.activeAsk.question))
+			b.WriteString(StyleBody.Render(m.wrap(m.activeAsk.question)))
 			b.WriteString("\n")
 			if m.activeAsk.opts.HelpText != "" {
-				b.WriteString(StyleHint.Render("  (" + m.activeAsk.opts.HelpText + ")"))
+				b.WriteString(StyleHint.Render(m.wrap("  (" + m.activeAsk.opts.HelpText + ")")))
 				b.WriteString("\n")
 			}
 			b.WriteString(m.input.View())
 
 		case kindMultiline:
 			b.WriteString("\n")
-			b.WriteString(StyleBody.Render(m.activeAsk.question))
+			b.WriteString(StyleBody.Render(m.wrap(m.activeAsk.question)))
 			b.WriteString("\n")
 			b.WriteString(StyleHint.Render("  (Press Esc then Enter to submit)"))
 			b.WriteString("\n")
@@ -301,7 +311,7 @@ func (m *model) View() string {
 
 		case kindPromptChoice:
 			b.WriteString("\n")
-			b.WriteString(StyleBody.Render(m.activeAsk.question))
+			b.WriteString(StyleBody.Render(m.wrap(m.activeAsk.question)))
 			b.WriteString("\n")
 			for i, opt := range m.activeAsk.choices {
 				focus := "  "
@@ -327,14 +337,39 @@ func (m *model) View() string {
 	return b.String()
 }
 
+// renderLogo produces a single-line stylized title:
+//
+//	─── E·I·D·O·P·S·Y·C·H·E ───
+//
+// Each letter is bolded in bronze; the dots are dim bronze; the
+// flanking em-dashes pick up the muted palette of section rules.
+// Style C is a transcript — the multi-line letter circle felt like
+// a curtain raise that didn't fit.
 func (m *model) renderLogo() string {
-	const logo = `       E   I
-     D       O
-    P    *    P
-     S       Y
-       C   H
-         E`
-	return StyleAccent.Render(logo)
+	letters := []string{"E", "I", "D", "O", "P", "S", "Y", "C", "H", "E"}
+	mid := lipgloss.NewStyle().Foreground(bronzeDim).Render("·")
+	parts := make([]string, 0, len(letters)*2-1)
+	for i, l := range letters {
+		parts = append(parts, StyleAccent.Render(l))
+		if i < len(letters)-1 {
+			parts = append(parts, mid)
+		}
+	}
+	body := strings.Join(parts, " ")
+	rule := StylePhaseRule.Render("───")
+	return rule + "  " + body + "  " + rule
+}
+
+// wrap word-wraps text to roughly the current terminal width, leaving
+// a small margin for the leading spaces View() prepends. When the
+// terminal width hasn't been received yet (m.width == 0), defaults to
+// 80 columns so output stays readable in pty harnesses.
+func (m *model) wrap(text string) string {
+	width := m.width - 2
+	if width < 40 {
+		width = 80
+	}
+	return wordwrap.String(text, width)
 }
 
 func renderMarkdown(body string, width int) (string, error) {

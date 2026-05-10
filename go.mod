@@ -14,6 +14,7 @@ require (
 	github.com/fiatjaf/eventstore v0.17.5
 	github.com/fiatjaf/khatru v0.17.4
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/muesli/reflow v0.3.0
 	github.com/nbd-wtf/go-nostr v0.52.3
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/mod v0.35.0
@@ -87,7 +88,6 @@ require (
 	github.com/morikuni/aec v1.1.0 // indirect
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
-	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
