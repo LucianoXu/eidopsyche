@@ -26,24 +26,43 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
+// Flags wired by Command(); read by Run().
+var (
+	flagMasterCard string
+	flagKeyFile    string
+)
+
 // Command returns the cobra command. Registered in cmd/eidos/main.go.
 func Command() *cobra.Command {
-	return &cobra.Command{
+	c := &cobra.Command{
 		Use:   "summon",
 		Short: "Summon a mind-form via the First Contact ritual",
 		Long: `Summon walks you through the First Contact ritual:
 
-  1. Pick a language and your operator label
-  2. Describe the character you want to summon
-  3. Watch a displaying paragraph take shape, name the to-be-summoned
-  4. Seal the summoning book; the new mind-form awakens and replies
+  1. Identity stage  (first run only): create / import / skip
+  2. Mind-form stage: choose master source (your local identity, or a card)
+  3. Describe the character you want to summon
+  4. Watch a displaying paragraph take shape, name the to-be-summoned
+  5. Seal the summoning book; the new mind-form awakens and replies
 
 The ritual is one-shot: failure or interruption discards in-flight
-state and you start over. claude (Claude Code) must be on PATH.`,
+state and you start over. claude (Claude Code) must be on PATH.
+
+Flags:
+  --master-card <path>   Use the holder of this v1 TOML card as the
+                         new mind-form's master, regardless of any
+                         local identity. Skips Phase 2's prompt.
+  --key-file <path>      Read the operator's nsec1... or 32-byte hex
+                         private key from a file (for the import
+                         branch of Phase 1, when no local identity
+                         exists yet). Avoids pasting nsec on stdin.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return Run(cmd.Context())
 		},
 	}
+	c.Flags().StringVar(&flagMasterCard, "master-card", "", "path to the master's identity card (overrides any local identity)")
+	c.Flags().StringVar(&flagKeyFile, "key-file", "", "path to a file containing the operator's nsec1... or 32-byte hex private key (used in the import-identity branch)")
+	return c
 }
 
 // Run is the entry point both Command() and bare-eidos dispatch call.
@@ -67,11 +86,14 @@ func Run(ctx context.Context) error {
 	image := forge.DefaultImage
 
 	deps := firstcontact.Deps{
-		StateDir:     stateDir,
-		Renderer:     rend,
-		Claude:       cl,
-		DockerClient: dock,
-		Image:        image,
+		StateDir:        stateDir,
+		Renderer:        rend,
+		Claude:          cl,
+		DockerClient:    dock,
+		Image:           image,
+		EntryMode:       firstcontact.EntrySummon,
+		MasterCardPath:  flagMasterCard,
+		OperatorKeyPath: flagKeyFile,
 		WriteVolume: func(ctx context.Context, slug, relPath string, body []byte) error {
 			return forgectl.WriteToVolume(ctx, dock, image, slug, relPath, body)
 		},

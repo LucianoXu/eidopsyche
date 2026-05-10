@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/firstcontact"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/store"
 )
@@ -46,6 +47,21 @@ func runInit(cmd *cobra.Command, args []string) error {
 	dir, err := config.ResolveStateDir(globalStateDir)
 	if err != nil {
 		return err
+	}
+
+	// Idempotent guard: if the host is already identity-initialized,
+	// report it and exit 0. Spec § 4.3 — gate init delegates the
+	// "already initialized" decision to the same predicate the wizard
+	// and main.go's auto-dispatch consult, so the three layers cannot
+	// drift on what counts as initialized.
+	if firstcontact.IsIdentityInitialized(dir) {
+		label, _ := readGateLabel(dir)
+		if label == "" {
+			label = "(unset)"
+		}
+		fmt.Fprintf(cmd.OutOrStdout(),
+			"this host already has a gate identity at %s (label: %s)\nnothing to do\n", dir, label)
+		return nil
 	}
 
 	var npub string

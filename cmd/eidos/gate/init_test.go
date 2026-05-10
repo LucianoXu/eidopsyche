@@ -83,19 +83,21 @@ func TestInit_WritesConfigAndHomeRow(t *testing.T) {
 	}
 }
 
-func TestInit_RefusesToOverwrite(t *testing.T) {
+// TestInit_NoOpsWhenAlreadyInitialized pins spec § 4.3: a second
+// `gate init` against an already-initialized state dir exits 0 with a
+// clear message ("already has a gate identity ..."), instead of the
+// older error-style refusal. The on-disk state must still be intact.
+func TestInit_NoOpsWhenAlreadyInitialized(t *testing.T) {
 	dir := t.TempDir()
 	if err := callInit(t, dir, "alice", "wss://r.com"); err != nil {
 		t.Fatalf("first init: %v", err)
 	}
-	err := callInit(t, dir, "alice", "wss://r.com")
-	if err == nil {
-		t.Fatal("expected refusal on second init")
-	}
-	if !strings.Contains(err.Error(), "refusing to overwrite") {
-		t.Fatalf("unexpected error: %v", err)
+	if err := callInit(t, dir, "alice", "wss://r.com"); err != nil {
+		t.Fatalf("second init should be a no-op (exit 0), got: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "key")); err != nil {
 		t.Fatal(err)
 	}
 }
+
+var _ = strings.Contains // keep import for any future test assertions
