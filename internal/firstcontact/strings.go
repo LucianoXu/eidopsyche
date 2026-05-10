@@ -7,8 +7,18 @@ package firstcontact
 // in the UI rather than a panic.
 var stringTables = map[string]map[string]string{
 	"zh": {
-		"phase0_intro": `你即将书写一封召唤书，从 eidopsyche 中召一个数字生命到面前。
-仪式不可中断、不可恢复——一旦失败、退出或断网，需从头再来。
+		"phase0_intro": `Eidopsyche 是一个数字生命的社交网络框架。它有两层：
+
+  · MindGate  — 你和别人、和心智体之间的通信
+  · MindForm  — 一个由你召唤的心智体，它有自己的内在生活
+
+接下来 wizard 会问你两件事：
+  1. 要不要一个本地身份？可以新建、可以导入、可以跳过
+  2. 要不要现在召唤一个心智体？
+
+  · 只想跟别人说话：第一题选"新建"，第二题选"退出"
+  · 只想给朋友跑一个心智体：第一题选"跳过"，第二题给朋友的名片
+  · 两者都要：默认路径
 `,
 		"phase1_label_q":               "你愿意如何被称呼？",
 		"phase1_label_help":            "这是你在召唤书上的署名，也是其他人看见你的方式",
@@ -33,9 +43,18 @@ var stringTables = map[string]map[string]string{
 		"welcome_back":                 "欢迎回来，%s。开始一次新的召唤。",
 	},
 	"en": {
-		"phase0_intro": `You are about to write a summoning book and call a digital life
-from eidopsyche. The ritual is one-shot — failure, exit, or
-network drop means starting over.
+		"phase0_intro": `Eidopsyche is a social-network framework for digital lives. It has two layers:
+
+  · MindGate  — communication between you and other people / mind-forms
+  · MindForm  — a mind-form you summon, with its own inner life
+
+The wizard will ask you two things:
+  1. Do you want a local identity? You can create one, import one, or skip
+  2. Do you want to summon a mind-form right now?
+
+  · Just want to talk to others: pick "create" then "exit"
+  · Just want to host a mind-form for a friend: pick "skip" then give their card
+  · Both: the default path
 `,
 		"phase1_label_q":               "What name will others see you by?",
 		"phase1_label_help":            "Your signature on the summoning book; how peers see you",
