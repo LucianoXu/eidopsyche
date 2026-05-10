@@ -23,6 +23,23 @@ type CreateOpts struct {
 	Model        string
 	KeyHex       string // wizard-only: pre-generated MindForm private hex
 	JournalEntry string // wizard-only: rendered summoning-book markdown
+
+	// PrefabID, when non-empty, makes Orchestrate stream the
+	// prefab/<id>/ tree into the volume instead of the canonical
+	// template. The wizard's Phase 3 prefab branch sets this; the
+	// scratch path leaves it empty.
+	PrefabID string
+
+	// OwnerLabel is the master's human-readable label, surfaced to
+	// prefab .tpl files (e.g. summoning-book templates). Empty on
+	// scratch path; the scratch template/ does not reference it.
+	OwnerLabel string
+
+	// MindFormNpub is the new mind-form's npub, surfaced to prefab
+	// .tpl files. The wizard knows it after key generation; CLI
+	// `eidos forge create` (which has no key context) leaves it
+	// empty — prefab path is wizard-only.
+	MindFormNpub string
 }
 
 func newCreateCmd() *cobra.Command {
