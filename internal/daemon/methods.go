@@ -713,6 +713,7 @@ func inboxList(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessa
 	if err != nil {
 		return nil, internalErr(err)
 	}
+	annotateInboxLabels(ctx, d, out)
 	return out, nil
 }
 
@@ -750,7 +751,56 @@ func outboxList(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMess
 	if err != nil {
 		return nil, internalErr(err)
 	}
+	annotateOutboxLabels(ctx, d, out)
 	return out, nil
+}
+
+// annotateInboxLabels fills in row.Label from the contacts store. A
+// per-call cache amortises the lookup when the same sender appears in
+// many rows. Lookup errors degrade silently to "" so a missing or
+// mis-keyed contact never blocks the listing — the surface still
+// renders the short-hex fallback for that row.
+func annotateInboxLabels(ctx context.Context, d *Daemon, rows []inbox.Message) {
+	cache := map[string]string{}
+	for i := range rows {
+		rows[i].Label = lookupLabel(ctx, d, rows[i].From, cache)
+	}
+}
+
+// annotateOutboxLabels mirrors annotateInboxLabels for sent rows.
+func annotateOutboxLabels(ctx context.Context, d *Daemon, rows []inbox.Sent) {
+	cache := map[string]string{}
+	for i := range rows {
+		rows[i].Label = lookupLabel(ctx, d, rows[i].To, cache)
+	}
+}
+
+// lookupLabel returns the contact label for pubkey, "" if unknown.
+// Results are cached in the supplied map so a noisy thread does not
+// trigger one DB read per row.
+func lookupLabel(ctx context.Context, d *Daemon, pubkey string, cache map[string]string) string {
+	if pubkey == "" || d == nil || d.Repo == nil {
+		return ""
+	}
+	if v, ok := cache[pubkey]; ok {
+		return v
+	}
+	c, err := d.Repo.Get(ctx, pubkey)
+	if err != nil || c == nil {
+		cache[pubkey] = ""
+		return ""
+	}
+	cache[pubkey] = c.Label
+	return c.Label
+}
+
+// peerLabel returns a display string for pubkey suitable for log
+// entries: "alice (abc1234…)" when a contact label is known,
+// "abc1234…" otherwise. A miss in the contacts store degrades silently
+// to the short-hex form so logging never errors out.
+func (d *Daemon) peerLabel(ctx context.Context, pubkey string) string {
+	label := lookupLabel(ctx, d, pubkey, map[string]string{})
+	return contacts.FormatPubkeyWithHex(label, pubkey)
 }
 
 // versionMethod returns the daemon and schema versions.

@@ -159,7 +159,7 @@ func threadHandler(deps DashboardDeps, r *renderer, logger *slog.Logger) http.Ha
 		if c != nil {
 			counterpart = sidebarContact{Pubkey: c.Pubkey, Label: c.Label, Tier: c.Tier}
 		} else {
-			counterpart = sidebarContact{Pubkey: pk, Label: shortenPubkey(pk), Tier: contacts.TierAcquaintance}
+			counterpart = sidebarContact{Pubkey: pk, Label: contacts.ShortHex(pk), Tier: contacts.TierAcquaintance}
 		}
 		bubbles := buildBubbles(deps, pk)
 		threadHTML, err := r.Render("thread", threadData{
@@ -401,7 +401,7 @@ func buildMessagesView(deps DashboardDeps, onlyMal bool, cursor string) messages
 func msgToRow(m inbox.Message) messageRow {
 	return messageRow{
 		Direction:    "in",
-		From:         shortenPubkey(m.From),
+		From:         contacts.FormatPubkey(m.Label, m.From),
 		Pubkey:       m.From,
 		Preview:      previewFor(m.Content),
 		At:           time.Unix(m.ReceivedAt, 0),
@@ -414,7 +414,7 @@ func msgToRow(m inbox.Message) messageRow {
 func sentToRow(s inbox.Sent) messageRow {
 	return messageRow{
 		Direction: "out",
-		From:      shortenPubkey(s.To),
+		From:      contacts.FormatPubkey(s.Label, s.To),
 		Pubkey:    s.To,
 		Preview:   previewFor(s.Content),
 		At:        time.Unix(s.SentAt, 0),
@@ -457,7 +457,7 @@ func msgToBubble(m inbox.Message) bubbleData {
 	}
 	return bubbleData{
 		Self:         false,
-		From:         shortenPubkey(m.From),
+		From:         contacts.FormatPubkey(m.Label, m.From),
 		Text:         text,
 		At:           time.Unix(m.ReceivedAt, 0),
 		Malformed:    m.Malformed,
@@ -499,13 +499,6 @@ func lookupContact(ctx context.Context, deps DashboardDeps, pk string) *contacts
 		}
 	}
 	return nil
-}
-
-func shortenPubkey(pk string) string {
-	if len(pk) <= 16 {
-		return pk
-	}
-	return pk[:8] + "…" + pk[len(pk)-4:]
 }
 
 // relaysData is the template payload for the relay-health panel.

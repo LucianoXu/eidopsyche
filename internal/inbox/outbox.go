@@ -14,6 +14,7 @@ func (s *Store) AppendOutbox(o Sent) error {
 	if o.SentAt == 0 {
 		o.SentAt = time.Now().Unix()
 	}
+	o.Label = "" // transit-only; defense against accidental persistence
 	return s.appendJSONL(dailyPath(s.outboxDir(), time.Unix(o.SentAt, 0)), o)
 }
 

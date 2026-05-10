@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
 )
 
@@ -65,16 +66,19 @@ var inboxCmd = &cobra.Command{
 
 // formatInboxRow renders one inbox row. The format is:
 //
-//	YYYY-MM-DD HH:MM:SS  <from-prefix>  [malformed: <reason>] <body>
+//	YYYY-MM-DD HH:MM:SS  <sender>  [malformed: <reason>] <body>
 //
-// For envelope-decoded chat rows the body is the parsed text. For malformed
-// rows the prefix carries the reason; the body falls back to whatever
-// content arrived (so operators can debug interop). Legacy plain-text rows
-// (pre-envelope, no Malformed flag) render their content as-is.
+// <sender> is the contact label when one is known (the daemon-side join
+// fills it in via inbox.list), otherwise a short hex prefix with an
+// ellipsis. For envelope-decoded chat rows the body is the parsed text;
+// for malformed rows the prefix carries the reason and the body falls
+// back to whatever content arrived. Legacy plain-text rows (pre-
+// envelope, no Malformed flag) render their content as-is.
 func formatInboxRow(m map[string]any) string {
 	tsRaw, _ := m["received_at"].(float64)
 	ts := time.Unix(int64(tsRaw), 0)
 	from, _ := m["from"].(string)
+	label, _ := m["label"].(string)
 	content, _ := m["content"].(string)
 
 	var prefix string
@@ -87,8 +91,8 @@ func formatInboxRow(m map[string]any) string {
 	if env, err := envelope.Decode(content); err == nil && env.Type == envelope.TypeChat {
 		body = env.Text
 	}
-	return fmt.Sprintf("%s  %.16s  %s%s",
-		ts.Format("2006-01-02 15:04:05"), from, prefix, strings.TrimRight(body, "\n"))
+	return fmt.Sprintf("%s  %-16s  %s%s",
+		ts.Format("2006-01-02 15:04:05"), contacts.FormatPubkey(label, from), prefix, strings.TrimRight(body, "\n"))
 }
 
 func init() {

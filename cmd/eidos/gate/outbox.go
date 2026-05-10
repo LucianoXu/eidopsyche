@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/LucianoXu/eidopsyche/internal/contacts"
 )
 
 var (
@@ -33,12 +35,23 @@ var outboxCmd = &cobra.Command{
 			return err
 		}
 		for _, m := range resp {
-			ts := time.Unix(int64(m["sent_at"].(float64)), 0)
-			fmt.Printf("%s  %s  -> %.16s  %s\n",
-				ts.Format("2006-01-02 15:04:05"), outboxStatus(m), m["to"], m["content"])
+			fmt.Println(formatOutboxRow(m))
 		}
 		return nil
 	},
+}
+
+// formatOutboxRow renders one outbox row. <recipient> is the contact
+// label when known (daemon-side join via outbox.list), otherwise a
+// short hex prefix with an ellipsis.
+func formatOutboxRow(m map[string]any) string {
+	tsRaw, _ := m["sent_at"].(float64)
+	ts := time.Unix(int64(tsRaw), 0)
+	to, _ := m["to"].(string)
+	label, _ := m["label"].(string)
+	content, _ := m["content"].(string)
+	return fmt.Sprintf("%s  %s  -> %-16s  %s",
+		ts.Format("2006-01-02 15:04:05"), outboxStatus(m), contacts.FormatPubkey(label, to), content)
 }
 
 // outboxStatus returns a fixed-width column indicating delivery state.

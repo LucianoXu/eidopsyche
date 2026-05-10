@@ -12,6 +12,11 @@ type Message struct {
 	Relays       []string `json:"relays,omitempty"`
 	Malformed    bool     `json:"malformed,omitempty"`
 	RejectReason string   `json:"reject_reason,omitempty"`
+	// Label is a transit-only annotation: IPC handlers populate it
+	// from the contacts store before returning so every surface (CLI,
+	// dashboard, future TUI) renders pubkeys consistently. AppendInbox
+	// strips it before persisting; ListInbox always returns "".
+	Label string `json:"label,omitempty"`
 }
 
 type Sent struct {
@@ -28,4 +33,6 @@ type Sent struct {
 	Final       bool     `json:"final,omitempty"`
 	AckedAt     int64    `json:"acked_at,omitempty"`
 	AckEventID  string   `json:"ack_event_id,omitempty"`
+	// Label mirrors Message.Label: transit-only, never persisted.
+	Label string `json:"label,omitempty"`
 }

@@ -389,7 +389,7 @@ func (d *Daemon) handleIncoming(ctx context.Context, ev *gnostr.Event) {
 	case 25001:
 		d.handleInviteRedemption(ctx, ev, rumor)
 	default:
-		d.Log.Warn("ignored unknown rumor kind", "kind", rumor.Kind, "from", rumor.PubKey)
+		d.Log.Warn("ignored unknown rumor kind", "kind", rumor.Kind, "from", rumor.PubKey, "peer", d.peerLabel(ctx, rumor.PubKey))
 	}
 }
 
@@ -419,7 +419,7 @@ func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *
 		if rumor.PubKey != d.Key.PublicHex {
 			c, err := d.Repo.Get(ctx, rumor.PubKey)
 			if err != nil || c.Tier == contacts.TierBlocked {
-				d.Log.Debug("dropped non-contact / blocked", "from", rumor.PubKey)
+				d.Log.Debug("dropped non-contact / blocked", "from", rumor.PubKey, "peer", d.peerLabel(ctx, rumor.PubKey))
 				return
 			}
 			senderContact = c
@@ -476,7 +476,7 @@ func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *
 // given reason, then broadcasts. The Content field stores rumor.Content
 // as-received so operators can debug interop issues.
 func (d *Daemon) persistSoftReject(ev *gnostr.Event, rumor *gnostr.Event, reason string) {
-	d.Log.Info("soft-reject", "reason", reason, "from", rumor.PubKey, "event_id", ev.ID)
+	d.Log.Info("soft-reject", "reason", reason, "from", rumor.PubKey, "peer", d.peerLabel(context.Background(), rumor.PubKey), "event_id", ev.ID)
 	msg := inbox.Message{
 		EventID:      ev.ID,
 		InnerID:      rumor.ID,
@@ -620,7 +620,7 @@ func (d *Daemon) handleInboundAck(ctx context.Context, ev *gnostr.Event, rumor *
 	}
 	c, err := d.Repo.Get(ctx, rumor.PubKey)
 	if err != nil || c.Tier == contacts.TierBlocked {
-		d.Log.Debug("dropped ack from non-contact / blocked", "from", rumor.PubKey)
+		d.Log.Debug("dropped ack from non-contact / blocked", "from", rumor.PubKey, "peer", d.peerLabel(ctx, rumor.PubKey))
 		return
 	}
 
@@ -641,7 +641,9 @@ func (d *Daemon) handleInboundAck(ctx context.Context, ev *gnostr.Event, rumor *
 		return
 	}
 	if match.To != rumor.PubKey {
-		d.Log.Warn("ack from non-recipient", "ref", env.Ref, "expected", match.To, "actual", rumor.PubKey)
+		d.Log.Warn("ack from non-recipient", "ref", env.Ref,
+			"expected", match.To, "expected_peer", d.peerLabel(ctx, match.To),
+			"actual", rumor.PubKey, "actual_peer", d.peerLabel(ctx, rumor.PubKey))
 		return
 	}
 	if match.AckedAt != 0 {
@@ -705,7 +707,7 @@ func (d *Daemon) emitAck(ctx context.Context, toPubkey string, recipientRelays [
 	urls, err := d.publishTargets(ctx, recipientRelays)
 	if err != nil {
 		// Best-effort: log and keep going — but with no targets, abort.
-		d.Log.Warn("emit ack: publishTargets", "err", err, "to", toPubkey)
+		d.Log.Warn("emit ack: publishTargets", "err", err, "to", toPubkey, "peer", d.peerLabel(ctx, toPubkey))
 		return
 	}
 	if len(urls) == 0 {

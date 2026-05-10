@@ -36,6 +36,7 @@ func (s *Store) AppendInbox(m Message) error {
 	if m.ReceivedAt == 0 {
 		m.ReceivedAt = time.Now().Unix()
 	}
+	m.Label = "" // transit-only; defense against accidental persistence
 	return s.appendJSONL(dailyPath(s.inboxDir(), time.Unix(m.ReceivedAt, 0)), m)
 }
 
