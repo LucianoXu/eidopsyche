@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/authstate"
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 )
@@ -106,6 +107,20 @@ func productionBirthHandler(ctx context.Context, sig wake.BirthSignal, ontologyD
 	c.Stderr = os.Stderr
 	c.Env = append(os.Environ(), "CLAUDE_DIR="+filepath.Join(ontologyDir, ".claude"))
 	if err := c.Run(); err != nil {
+		// Mirror agent_runner's behaviour: detect auth failures and
+		// persist the auth_required marker so forge status surfaces
+		// it and the supervisor stops retrying birth.json on every
+		// iteration. The wake-loop birth-handler itself doesn't exit;
+		// drainBirthIfPresent will treat the returned error as
+		// retry-this-iteration, but agent-runner's self-gate now
+		// short-circuits any subsequent wake until login clears the
+		// marker — and the host operator sees auth: REQUIRED in
+		// `eidos forge status <slug>`.
+		if isAuthError(err, c.ProcessState) {
+			if werr := authstate.Write(time.Now()); werr != nil {
+				log.Printf("birth handler: write %s: %v", authstate.Path, werr)
+			}
+		}
 		return fmt.Errorf("claude (birth) exited: %w", err)
 	}
 	if _, err := os.Stat(filepath.Join(ontologyDir, bornAtRel)); err != nil {

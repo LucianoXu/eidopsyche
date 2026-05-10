@@ -148,11 +148,12 @@ func installFromHost(name, image string, runSetupToken bool) error {
 		}
 	}
 	if err := clearAuthRequiredInVolume(name, image); err != nil {
-		// Non-fatal: credentials are installed, marker stays. Operator's
-		// next wake will discover the mismatch (agent-runner self-gates
-		// on the marker before invoking claude); we surface the warning
-		// rather than fail login over a cleanup error.
-		fmt.Fprintf(os.Stderr, "(warning: could not clear auth_required marker: %v)\n", err)
+		// Hard error. Without the marker cleared, agent-runner's
+		// self-gate keeps refusing to invoke claude — so a "login OK"
+		// message followed by a permanently-locked mind-form is much
+		// worse than failing login here. Operator can re-run after
+		// fixing the underlying issue (typically docker not running).
+		return fmt.Errorf("login: clear auth_required marker: %w", err)
 	}
 	fmt.Printf("✓ credentials installed into eidos-mindform-%s\n", name)
 	return nil
@@ -243,9 +244,7 @@ func runInContainerLogin(name, image, method string) error {
 		return err
 	}
 	if err := clearAuthRequiredInVolume(name, image); err != nil {
-		// Non-fatal: in-container login succeeded, marker stays.
-		// Operator's next wake will discover the mismatch.
-		fmt.Fprintf(os.Stderr, "(warning: could not clear auth_required marker: %v)\n", err)
+		return fmt.Errorf("login: clear auth_required marker: %w", err)
 	}
 	return nil
 }
