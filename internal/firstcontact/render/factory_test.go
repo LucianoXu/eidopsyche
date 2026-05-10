@@ -38,3 +38,16 @@ func TestNewAuto_RespectsDumbTerm(t *testing.T) {
 		t.Errorf("TERM=dumb should force CLI fallback")
 	}
 }
+
+// TestNewAuto_FallsBackOnPipedStdin pins the codex review fix:
+// `printf '...' | eidos summon` from an interactive terminal has a
+// real TTY stdout but a pipe stdin. The TUI cannot read keystrokes
+// from a pipe, so the factory must take the CLI path.
+func TestNewAuto_FallsBackOnPipedStdin(t *testing.T) {
+	// strings.NewReader is not an *os.File, so isFileTTY returns false —
+	// matches the piped-stdin shape regardless of stdout's TTY status.
+	r := render.NewAuto(strings.NewReader("scripted input"), &bytes.Buffer{}, 30)
+	if _, ok := r.(render.TUIRenderer); ok {
+		t.Errorf("non-TTY stdin should force CLI fallback")
+	}
+}

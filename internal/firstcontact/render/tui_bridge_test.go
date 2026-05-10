@@ -55,6 +55,55 @@ func TestTUI_BridgeRoundTrip(t *testing.T) {
 	}
 }
 
+// TestTUI_DoneUnblocksFireAndAck pins the codex review fix: when the
+// TUI exits while the worker is mid-call to a fire-and-act op
+// (Show / Frame / Typewriter / Logo / RenderMarkdown), close(r.done)
+// must unblock the worker rather than leak it forever. We construct
+// the renderer directly (no tea.Program.Run) and just close r.done
+// before the worker calls Show — the Show should return promptly.
+func TestTUI_DoneUnblocksFireAndAck(t *testing.T) {
+	r := &tuiRenderer{
+		asks:    make(chan askMsg, 1),
+		replies: make(chan replyMsg, 1),
+		done:    make(chan struct{}),
+	}
+	close(r.done) // simulate TUI already exited
+
+	finished := make(chan struct{})
+	go func() {
+		r.Show("late")        // must not block forever
+		r.Frame("late frame") // same for the other fire-and-act ops
+		r.Typewriter(context.Background(), "late tw")
+		r.Logo(context.Background(), 0)
+		close(finished)
+	}()
+	select {
+	case <-finished:
+		// success
+	case <-time.After(time.Second):
+		t.Fatalf("fire-and-act renderer methods did not return after r.done closed")
+	}
+}
+
+// TestTUI_DoneUnblocksPrompt verifies the same contract for input ops:
+// Prompt and PromptChoice return ErrTUIClosed when the TUI exits
+// while the worker is blocked.
+func TestTUI_DoneUnblocksPrompt(t *testing.T) {
+	r := &tuiRenderer{
+		asks:    make(chan askMsg, 1),
+		replies: make(chan replyMsg, 1),
+		done:    make(chan struct{}),
+	}
+	close(r.done)
+
+	if _, err := r.Prompt("name?", PromptOpts{}); err != ErrTUIClosed {
+		t.Errorf("Prompt err = %v, want ErrTUIClosed", err)
+	}
+	if _, err := r.PromptChoice("?", []ChoiceOption{{Label: "a"}}); err != ErrTUIClosed {
+		t.Errorf("PromptChoice err = %v, want ErrTUIClosed", err)
+	}
+}
+
 // TestTUI_BridgeWorkerPanic_Recovers verifies that a worker panic is
 // caught and converted to an error via RunWithPhases.
 func TestTUI_BridgeWorkerPanic_Recovers(t *testing.T) {
