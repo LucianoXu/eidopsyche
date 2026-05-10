@@ -297,10 +297,9 @@ type volumeTailer struct {
 	image  string
 }
 
-func (v *volumeTailer) Wait(ctx context.Context, slug, gatePath, bodyPath string, timeout time.Duration) ([]byte, error) {
+func (v *volumeTailer) Wait(ctx context.Context, slug, gatePath, bodyPath string) ([]byte, error) {
 	gateTarget := "/eidos/" + strings.TrimPrefix(gatePath, "/")
 	bodyTarget := "/eidos/" + strings.TrimPrefix(bodyPath, "/")
-	deadline := time.Now().Add(timeout)
 	// Single helper-container script: exit 0 + print body iff both
 	// files are non-empty. Order matters: -s on gate first means we
 	// don't even read body until the supervisor's authoritative
@@ -316,9 +315,6 @@ func (v *volumeTailer) Wait(ctx context.Context, slug, gatePath, bodyPath string
 		})
 		if err == nil && len(res.Stdout) > 0 {
 			return res.Stdout, nil
-		}
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("timed out waiting for gate %s + body %s in volume", gatePath, bodyPath)
 		}
 		select {
 		case <-ctx.Done():

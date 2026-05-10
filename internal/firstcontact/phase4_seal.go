@@ -33,8 +33,11 @@ type VolumeWriter func(ctx context.Context, slug, relPath string, body []byte) e
 // the supervisor's next iteration re-runs birth and overwrites the
 // just-committed response.
 //
-// Returns error on timeout or context cancellation.
-type ResponseWaiter func(ctx context.Context, slug, gatePath, bodyPath string, timeout time.Duration) ([]byte, error)
+// The waiter does not impose a deadline of its own; the only way out
+// is ctx cancellation (operator Ctrl-C). Birth-wake claude is
+// multi-step and cold-cache slow, and a fixed timeout was misreporting
+// "still working" as failure.
+type ResponseWaiter func(ctx context.Context, slug, gatePath, bodyPath string) ([]byte, error)
 
 // ContactAdder records the new MindForm in the operator's host
 // contacts. The wizard wires this to a sanctioned bootstrap exception
@@ -245,8 +248,7 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	}()
 	body, err := d.ResponseWait(ctx, s.Slug,
 		"ontology/essence/born_at",
-		"ontology/journal/0000-response.md",
-		240*time.Second)
+		"ontology/journal/0000-response.md")
 	cancelTick()
 	st2.Stop()
 	if err != nil {
