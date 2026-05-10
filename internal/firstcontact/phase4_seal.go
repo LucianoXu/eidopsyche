@@ -21,9 +21,20 @@ import (
 // container; tests substitute an in-memory implementation.
 type VolumeWriter func(ctx context.Context, slug, relPath string, body []byte) error
 
-// ResponseWaiter blocks until <volume>/<relPath> appears with non-empty
-// content, or until timeout / context cancellation.
-type ResponseWaiter func(ctx context.Context, slug, relPath string, timeout time.Duration) ([]byte, error)
+// ResponseWaiter blocks until <volume>/<gatePath> appears with
+// non-empty content, then reads and returns <volume>/<bodyPath>.
+//
+// gatePath is the supervisor's authoritative birth-completion marker
+// (essence/born_at). The agent's birth boot prompt is explicit that
+// born_at is written LAST, after identity / secret / response — so
+// once born_at is non-empty we know the response file is already
+// committed. Gating on born_at closes the race where the wizard
+// reports done after response is written but before born_at, then
+// the supervisor's next iteration re-runs birth and overwrites the
+// just-committed response.
+//
+// Returns error on timeout or context cancellation.
+type ResponseWaiter func(ctx context.Context, slug, gatePath, bodyPath string, timeout time.Duration) ([]byte, error)
 
 // ContactAdder records the new MindForm in the operator's host
 // contacts. The wizard wires this to a sanctioned bootstrap exception
@@ -66,23 +77,30 @@ func RenderSummoningBook(s *Summoning) string {
 	return sb.String()
 }
 
-// PollResponseFile is a host-side ResponseWaiter implementation: it
-// polls a path on the local filesystem (e.g. a bind-mounted volume
-// inspector) every interval until the file appears with non-empty
-// content or the timeout elapses. cmd/eidos/summon picks a different
-// path that talks to docker.
-func PollResponseFile(ctx context.Context, path string, timeout, interval time.Duration) ([]byte, error) {
+// PollResponseFile is a host-side ResponseWaiter implementation that
+// polls bind-mounted local filesystem paths. It blocks until gatePath
+// is non-empty, then reads bodyPath and returns its content. Used by
+// tests; cmd/eidos/summon picks a different ResponseWaiter that talks
+// to docker.
+func PollResponseFile(ctx context.Context, gatePath, bodyPath string, timeout, interval time.Duration) ([]byte, error) {
 	deadline := time.Now().Add(timeout)
 	for {
-		body, err := os.ReadFile(path)
-		if err == nil && len(body) > 0 {
+		gateBody, gateErr := os.ReadFile(gatePath)
+		if gateErr == nil && len(gateBody) > 0 {
+			body, err := os.ReadFile(bodyPath)
+			if err != nil {
+				return nil, fmt.Errorf("read body %q (gate present): %w", bodyPath, err)
+			}
+			if len(body) == 0 {
+				return nil, fmt.Errorf("body %q is empty even though gate %q is set — agent wrote birth marker before response", bodyPath, gatePath)
+			}
 			return body, nil
 		}
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return nil, err
+		if gateErr != nil && !errors.Is(gateErr, fs.ErrNotExist) {
+			return nil, gateErr
 		}
 		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("timed out waiting for %s", path)
+			return nil, fmt.Errorf("timed out waiting for gate %s", gatePath)
 		}
 		select {
 		case <-ctx.Done():
@@ -215,7 +233,10 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 			}
 		}
 	}()
-	body, err := d.ResponseWait(ctx, s.Slug, "ontology/journal/0000-response.md", 240*time.Second)
+	body, err := d.ResponseWait(ctx, s.Slug,
+		"ontology/essence/born_at",
+		"ontology/journal/0000-response.md",
+		240*time.Second)
 	cancelTick()
 	st2.Stop()
 	if err != nil {

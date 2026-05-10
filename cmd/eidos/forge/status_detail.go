@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/authstate"
 	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
 	"github.com/LucianoXu/eidopsyche/internal/scheduler"
 	"github.com/spf13/cobra"
@@ -25,6 +26,16 @@ func newStatusDetailCmd() *cobra.Command {
 			plans, _ := scheduler.List(plansDir)
 			ds, _ := dreamstate.Read(dreamStatePath)
 			now := time.Now()
+
+			// auth_required line — surface ABOVE plans/dreams so it's
+			// the first thing the operator sees when claude auth has
+			// expired.
+			if state, _ := authstate.Read(); state != nil {
+				since := time.Unix(state.Since, 0).In(tz)
+				fmt.Fprintf(cmd.OutOrStdout(),
+					"auth:    REQUIRED (claude login expired since %s)\n",
+					since.Format(time.RFC3339))
+			}
 
 			// Plans line
 			if len(plans) == 0 {

@@ -147,6 +147,14 @@ func installFromHost(name, image string, runSetupToken bool) error {
 			return err
 		}
 	}
+	if err := clearAuthRequiredInVolume(name, image); err != nil {
+		// Hard error. Without the marker cleared, agent-runner's
+		// self-gate keeps refusing to invoke claude — so a "login OK"
+		// message followed by a permanently-locked mind-form is much
+		// worse than failing login here. Operator can re-run after
+		// fixing the underlying issue (typically docker not running).
+		return fmt.Errorf("login: clear auth_required marker: %w", err)
+	}
 	fmt.Printf("✓ credentials installed into eidos-mindform-%s\n", name)
 	return nil
 }
@@ -161,7 +169,33 @@ func installCredentialsFromFile(name, image, path string) error {
 	if err := writeIntoVolume(name, image, "/eidos/claude/.claude.json", f); err != nil {
 		return err
 	}
+	if err := clearAuthRequiredInVolume(name, image); err != nil {
+		return fmt.Errorf("login: clear auth_required marker: %w", err)
+	}
 	fmt.Printf("✓ credentials installed into eidos-mindform-%s from %s\n", name, path)
+	return nil
+}
+
+// clearAuthRequiredInVolume removes /eidos/run/auth_required.json
+// inside the mind-form's volume after a successful login. Uses a
+// one-shot helper container running as uid 0 (the marker may have
+// been written by either the in-container eidos uid 1000 supervisor
+// or an init-time root process; only root can rm both). The container
+// is short-lived so the elevated uid is bounded. Tolerates absence
+// via rm -f.
+func clearAuthRequiredInVolume(name, image string) error {
+	c := exec.Command("docker", "run", "--rm",
+		"--user", "0:0",
+		"--mount", "source="+forgectl.VolumeName(name)+",target=/eidos",
+		"--entrypoint", "sh",
+		image,
+		"-c", "rm -f /eidos/run/auth_required.json",
+	) //nolint:gosec // argv built from validated inputs
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	if err := c.Run(); err != nil {
+		return fmt.Errorf("clear auth_required marker: %w", err)
+	}
 	return nil
 }
 
@@ -210,5 +244,11 @@ func runInContainerLogin(name, image, method string) error {
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
-	return c.Run()
+	if err := c.Run(); err != nil {
+		return err
+	}
+	if err := clearAuthRequiredInVolume(name, image); err != nil {
+		return fmt.Errorf("login: clear auth_required marker: %w", err)
+	}
+	return nil
 }
