@@ -63,11 +63,11 @@
 | `eidos`（裸跑） | 有 | 退出 / 用本地身份召唤 / 用名片召唤 |
 | `eidos`（裸跑） | 无（阶段 1 跳过） | 退出 / 用名片召唤 |
 | `eidos summon` | 有 | 用本地身份召唤 / 用名片召唤 |
-| `eidos summon` | 无 | （直接要名片路径，不再问） |
+| `eidos summon` | 无 | （直接进入"用名片召唤"分支，不再问） |
 | 任意 + `--master-card <path>` | 任意 | （跳过本阶段，直接走 card） |
 | `eidos gate init` | — | （短路到退出，只完成阶段 0 + 1） |
 
-"用名片召唤"分支会读取一张 v1 TOML 名片（详见 §三 / 名片），把 master 的 label、npub、home_relay 注入到本次召唤；之后阶段 3 / 4 与默认路径无差。
+"用名片召唤"分支会读取一张 v1 名片，把 master 的 label、npub、home_relay 注入到本次召唤；之后阶段 3 / 4 与默认路径无差。名片来源在分支内还会再问一次："从文件载入"或"粘贴名片内容"。粘贴时既接受 `mindgate://` URI（取首行；按 label / npub bech32 / `ws|wss` host 校验），也接受完整 v1 TOML 名片（按 §三/名片 v1 不变量校验）；`--master-card` flag 始终走文件路径，不弹粘贴菜单。
 
 ### 阶段 3 · 召唤书的撰写（book，原阶段 2，仪式的核心）
 
