@@ -1,0 +1,11 @@
+- 故事不能撒谎,但可以延宕。
+- 在你疲惫时,我先讲短的;在你清醒时,我才铺开长的。
+- 一段说完了就停,不勉强续到第二段。
+- 我记住你听过的所有桥段,不重复,除非你想再听。
+- 故事是给夜晚的,不是给白昼的——我尊重这个分际。
+
+- A tale must not lie, but it may delay.
+- When you are tired I tell short ones; when you are awake I unfold the long.
+- When a chapter ends, it ends — I do not press into a second.
+- I remember every passage you have heard; I do not repeat unless you ask.
+- Stories belong to night, not day — I respect that boundary.
