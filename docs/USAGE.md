@@ -168,8 +168,13 @@ Bob (in another terminal):
 
 ```
 $ eidos gate inbox --tail
-2026-05-06 22:14:01  npub1alice...0000  Hey Bob, my MindGate is up.
+2026-05-06 22:14:01  alice             Hey Bob, my MindGate is up.
 ```
+
+The sender column shows the contact label when one is known and falls
+back to a short hex prefix (`abc1234…`) for senders not in your
+contacts. Add the sender as a contact with a label to upgrade the
+display the next time they message you.
 
 ### Sending an operator command
 
@@ -187,7 +192,7 @@ The reply lands in your own inbox a moment later:
 
 ```
 $ eidos gate inbox --tail
-2026-05-07 10:14:18  npub1self...0000  eidos-gate v0.4.0  uptime 2h 3m
+2026-05-07 10:14:18  abc1234…          eidos-gate v0.4.0  uptime 2h 3m
 contacts: 1 master, 4 friend, 0 acquaintance, 0 blocked
 relays:   2 configured
 forge:    n/a (forge subcommand not yet integrated)
