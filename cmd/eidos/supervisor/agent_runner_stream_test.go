@@ -4,6 +4,7 @@ package supervisor
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -236,5 +237,18 @@ exit 0`)
 	}
 	if len(idx.Wakes) != 1 || idx.Wakes[0].SessionID != sessionUUID {
 		t.Fatalf("entry.SessionID = %q, want %q (idx=%+v)", idx.Wakes[0].SessionID, sessionUUID, idx)
+	}
+}
+
+func TestRunWithTranscript_ReturnsSessionNotFoundOnStderr(t *testing.T) {
+	streamFixture(t, `echo "Error: session not found" 1>&2
+exit 1`)
+	sig := wake.Signal{V: 1, ID: "snf-wake-1", Reason: wake.ReasonHeartBeat, TriggeredAt: 1}
+	err := runWithTranscript(sig, t.TempDir(), []string{"-p", "ignored"}, "some-uuid")
+	if err == nil {
+		t.Fatal("expected error from stub exit 1; got nil")
+	}
+	if !errors.Is(err, errSessionNotFound) {
+		t.Fatalf("expected errSessionNotFound; got %v", err)
 	}
 }

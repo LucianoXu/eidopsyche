@@ -189,6 +189,26 @@ func runAgent(wakeFile, ontologyDir string) error {
 	} else {
 		runErr = runWithoutTranscript(ontologyDir, args)
 	}
+	if runErr != nil && errors.Is(runErr, errSessionNotFound) && !isFirstWake {
+		log.Printf("agent-runner: claude reports session %s not found; resetting and retrying", sessionUUID)
+		if cErr := sessionstate.Clear(sessionStatePath); cErr != nil {
+			log.Printf("agent-runner: session-state clear after stderr fallback: %v", cErr)
+		}
+		fresh, mErr := sessionstate.Mint(sessionStatePath, time.Now())
+		if mErr != nil {
+			return fmt.Errorf("session-state mint after stderr-fallback: %w", mErr)
+		}
+		sessionUUID = fresh.SessionID
+		isFirstWake = true
+		mode = SessionMode{Kind: SessionNew, UUID: sessionUUID}
+		msg = rebuildWakeMessage(sig, cfg, ds, true)
+		args = buildClaudeArgs(string(identity), msg, gateConfigPath, streamJSON, mode)
+		if streamJSON {
+			runErr = runWithTranscript(sig, ontologyDir, args, sessionUUID)
+		} else {
+			runErr = runWithoutTranscript(ontologyDir, args)
+		}
+	}
 	if runErr != nil {
 		return runErr
 	}
@@ -243,12 +263,34 @@ func runWithoutTranscript(ontologyDir string, args []string) error {
 	c := exec.Command(claudeBin, args...) //nolint:gosec
 	c.Dir = ontologyDir
 	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
+	stderrBuf := &strings.Builder{}
+	c.Stderr = io.MultiWriter(os.Stderr, stderrBuf)
 	c.Env = append(os.Environ(), "CLAUDE_DIR="+filepath.Join(ontologyDir, ".claude"))
 	if err := c.Run(); err != nil {
+		if matchSessionNotFound(stderrBuf.String()) {
+			return errors.Join(errSessionNotFound, err)
+		}
 		return handleClaudeExit(err, c.ProcessState)
 	}
 	return nil
+}
+
+// errSessionNotFound is returned when claude exited non-zero and stderr
+// indicated the resumed session is missing or unreadable. runAgent
+// catches this once and retries with a fresh session UUID.
+var errSessionNotFound = errors.New("claude reports session not found")
+
+// matchSessionNotFound is a case-insensitive substring scan over claude's
+// stderr for any marker we know it uses to signal a missing / unreadable
+// session file. Tolerant on additions — substring match.
+func matchSessionNotFound(stderr string) bool {
+	low := strings.ToLower(stderr)
+	for _, m := range []string{"session not found", "could not find session", "no such session"} {
+		if strings.Contains(low, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // runWithTranscript runs claude with --output-format stream-json and tees
@@ -300,7 +342,8 @@ func runWithTranscript(sig wake.Signal, ontologyDir string, args []string, sessi
 
 	c := exec.Command(claudeBin, args...) //nolint:gosec
 	c.Dir = ontologyDir
-	c.Stderr = os.Stderr
+	stderrBuf := &strings.Builder{}
+	c.Stderr = io.MultiWriter(os.Stderr, stderrBuf)
 	c.Env = append(os.Environ(), "CLAUDE_DIR="+filepath.Join(ontologyDir, ".claude"))
 
 	stdoutPipe, err := c.StdoutPipe()
@@ -371,6 +414,9 @@ func runWithTranscript(sig wake.Signal, ontologyDir string, args []string, sessi
 	log.Printf("agent-runner: wake-id=%s completed cost=%s dur_s=%d tools=%d %s",
 		wakeID, costStr, endedAt-startedAt, counter.ToolUseCount, statusStr)
 
+	if runErr != nil && matchSessionNotFound(stderrBuf.String()) {
+		return errors.Join(errSessionNotFound, runErr)
+	}
 	return handleClaudeExit(runErr, c.ProcessState)
 }
 

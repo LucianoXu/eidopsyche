@@ -174,6 +174,24 @@ func TestBuildClaudeArgs_SessionNew(t *testing.T) {
 	}
 }
 
+func TestMatchSessionNotFound(t *testing.T) {
+	cases := []struct {
+		stderr string
+		want   bool
+	}{
+		{"Error: session not found\n", true},
+		{"Could not find session abc-123\n", true},
+		{"no such session\n", true},
+		{"some other error\n", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := matchSessionNotFound(c.stderr); got != c.want {
+			t.Errorf("matchSessionNotFound(%q) = %v, want %v", c.stderr, got, c.want)
+		}
+	}
+}
+
 func TestEncodeCWD(t *testing.T) {
 	cases := []struct {
 		in, want string
