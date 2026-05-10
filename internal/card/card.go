@@ -4,12 +4,12 @@
 // Two on-disk representations share one struct:
 //
 //   - mindgate:// URI         — short, paste-friendly, used in chat / email
-//                                / NIP-21 contexts. Round-trips Npub +
-//                                Relay + Label only.
+//     / NIP-21 contexts. Round-trips Npub +
+//     Relay + Label only.
 //   - .eidos-card.toml file   — full v1 card. Adds SchemaVersion +
-//                                PubkeyHex + CreatedAt; the URI fields
-//                                map to TOML keys via struct tags
-//                                (Relay → home_relay).
+//     PubkeyHex + CreatedAt; the URI fields
+//     map to TOML keys via struct tags
+//     (Relay → home_relay).
 //
 // Use URI / Parse for the URI form; Encode / Decode / Read / Write for
 // the TOML form. Validate enforces the v1 invariants required by the
