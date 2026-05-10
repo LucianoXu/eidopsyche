@@ -38,7 +38,8 @@ func Scaffold(dir string, params Params) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("mkdir target: %w", err)
 	}
-	return fs.WalkDir(templateFS, "template", func(srcPath string, d fs.DirEntry, err error) error {
+	tfs := templateFS()
+	return fs.WalkDir(tfs, "template", func(srcPath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -53,7 +54,7 @@ func Scaffold(dir string, params Params) error {
 		if d.IsDir() {
 			return os.MkdirAll(dst, 0o700)
 		}
-		body, err := fs.ReadFile(templateFS, srcPath)
+		body, err := fs.ReadFile(tfs, srcPath)
 		if err != nil {
 			return fmt.Errorf("read embed %s: %w", srcPath, err)
 		}
@@ -82,7 +83,8 @@ func Scaffold(dir string, params Params) error {
 func TarStream(w io.Writer, params Params) error {
 	tw := tar.NewWriter(w)
 	now := time.Now()
-	walkErr := fs.WalkDir(templateFS, "template", func(srcPath string, d fs.DirEntry, err error) error {
+	tfs := templateFS()
+	walkErr := fs.WalkDir(tfs, "template", func(srcPath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -100,7 +102,7 @@ func TarStream(w io.Writer, params Params) error {
 				ModTime:  now,
 			})
 		}
-		body, err := fs.ReadFile(templateFS, srcPath)
+		body, err := fs.ReadFile(tfs, srcPath)
 		if err != nil {
 			return err
 		}
