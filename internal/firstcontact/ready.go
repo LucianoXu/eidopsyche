@@ -59,11 +59,24 @@ func StartBackground(ctx context.Context, deps ReadyDeps) <-chan ReadyState {
 		HomeRelay:   TaskState{Status: "pending"},
 	}
 	var mu sync.Mutex
+	// emit holds the mutex through both the state mutation AND the
+	// send. This guarantees channel-order = lock-order, which in turn
+	// guarantees the LAST snap on the channel is captured by the LAST
+	// worker to acquire the lock — and by then, all workers have
+	// already mutated their fields, so that final snap is always the
+	// all-ready / all-final ReadyState. Without this, lock-order and
+	// send-order could desync (a goroutine that locked first might be
+	// preempted before its send), so a stale intermediate snap could
+	// be the last one received — making the AllReady() check flake.
+	//
+	// Safe because the channel is buffered to 8 and we only ever do 4
+	// sends (one initial + one per task), so the in-lock send never
+	// blocks unless ctx is cancelled.
 	emit := func(mut func(*ReadyState)) {
 		mu.Lock()
+		defer mu.Unlock()
 		mut(&state)
 		snap := state
-		mu.Unlock()
 		select {
 		case ch <- snap:
 		case <-ctx.Done():
