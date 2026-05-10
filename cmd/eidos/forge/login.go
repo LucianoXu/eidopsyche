@@ -170,7 +170,7 @@ func installCredentialsFromFile(name, image, path string) error {
 		return err
 	}
 	if err := clearAuthRequiredInVolume(name, image); err != nil {
-		fmt.Fprintf(os.Stderr, "(warning: could not clear auth_required marker: %v)\n", err)
+		return fmt.Errorf("login: clear auth_required marker: %w", err)
 	}
 	fmt.Printf("✓ credentials installed into eidos-mindform-%s from %s\n", name, path)
 	return nil
