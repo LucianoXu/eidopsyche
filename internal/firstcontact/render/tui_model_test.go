@@ -263,6 +263,41 @@ func TestModel_WrapLongShowBody(t *testing.T) {
 	}
 }
 
+// TestModel_WrapHandlesCJKDisplayWidth pins the second wrap fix:
+// CJK characters take 2 terminal cells but rune-based wrap counts
+// them as 1, so the visible line was twice the wrap width. Reproduces
+// the tmux smoke output where Chinese narrative ran past the right
+// edge despite m.width=80. After the fix, no wrapped line should
+// exceed m.width by display-width measure.
+func TestModel_WrapHandlesCJKDisplayWidth(t *testing.T) {
+	asks := make(chan askMsg, 1)
+	replies := make(chan replyMsg, 1)
+	m := newModel(modelDeps{asks: asks, replies: replies})
+	m.width = 60
+
+	cjk := strings.Repeat("他先于脚步声出现——圆框眼镜折回审讯室的白炽灯光，", 3)
+	_, _ = m.Update(askMsg{kind: kindShow, body: cjk})
+
+	if len(m.transcript) != 1 {
+		t.Fatalf("transcript = %v entries", len(m.transcript))
+	}
+	got := m.transcript[0]
+	for _, line := range strings.Split(got, "\n") {
+		visible := stripANSI(line)
+		w := displayWidth(visible)
+		if w > m.width {
+			t.Errorf("CJK line exceeds display width %d: %q (w=%d)", m.width, visible, w)
+		}
+	}
+}
+
+// displayWidth uses the same EastAsianWidth=true Condition the wrap
+// itself uses, so the assertion sees the wrap's view of cell counts
+// (em-dash `—` and other ambiguous-width glyphs as 2 cells).
+func displayWidth(s string) int {
+	return wrapCondition.StringWidth(s)
+}
+
 // TestModel_LogoIsSingleLine pins the design change: the logo is now
 // a one-line stylized title rather than the multi-line letter circle.
 func TestModel_LogoIsSingleLine(t *testing.T) {

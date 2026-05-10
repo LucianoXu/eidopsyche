@@ -11,7 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/reflow/wordwrap"
+	"github.com/mattn/go-runewidth"
 )
 
 // modelDeps groups the bridge channels the Model talks to. Exposed so
@@ -360,16 +360,85 @@ func (m *model) renderLogo() string {
 	return rule + "  " + body + "  " + rule
 }
 
-// wrap word-wraps text to roughly the current terminal width, leaving
-// a small margin for the leading spaces View() prepends. When the
-// terminal width hasn't been received yet (m.width == 0), defaults to
-// 80 columns so output stays readable in pty harnesses.
+// wrap wraps text to roughly the current terminal width, leaving a
+// small margin for the leading spaces View() prepends. CJK-aware:
+// uses display width (each Han / Kana / Hangul rune counts as 2
+// cells) rather than rune count, so a paragraph of Chinese narrative
+// no longer overruns the right edge by 2x.
+//
+// When the terminal width hasn't been received yet (m.width == 0),
+// defaults to 80 columns so output stays readable in pty harnesses.
 func (m *model) wrap(text string) string {
 	width := m.width - 2
 	if width < 40 {
 		width = 80
 	}
-	return wordwrap.String(text, width)
+	return wrapDisplayWidth(text, width)
+}
+
+// wrapCondition treats East Asian ambiguous-width characters (em-dash
+// `—`, fullwidth punctuation, certain symbols) as 2 cells. Real
+// terminals running in CJK locales render those glyphs at 2 cells, so
+// using the narrower width would underestimate line length and let
+// CJK narrative overrun the right edge — which is exactly the bug
+// reported from a tmux smoke. The default runewidth.Condition's
+// EastAsianWidth flag depends on LANG / LC_ALL at startup; we pin it
+// to true so the wrap is correct regardless of the user's locale.
+var wrapCondition = &runewidth.Condition{EastAsianWidth: true}
+
+// wrapDisplayWidth wraps each paragraph to fit within `width` display
+// columns. Prefers breaking at spaces (word boundaries for Latin
+// text); falls back to a hard char-break when a single token's
+// display width would overrun (covers CJK paragraphs that have no
+// internal spaces and any English word longer than the line).
+func wrapDisplayWidth(text string, width int) string {
+	if width < 1 {
+		width = 80
+	}
+	var out strings.Builder
+	paragraphs := strings.Split(text, "\n")
+	for pi, p := range paragraphs {
+		if pi > 0 {
+			out.WriteByte('\n')
+		}
+		runes := []rune(p)
+		lineStart := 0
+		col := 0
+		for i := 0; i < len(runes); i++ {
+			r := runes[i]
+			rw := wrapCondition.RuneWidth(r)
+			if col+rw <= width {
+				col += rw
+				continue
+			}
+			// Need to break before runes[i]. Try to back up to the
+			// nearest preceding space within the current line.
+			breakAt := -1
+			for j := i - 1; j > lineStart; j-- {
+				if runes[j] == ' ' {
+					breakAt = j
+					break
+				}
+			}
+			if breakAt > lineStart {
+				out.WriteString(string(runes[lineStart:breakAt]))
+				out.WriteByte('\n')
+				lineStart = breakAt + 1 // skip the space
+			} else {
+				// No space to break at — hard char-break.
+				out.WriteString(string(runes[lineStart:i]))
+				out.WriteByte('\n')
+				lineStart = i
+			}
+			// Recompute the new line's running width.
+			col = 0
+			for j := lineStart; j <= i; j++ {
+				col += wrapCondition.RuneWidth(runes[j])
+			}
+		}
+		out.WriteString(string(runes[lineStart:]))
+	}
+	return out.String()
 }
 
 func renderMarkdown(body string, width int) (string, error) {
