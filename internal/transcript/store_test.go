@@ -270,3 +270,66 @@ func TestStore_RecoverHandlesLargeLine(t *testing.T) {
 func intID(i int) string {
 	return string(rune('a' + i))
 }
+
+func TestEntry_SessionIDRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Entry{
+		ID:        "abc12345",
+		SessionID: "7d2f6f2e-1b2a-4c3d-9e8f-aabbccddeeff",
+		Reason:    "heartbeat",
+		StartedAt: 1700000000,
+		EndedAt:   1700000010,
+		OK:        true,
+		ExitCode:  0,
+	}
+	if err := s.WriteIndex(Index{V: 1, Wakes: []Entry{want}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ReadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Wakes) != 1 || got.Wakes[0].SessionID != want.SessionID {
+		t.Fatalf("SessionID round-trip: got %+v", got.Wakes)
+	}
+}
+
+func TestEntry_LegacyIndexWithoutSessionID(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`{
+  "v": 1,
+  "wakes": [
+    {
+      "id": "abc12345",
+      "reason": "heartbeat",
+      "started_at": 1700000000,
+      "ended_at": 1700000010,
+      "ok": true,
+      "exit_code": 0,
+      "cost_usd": null,
+      "tool_use_count": 0,
+      "thinking_blocks": 0,
+      "size_bytes": 0
+    }
+  ]
+}
+`)
+	if err := os.WriteFile(filepath.Join(dir, IndexFile), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx, err := s.ReadIndex()
+	if err != nil {
+		t.Fatalf("legacy ReadIndex: %v", err)
+	}
+	if len(idx.Wakes) != 1 || idx.Wakes[0].SessionID != "" {
+		t.Fatalf("legacy entry should have empty SessionID, got %+v", idx.Wakes)
+	}
+}
