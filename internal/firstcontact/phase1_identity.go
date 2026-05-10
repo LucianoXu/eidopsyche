@@ -112,8 +112,18 @@ func phase1Import(s *Summoning, r render.Renderer, d Phase1Deps) error {
 	if err := os.MkdirAll(d.StateDir, 0o700); err != nil {
 		return err
 	}
-	if err := os.WriteFile(keyPath, []byte(hexKey+"\n"), 0o600); err != nil {
-		return fmt.Errorf("write key file: %w", err)
+	// Construct a Keypair from the imported hex and SaveKey it through
+	// the keystore helper so platform key protection (chmod 0600 on
+	// Unix, DACL rewrite on Windows) is applied. A raw os.WriteFile
+	// would silently leave the file with a default/inherited DACL on
+	// Windows; identity.LoadKey's ACL check would then reject the
+	// imported key and BootstrapWithExistingKey would fail.
+	kp, err := identity.FromHex(hexKey)
+	if err != nil {
+		return fmt.Errorf("derive keypair from imported hex: %w", err)
+	}
+	if err := identity.SaveKey(keyPath, kp); err != nil {
+		return fmt.Errorf("save imported key: %w", err)
 	}
 	npub, err := identity.BootstrapWithExistingKey(d.StateDir, label, homeRelay)
 	if err != nil {
