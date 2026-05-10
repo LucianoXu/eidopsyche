@@ -3,6 +3,8 @@ package nostr
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	gnostr "github.com/nbd-wtf/go-nostr"
@@ -80,6 +82,163 @@ func TestConnect_DeadCachedEvictsAndRedials(t *testing.T) {
 	}
 	if calls < 1 {
 		t.Errorf("alive check never invoked on second Connect")
+	}
+}
+
+// TestConnect_ConcurrentDialDiscardsLoser: N concurrent Connect calls for the
+// same URL all enter the dialer (since each finds the cache empty under lock,
+// releases, and dials in parallel). Only one of the dialed relays ends up in
+// the pool; all callers must observe the same winner, and every loser must
+// be closed exactly once so the underlying websocket isn't leaked.
+//
+// Regression test for the "last-writer-wins on p.relays[url]" leak flagged
+// by codex review on 2026-05-10.
+func TestConnect_ConcurrentDialDiscardsLoser(t *testing.T) {
+	p := NewPool()
+	const N = 8
+
+	var dialed int32
+	started := make(chan struct{}, N)
+	release := make(chan struct{})
+
+	p.dialer = func(ctx context.Context, url string) (*gnostr.Relay, error) {
+		atomic.AddInt32(&dialed, 1)
+		started <- struct{}{}
+		<-release
+		return &gnostr.Relay{URL: url}, nil
+	}
+	p.alive = func(r *gnostr.Relay) bool { return true }
+
+	var closedMu sync.Mutex
+	closedRelays := make(map[*gnostr.Relay]int)
+	p.closer = func(r *gnostr.Relay) error {
+		closedMu.Lock()
+		closedRelays[r]++
+		closedMu.Unlock()
+		return nil
+	}
+
+	results := make([]*gnostr.Relay, N)
+	var wg sync.WaitGroup
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			r, err := p.Connect(context.Background(), "ws://race")
+			if err != nil {
+				t.Errorf("connect %d: %v", i, err)
+				return
+			}
+			results[i] = r
+		}()
+	}
+
+	// Wait for all N goroutines to enter the dialer, then release them
+	// together so they all race on the post-dial store.
+	for i := 0; i < N; i++ {
+		<-started
+	}
+	close(release)
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&dialed); got != N {
+		t.Fatalf("expected %d concurrent dials, got %d (test barrier failed)", N, got)
+	}
+
+	winner := results[0]
+	if winner == nil {
+		t.Fatal("winner is nil")
+	}
+	for i, r := range results {
+		if r != winner {
+			t.Errorf("caller %d got %p, want winner %p", i, r, winner)
+		}
+	}
+
+	p.mu.Lock()
+	n := len(p.relays)
+	stored := p.relays["ws://race"]
+	p.mu.Unlock()
+	if n != 1 {
+		t.Errorf("pool has %d entries after race, want 1", n)
+	}
+	if stored != winner {
+		t.Errorf("stored relay %p does not match winner %p", stored, winner)
+	}
+
+	closedMu.Lock()
+	defer closedMu.Unlock()
+	if got := len(closedRelays); got != N-1 {
+		t.Errorf("closer called on %d distinct relays, want %d (one per loser)", got, N-1)
+	}
+	for r, count := range closedRelays {
+		if r == winner {
+			t.Errorf("winner %p was closed; closer must not be called on it", r)
+		}
+		if count != 1 {
+			t.Errorf("loser %p closed %d times, want 1", r, count)
+		}
+	}
+}
+
+// TestConnect_RacingWinnerDiedReplacesWithFresh: covers the corner the
+// concurrent-dial race fix could otherwise miss — between the moment a racing
+// winner stored its relay and the moment the loser re-acquired the lock to
+// re-check, the winner's connection died. The loser must NOT return the dead
+// cached relay (and close its own healthy one); it must replace the dead
+// entry with its fresh dial, matching the stale-cache eviction at the top
+// of Connect.
+//
+// Setup uses a dialer side-effect to populate the cache mid-call, which
+// exercises the post-dial re-check branch deterministically without a real
+// goroutine race.
+func TestConnect_RacingWinnerDiedReplacesWithFresh(t *testing.T) {
+	p := NewPool()
+	deadWinner := &gnostr.Relay{URL: "ws://race"}
+
+	var freshDialed []*gnostr.Relay
+	p.dialer = func(ctx context.Context, url string) (*gnostr.Relay, error) {
+		// Simulate the racing winner having stored its relay during our dial.
+		p.mu.Lock()
+		p.relays[url] = deadWinner
+		p.mu.Unlock()
+		fresh := &gnostr.Relay{URL: url}
+		freshDialed = append(freshDialed, fresh)
+		return fresh, nil
+	}
+	// The racing winner is dead; everything else is alive.
+	p.alive = func(r *gnostr.Relay) bool { return r != deadWinner }
+
+	var closedMu sync.Mutex
+	var closed []*gnostr.Relay
+	p.closer = func(r *gnostr.Relay) error {
+		closedMu.Lock()
+		closed = append(closed, r)
+		closedMu.Unlock()
+		return nil
+	}
+
+	got, err := p.Connect(context.Background(), "ws://race")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(freshDialed) != 1 {
+		t.Fatalf("dialer called %d times, want 1", len(freshDialed))
+	}
+	if got != freshDialed[0] {
+		t.Errorf("got %p, want fresh %p (not dead winner %p)", got, freshDialed[0], deadWinner)
+	}
+	p.mu.Lock()
+	stored := p.relays["ws://race"]
+	p.mu.Unlock()
+	if stored != freshDialed[0] {
+		t.Errorf("pool stores %p, want fresh %p", stored, freshDialed[0])
+	}
+	closedMu.Lock()
+	defer closedMu.Unlock()
+	if len(closed) != 1 || closed[0] != deadWinner {
+		t.Errorf("closer history = %v, want exactly [deadWinner %p]", closed, deadWinner)
 	}
 }
 

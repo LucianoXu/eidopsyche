@@ -33,6 +33,7 @@ type Pool struct {
 	relays      map[string]*gnostr.Relay
 	dialer      func(ctx context.Context, url string) (*gnostr.Relay, error)
 	alive       func(*gnostr.Relay) bool
+	closer      func(*gnostr.Relay) error // test seam; defaults to (*gnostr.Relay).Close
 	timeout     time.Duration
 	signer      Signer                           // optional; when set, Subscribe handles NIP-42 AUTH transparently
 	stateHookMu sync.RWMutex                     // protects stateHook against concurrent SetStateHook calls
@@ -48,6 +49,7 @@ func NewPool() *Pool {
 		relays:  make(map[string]*gnostr.Relay),
 		dialer:  defaultDial,
 		alive:   defaultAlive,
+		closer:  func(r *gnostr.Relay) error { return r.Close() },
 		timeout: 5 * time.Second,
 	}
 }
@@ -108,7 +110,7 @@ func defaultAlive(r *gnostr.Relay) bool { return r != nil && r.IsConnected() }
 
 // Connect returns an existing relay connection or dials a new one. Connections
 // are cached by URL; concurrent callers for the same URL may each dial once
-// but the winner's connection is stored.
+// but only one winner is stored — losers are closed before return.
 //
 // A cached entry whose underlying websocket has gone away (e.g., the peer
 // relay restarted) is evicted and re-dialed — without this, every consumer
@@ -122,7 +124,7 @@ func (p *Pool) Connect(ctx context.Context, url string) (*gnostr.Relay, error) {
 		}
 		delete(p.relays, url)
 		p.mu.Unlock()
-		_ = r.Close()
+		_ = p.closer(r)
 	} else {
 		p.mu.Unlock()
 	}
@@ -136,6 +138,25 @@ func (p *Pool) Connect(ctx context.Context, url string) (*gnostr.Relay, error) {
 	}
 
 	p.mu.Lock()
+	if existing, ok := p.relays[url]; ok {
+		if p.alive(existing) {
+			// Another concurrent caller won the race and already stored a
+			// live relay for this URL while we were dialing. Drop our
+			// redundant connection and return the canonical entry.
+			p.mu.Unlock()
+			_ = p.closer(r)
+			return existing, nil
+		}
+		// The racing winner's connection died between store and re-check.
+		// Returning it would hand the caller a dead relay and force the
+		// next Connect to re-dial anyway; instead replace it with our
+		// fresh dial here, mirroring the stale-cache eviction at the top
+		// of Connect.
+		p.relays[url] = r
+		p.mu.Unlock()
+		_ = p.closer(existing)
+		return r, nil
+	}
 	p.relays[url] = r
 	p.mu.Unlock()
 
@@ -147,7 +168,7 @@ func (p *Pool) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, r := range p.relays {
-		_ = r.Close()
+		_ = p.closer(r)
 	}
 	p.relays = make(map[string]*gnostr.Relay)
 }
