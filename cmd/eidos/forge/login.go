@@ -178,10 +178,14 @@ func installCredentialsFromFile(name, image, path string) error {
 
 // clearAuthRequiredInVolume removes /eidos/run/auth_required.json
 // inside the mind-form's volume after a successful login. Uses a
-// one-shot helper container (works regardless of whether the
-// long-running container is up) and tolerates absence (rm -f).
+// one-shot helper container running as uid 0 (the marker may have
+// been written by either the in-container eidos uid 1000 supervisor
+// or an init-time root process; only root can rm both). The container
+// is short-lived so the elevated uid is bounded. Tolerates absence
+// via rm -f.
 func clearAuthRequiredInVolume(name, image string) error {
 	c := exec.Command("docker", "run", "--rm",
+		"--user", "0:0",
 		"--mount", "source="+forgectl.VolumeName(name)+",target=/eidos",
 		"--entrypoint", "sh",
 		image,
