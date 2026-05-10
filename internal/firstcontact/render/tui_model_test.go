@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-runewidth"
 )
 
 // TestModel_HandleAsk_Show drains a kindShow ask through Update and
@@ -296,6 +297,49 @@ func TestModel_WrapHandlesCJKDisplayWidth(t *testing.T) {
 // (em-dash `—` and other ambiguous-width glyphs as 2 cells).
 func displayWidth(s string) int {
 	return wrapCondition.StringWidth(s)
+}
+
+// TestModel_GlobalRuneWidthIsEastAsian pins the init() that flips the
+// runewidth GLOBAL DefaultCondition. Without this, glamour (via
+// muesli/reflow/wordwrap → runewidth.StringWidth) underestimates CJK
+// line widths and the agent's markdown response overflows the right
+// edge — reproduced from the user's tmux smoke output.
+func TestModel_GlobalRuneWidthIsEastAsian(t *testing.T) {
+	if !runewidth.DefaultCondition.EastAsianWidth {
+		t.Errorf("runewidth.DefaultCondition.EastAsianWidth = false; init() should have set it true")
+	}
+	if w := runewidth.StringWidth("—"); w != 2 {
+		t.Errorf("StringWidth(em-dash) = %d, want 2", w)
+	}
+}
+
+// TestModel_MarkdownTypewriterWrapsCJK pins the response-render path
+// also respects display width. Per-line check on the transcript:
+// after glamour renders, no line should exceed m.width.
+func TestModel_MarkdownTypewriterWrapsCJK(t *testing.T) {
+	asks := make(chan askMsg, 1)
+	replies := make(chan replyMsg, 1)
+	m := newModel(modelDeps{asks: asks, replies: replies})
+	m.width = 60
+
+	cjk := "> 致 Yingte——\n\n" +
+		strings.Repeat("我听见了。久美子，号嘴贴上唇前那一秒的静默。", 3)
+	_, _ = m.Update(askMsg{
+		kind: kindTypewriter,
+		body: cjk,
+		opts: PromptOpts{HelpText: "markdown"},
+	})
+
+	if len(m.transcript) != 1 {
+		t.Fatalf("transcript = %v entries", len(m.transcript))
+	}
+	for _, line := range strings.Split(m.transcript[0], "\n") {
+		visible := stripANSI(line)
+		w := displayWidth(visible)
+		if w > m.width {
+			t.Errorf("markdown line exceeds display width %d: %q (w=%d)", m.width, visible, w)
+		}
+	}
 }
 
 // TestModel_LogoIsSingleLine pins the design change: the logo is now
