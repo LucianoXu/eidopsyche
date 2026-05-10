@@ -78,77 +78,82 @@ func Run(ctx context.Context) error {
 }
 
 // run is the shared body, parameterised by entry mode.
+//
+// Note on dependency resolution: claude on PATH and the docker client
+// are summon-only prerequisites. They are NOT validated up front,
+// because the new decoupled wizard supports a mindgate-only flow
+// (Phase 1 = create / import, Phase 2 = exit) on hosts that may not
+// have claude or docker installed yet. We pass an EnsureSummonReady
+// callback into the wizard; firstcontact.Run invokes it only after
+// Phase 2 returns a summon action, populating Claude / DockerClient /
+// the volume helpers in place.
 func run(ctx context.Context, entry firstcontact.EntryMode) error {
-	if _, err := exec.LookPath("claude"); err != nil {
-		return errors.New("the `claude` command is not on PATH; install Claude Code (https://docs.anthropic.com/claude/claude-code) and run `claude /login`")
-	}
-
 	stateDir, err := config.ResolveStateDir("")
 	if err != nil {
 		return err
 	}
 
-	dock, err := forgectl.New()
-	if err != nil {
-		return fmt.Errorf("docker client: %w", err)
-	}
-
 	rend := render.NewAuto(os.Stdin, os.Stdout, firstcontact.TypewriterCPS)
-	cl := &firstcontact.Claude{Run: firstcontact.ProductionRunner}
-	image := forge.DefaultImage
 
 	deps := firstcontact.Deps{
 		StateDir:        stateDir,
 		Renderer:        rend,
-		Claude:          cl,
-		DockerClient:    dock,
-		Image:           image,
 		EntryMode:       entry,
 		MasterCardPath:  flagMasterCard,
 		OperatorKeyPath: flagKeyFile,
-		WriteVolume: func(ctx context.Context, slug, relPath string, body []byte) error {
-			return forgectl.WriteToVolume(ctx, dock, image, slug, relPath, body)
-		},
-		StartContainer: func(ctx context.Context, slug string) error {
-			return dock.ContainerStart(ctx, forgectl.ContainerName(slug))
-		},
-		ResponseWait: (&volumeTailer{client: dock, image: image}).Wait,
-		AddContact:   addContactDirect(stateDir),
-		ExistingSlugs: func() ([]string, error) {
-			vols, err := dock.VolumeList(ctx, forgectl.VolumePrefix)
+		AddContact:      addContactDirect(stateDir),
+		EnsureSummonReady: func(d *firstcontact.Deps) error {
+			if _, err := exec.LookPath("claude"); err != nil {
+				return errors.New("the `claude` command is not on PATH; install Claude Code (https://docs.anthropic.com/claude/claude-code) and run `claude /login`")
+			}
+			dock, err := forgectl.New()
 			if err != nil {
-				return nil, err
+				return fmt.Errorf("docker client: %w", err)
 			}
-			out := make([]string, 0, len(vols))
-			for _, v := range vols {
-				out = append(out, strings.TrimPrefix(v, forgectl.VolumePrefix))
+			image := forge.DefaultImage
+			d.Claude = &firstcontact.Claude{Run: firstcontact.ProductionRunner}
+			d.DockerClient = dock
+			d.Image = image
+			d.WriteVolume = func(ctx context.Context, slug, relPath string, body []byte) error {
+				return forgectl.WriteToVolume(ctx, dock, image, slug, relPath, body)
 			}
-			return out, nil
-		},
-		ReadyDeps: firstcontact.ReadyDeps{
-			PullImage: func(ctx context.Context) error {
-				if exists, _ := dock.ImageExists(ctx, image); exists {
-					return nil
-				}
-				return dock.ImagePull(ctx, image, os.Stderr)
-			},
-			GenerateKey: func() (string, string, error) {
-				k, err := identity.Generate()
+			d.StartContainer = func(ctx context.Context, slug string) error {
+				return dock.ContainerStart(ctx, forgectl.ContainerName(slug))
+			}
+			d.ResponseWait = (&volumeTailer{client: dock, image: image}).Wait
+			d.ExistingSlugs = func() ([]string, error) {
+				vols, err := dock.VolumeList(ctx, forgectl.VolumePrefix)
 				if err != nil {
-					return "", "", err
+					return nil, err
 				}
-				return k.Npub, k.PrivateHex, nil
-			},
-			ProbeRelay: func(ctx context.Context, _ string) error {
-				// Accept any reachable ws/wss URL by treating relay
-				// reachability as advisory (the real probe is wired
-				// post-merge once we have an internal/relay/probe
-				// helper). For now: rely on user-supplied URL being
-				// well-formed; the gate daemon will surface dial
-				// failures at first publish.
-				return nil
-			},
-			HomeRelayURL: firstcontact.PublicHomeRelay,
+				out := make([]string, 0, len(vols))
+				for _, v := range vols {
+					out = append(out, strings.TrimPrefix(v, forgectl.VolumePrefix))
+				}
+				return out, nil
+			}
+			d.ReadyDeps = firstcontact.ReadyDeps{
+				PullImage: func(ctx context.Context) error {
+					if exists, _ := dock.ImageExists(ctx, image); exists {
+						return nil
+					}
+					return dock.ImagePull(ctx, image, os.Stderr)
+				},
+				GenerateKey: func() (string, string, error) {
+					k, err := identity.Generate()
+					if err != nil {
+						return "", "", err
+					}
+					return k.Npub, k.PrivateHex, nil
+				},
+				ProbeRelay: func(ctx context.Context, _ string) error {
+					// Relay reachability is advisory in v1; the gate
+					// daemon will surface dial failures at first publish.
+					return nil
+				},
+				HomeRelayURL: firstcontact.PublicHomeRelay,
+			}
+			return nil
 		},
 	}
 	if tui, ok := rend.(render.TUIRenderer); ok {

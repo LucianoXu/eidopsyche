@@ -55,6 +55,21 @@ type Deps struct {
 	// import branch from a file rather than interactive paste. The file
 	// must contain either an `nsec1...` NIP-19 string or a 64-char hex.
 	OperatorKeyPath string
+
+	// EnsureSummonReady is called after Phase 2 returns a summon action
+	// (Local or Card) and before Phase 3 starts. The cmd-side uses it
+	// to defer summon-only prerequisites — claude on PATH, docker
+	// daemon, volume writers — until the user has actually committed
+	// to summoning. This is what makes the mindgate-only flow (Phase
+	// 2 = Exit) reachable on hosts that don't have claude / docker
+	// installed.
+	//
+	// The callback receives a pointer to the Deps so it can populate
+	// Claude / DockerClient / WriteVolume / StartContainer /
+	// ResponseWait / AddContact / ExistingSlugs / Image / ReadyDeps
+	// in place. nil callback = the caller has already populated those
+	// fields (test path).
+	EnsureSummonReady func(*Deps) error
 }
 
 // Run drives the wizard end-to-end through the four-phase tree:
@@ -105,6 +120,13 @@ func Run(ctx context.Context, d Deps) (*Summoning, []byte, error) {
 	}
 	if action == Phase2Exit {
 		return s, nil, nil
+	}
+
+	// User committed to summoning. NOW resolve claude / docker / etc.
+	if d.EnsureSummonReady != nil {
+		if err := d.EnsureSummonReady(&d); err != nil {
+			return s, nil, fmt.Errorf("summon prerequisites: %w", err)
+		}
 	}
 
 	ready := StartBackground(ctx, d.ReadyDeps)
