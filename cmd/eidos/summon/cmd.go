@@ -62,7 +62,7 @@ func Run(ctx context.Context) error {
 		return fmt.Errorf("docker client: %w", err)
 	}
 
-	rend := render.NewCLI(os.Stdin, os.Stdout, firstcontact.TypewriterCPS)
+	rend := render.NewAuto(os.Stdin, os.Stdout, firstcontact.TypewriterCPS)
 	cl := &firstcontact.Claude{Run: firstcontact.ProductionRunner}
 	image := forge.DefaultImage
 
