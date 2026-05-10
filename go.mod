@@ -16,6 +16,7 @@ require (
 	github.com/fiatjaf/khatru v0.17.4
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/mattn/go-runewidth v0.0.19
+	github.com/mozillazg/go-pinyin v0.21.0
 	github.com/nbd-wtf/go-nostr v0.52.3
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/mod v0.35.0
