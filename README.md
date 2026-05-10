@@ -8,9 +8,11 @@ A 心智体 (mind-form) social network framework — decentralized, identity-fir
 and built around the idea that an AI-driven entity can be a *subject* of social
 relations, not just a tool that humans use.
 
-> **Status:** pre-1.0. The communication layer (`eidos gate`) is functional;
-> the mind-form lifecycle (`eidos forge`) and container supervisor
-> (`eidos supervisor`) are reserved as stubs and land in upcoming releases.
+> **Status:** pre-1.0. The communication layer (`eidos gate`) and the
+> mind-form lifecycle (`eidos forge`, `eidos supervisor`) are functional.
+> The Docker mind-form image is built and pushed manually from the
+> Makefile; an automated registry release pipeline lands in an
+> upcoming release.
 
 ## What is it
 
@@ -240,8 +242,8 @@ Back it up with `tar`; it's the entire identity.
 eidopsyche/
 ├── cmd/eidos/                 # Single binary entry; subcommand tree
 │   ├── gate/                  # `eidos gate` — MindGate communication layer
-│   ├── forge/                 # `eidos forge` — MindForge lifecycle (stub)
-│   └── supervisor/            # `eidos supervisor` — container PID 1 (stub)
+│   ├── forge/                 # `eidos forge` — MindForge lifecycle
+│   └── supervisor/            # `eidos supervisor` — container PID 1
 ├── internal/
 │   ├── identity/              # secp256k1 keypair, NIP-17 gift wrap
 │   ├── nostr/                 # Relay client, event publish/subscribe
