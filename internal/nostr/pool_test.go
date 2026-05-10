@@ -182,6 +182,66 @@ func TestConnect_ConcurrentDialDiscardsLoser(t *testing.T) {
 	}
 }
 
+// TestConnect_RacingWinnerDiedReplacesWithFresh: covers the corner the
+// concurrent-dial race fix could otherwise miss — between the moment a racing
+// winner stored its relay and the moment the loser re-acquired the lock to
+// re-check, the winner's connection died. The loser must NOT return the dead
+// cached relay (and close its own healthy one); it must replace the dead
+// entry with its fresh dial, matching the stale-cache eviction at the top
+// of Connect.
+//
+// Setup uses a dialer side-effect to populate the cache mid-call, which
+// exercises the post-dial re-check branch deterministically without a real
+// goroutine race.
+func TestConnect_RacingWinnerDiedReplacesWithFresh(t *testing.T) {
+	p := NewPool()
+	deadWinner := &gnostr.Relay{URL: "ws://race"}
+
+	var freshDialed []*gnostr.Relay
+	p.dialer = func(ctx context.Context, url string) (*gnostr.Relay, error) {
+		// Simulate the racing winner having stored its relay during our dial.
+		p.mu.Lock()
+		p.relays[url] = deadWinner
+		p.mu.Unlock()
+		fresh := &gnostr.Relay{URL: url}
+		freshDialed = append(freshDialed, fresh)
+		return fresh, nil
+	}
+	// The racing winner is dead; everything else is alive.
+	p.alive = func(r *gnostr.Relay) bool { return r != deadWinner }
+
+	var closedMu sync.Mutex
+	var closed []*gnostr.Relay
+	p.closer = func(r *gnostr.Relay) error {
+		closedMu.Lock()
+		closed = append(closed, r)
+		closedMu.Unlock()
+		return nil
+	}
+
+	got, err := p.Connect(context.Background(), "ws://race")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(freshDialed) != 1 {
+		t.Fatalf("dialer called %d times, want 1", len(freshDialed))
+	}
+	if got != freshDialed[0] {
+		t.Errorf("got %p, want fresh %p (not dead winner %p)", got, freshDialed[0], deadWinner)
+	}
+	p.mu.Lock()
+	stored := p.relays["ws://race"]
+	p.mu.Unlock()
+	if stored != freshDialed[0] {
+		t.Errorf("pool stores %p, want fresh %p", stored, freshDialed[0])
+	}
+	closedMu.Lock()
+	defer closedMu.Unlock()
+	if len(closed) != 1 || closed[0] != deadWinner {
+		t.Errorf("closer history = %v, want exactly [deadWinner %p]", closed, deadWinner)
+	}
+}
+
 // TestConnect_DialerErrorPropagates: when the dialer fails on a fresh URL
 // the error is returned and the cache stays empty so retries reach the
 // dialer again.

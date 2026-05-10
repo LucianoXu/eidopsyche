@@ -139,12 +139,23 @@ func (p *Pool) Connect(ctx context.Context, url string) (*gnostr.Relay, error) {
 
 	p.mu.Lock()
 	if existing, ok := p.relays[url]; ok {
-		// Another concurrent caller won the race and already stored a relay
-		// for this URL while we were dialing. Drop our redundant connection
-		// so the websocket isn't leaked and return the canonical entry.
+		if p.alive(existing) {
+			// Another concurrent caller won the race and already stored a
+			// live relay for this URL while we were dialing. Drop our
+			// redundant connection and return the canonical entry.
+			p.mu.Unlock()
+			_ = p.closer(r)
+			return existing, nil
+		}
+		// The racing winner's connection died between store and re-check.
+		// Returning it would hand the caller a dead relay and force the
+		// next Connect to re-dial anyway; instead replace it with our
+		// fresh dial here, mirroring the stale-cache eviction at the top
+		// of Connect.
+		p.relays[url] = r
 		p.mu.Unlock()
-		_ = p.closer(r)
-		return existing, nil
+		_ = p.closer(existing)
+		return r, nil
 	}
 	p.relays[url] = r
 	p.mu.Unlock()
