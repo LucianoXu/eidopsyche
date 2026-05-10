@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -70,11 +71,39 @@ func (f *fakeManager) Status(_ context.Context) ([]service.Status, error) {
 // returned for both user and system scope — single-scope tests don't
 // care which slot it is plumbed into; dual-scope tests use
 // withFakeManagersByScope below to differentiate.
+//
+// Also installs a no-op IPC fast path so the test does not accidentally
+// dial the developer's real daemon socket at $HOME/.eidos/gate/sock and
+// syscall.Exec the live daemon. Tests that want to exercise the IPC fast
+// path should override tryIPCExecReplaceFn after this helper returns.
 func withFakeManager(t *testing.T, m service.Manager, err error) {
 	t.Helper()
 	saved := serviceManagerFactory
 	t.Cleanup(func() { serviceManagerFactory = saved })
 	serviceManagerFactory = func(_ bool) (service.Manager, error) { return m, err }
+	stubIPCExecReplace(t, false, nil)
+}
+
+// stubIPCExecReplace overrides the runRestart IPC fast path. Pass ok=true
+// to simulate "running daemon accepted exec-replace" (writing the same
+// success line the production path emits); ok=false + simulatedErr=nil to
+// simulate "no daemon running" so the test falls through to the
+// managed-service path; or any non-nil simulatedErr to drive the
+// surface-failure branch.
+func stubIPCExecReplace(t *testing.T, ok bool, simulatedErr error) {
+	t.Helper()
+	saved := tryIPCExecReplaceFn
+	t.Cleanup(func() { tryIPCExecReplaceFn = saved })
+	tryIPCExecReplaceFn = func(w io.Writer) (bool, error) {
+		if ok {
+			_, _ = w.Write([]byte("✓ gate daemon re-exec'd in place (pid=42, binary=/test/eidos)\n"))
+			return true, nil
+		}
+		if simulatedErr == nil {
+			return false, errNoDaemonRunning
+		}
+		return false, simulatedErr
+	}
 }
 
 // withFakeManagersByScope installs distinct fakes per scope so a test
@@ -97,6 +126,7 @@ func withFakeManagersByScope(t *testing.T, user, system service.Manager) {
 		}
 		return user, nil
 	}
+	stubIPCExecReplace(t, false, nil)
 }
 
 func TestRestart_NotInstalled_IfRunning_NoOp(t *testing.T) {
@@ -243,6 +273,127 @@ func TestRestart_IfRunning_ExplicitSystemFlagNarrowsToSystemOnly(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "nothing to do") {
 		t.Errorf("expected no-op hint when system scope is empty; got: %q", buf.String())
+	}
+}
+
+// TestRestart_IfRunning_IPCFastPath_Succeeds covers the unmanaged-daemon
+// case the dashboard self-update flow lands in: no service installed,
+// but a daemon is responding on the IPC socket. runRestart short-circuits
+// to exec-replace and never even inspects the service manager. Without
+// this fast path, install.sh's `gate restart --if-running` was a silent
+// no-op for users who started the daemon directly with `eidos gate
+// daemon &`.
+func TestRestart_IfRunning_IPCFastPath_Succeeds(t *testing.T) {
+	fm := &fakeManager{}
+	withFakeManager(t, fm, nil)
+	stubIPCExecReplace(t, true, nil)
+
+	var buf bytes.Buffer
+	if err := runRestart(context.Background(), &buf, true); err != nil {
+		t.Fatalf("runRestart: %v", err)
+	}
+	if !strings.Contains(buf.String(), "re-exec'd in place") {
+		t.Errorf("expected exec-replace confirmation, got: %q", buf.String())
+	}
+	for _, c := range fm.calls {
+		if c == "restart-daemon" || c == "start-daemon" {
+			t.Errorf("service manager should not be touched once IPC succeeds, got call %q", c)
+		}
+	}
+}
+
+// TestRestart_IfRunning_IPCNoDaemon_FallsThrough verifies the IPC fast
+// path is silent when the daemon is not reachable: runRestart proceeds
+// to the existing managed-service walk, so daemons that haven't been
+// upgraded to the exec-replace method still see the prior --if-running
+// behavior on freshly-installed managed services.
+func TestRestart_IfRunning_IPCNoDaemon_FallsThrough(t *testing.T) {
+	fm := &fakeManager{installed: true, active: true}
+	withFakeManager(t, fm, nil)
+	stubIPCExecReplace(t, false, nil) // simulate "daemon not running on IPC"
+
+	var buf bytes.Buffer
+	if err := runRestart(context.Background(), &buf, true); err != nil {
+		t.Fatalf("runRestart: %v", err)
+	}
+	// --if-running walks both scopes; with a single fakeManager wired to
+	// both, restart-daemon fires once per scope. We just assert it fired
+	// at all — the point is the fallback happened, not the exact count.
+	if countCalls(fm.calls, "restart-daemon") < 1 {
+		t.Errorf("expected fallback to systemctl restart, got calls=%v", fm.calls)
+	}
+	if strings.Contains(buf.String(), "re-exec'd in place") {
+		t.Errorf("should not print exec-replace line when IPC fast path was skipped")
+	}
+}
+
+// TestRestart_IfRunning_IPCUnsupported_FallsThrough covers older daemons
+// that don't have daemon.exec-replace registered. The IPC error code
+// UNKNOWN_METHOD must map to the same silent fallback as "no daemon
+// running" — surfacing it would spam the dashboard's lifecycle log on
+// every self-update against a pre-fix daemon.
+func TestRestart_IfRunning_IPCUnsupported_FallsThrough(t *testing.T) {
+	fm := &fakeManager{installed: true, active: true}
+	withFakeManager(t, fm, nil)
+	stubIPCExecReplace(t, false, errExecReplaceUnsupported)
+
+	var buf bytes.Buffer
+	if err := runRestart(context.Background(), &buf, true); err != nil {
+		t.Fatalf("runRestart: %v", err)
+	}
+	if countCalls(fm.calls, "restart-daemon") < 1 {
+		t.Errorf("expected fallback to systemctl restart, got calls=%v", fm.calls)
+	}
+	if strings.Contains(buf.String(), "exec via IPC failed") {
+		t.Errorf("UNKNOWN_METHOD should fall through silently, got: %q", buf.String())
+	}
+}
+
+// TestRestart_IfRunning_IPCError_Surfaces verifies that real IPC errors
+// (binary missing, permission denied, "exec-replace already scheduled"
+// — anything that isn't "no daemon" or "unsupported method") get printed
+// to the operator's log so they're not swallowed before the fall-through
+// runs. The fall-through still tries the managed-service path so the
+// surface message is supplementary, not fatal.
+func TestRestart_IfRunning_IPCError_Surfaces(t *testing.T) {
+	fm := &fakeManager{}
+	withFakeManager(t, fm, nil)
+	stubIPCExecReplace(t, false, errors.New("INTERNAL: stat self: permission denied"))
+
+	var buf bytes.Buffer
+	if err := runRestart(context.Background(), &buf, true); err != nil {
+		t.Fatalf("runRestart: %v", err)
+	}
+	if !strings.Contains(buf.String(), "in-place exec via IPC failed") {
+		t.Errorf("expected surfaced IPC failure, got: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "permission denied") {
+		t.Errorf("expected error detail in output, got: %q", buf.String())
+	}
+}
+
+// TestRestart_NoIfRunning_SkipsIPCFastPath: the IPC exec-replace fast
+// path is gated to --if-running. An explicit `gate restart` (without
+// the flag) is the operator saying "I want a managed-service restart"
+// — using exec-replace here would silently swap an in-place exec for
+// the systemctl-driven bounce the user asked for.
+func TestRestart_NoIfRunning_SkipsIPCFastPath(t *testing.T) {
+	fm := &fakeManager{installed: true, active: true}
+	withFakeManager(t, fm, nil)
+	// If the IPC path is consulted at all this returns success and
+	// would short-circuit the systemctl path; the assertion below
+	// proves we did NOT take that branch.
+	stubIPCExecReplace(t, true, nil)
+
+	var buf bytes.Buffer
+	if err := runRestart(context.Background(), &buf, false); err != nil {
+		t.Fatalf("runRestart: %v", err)
+	}
+	if countCalls(fm.calls, "restart-daemon") != 1 {
+		t.Errorf("expected systemctl restart for explicit `gate restart`, got calls=%v", fm.calls)
+	}
+	if strings.Contains(buf.String(), "re-exec'd in place") {
+		t.Errorf("explicit `gate restart` must not take the IPC fast path, got: %q", buf.String())
 	}
 }
 
