@@ -4,6 +4,7 @@ package supervisor
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -158,7 +159,7 @@ exit 0`)
 
 	wakeID := "test-wake-1"
 	sig := wake.Signal{V: 1, ID: wakeID, Reason: wake.ReasonMindGate, TriggeredAt: 1}
-	if err := runWithTranscript(sig, t.TempDir(), []string{"-p", "ignored"}); err != nil {
+	if err := runWithTranscript(sig, t.TempDir(), []string{"-p", "ignored"}, ""); err != nil {
 		t.Fatalf("runWithTranscript: %v", err)
 	}
 
@@ -206,7 +207,7 @@ func TestRunWithTranscript_RecordsCrashedExit(t *testing.T) {
 exit 7`)
 
 	sig := wake.Signal{V: 1, ID: "crash-1", Reason: wake.ReasonHeartBeat, TriggeredAt: 1}
-	if err := runWithTranscript(sig, t.TempDir(), []string{"-p", "x"}); err == nil {
+	if err := runWithTranscript(sig, t.TempDir(), []string{"-p", "x"}, ""); err == nil {
 		t.Errorf("expected non-nil error from non-zero exit")
 	}
 
@@ -214,5 +215,40 @@ exit 7`)
 	idx, _ := store.ReadIndex()
 	if len(idx.Wakes) != 1 || idx.Wakes[0].OK || idx.Wakes[0].ExitCode != 7 {
 		t.Errorf("wrong index state: %+v", idx.Wakes)
+	}
+}
+
+func TestRunWithTranscript_StampsSessionIDOntoEntry(t *testing.T) {
+	trDir := streamFixture(t, `printf '%s\n' \
+  '{"type":"system","subtype":"init","model":"stub","tools":[]}' \
+  '{"type":"result","subtype":"success","total_cost_usd":0,"duration_ms":1,"is_error":false,"num_turns":1}'
+exit 0`)
+
+	const wakeID = "stamp-wake-1"
+	const sessionUUID = "00000000-1111-2222-3333-444444444444"
+	sig := wake.Signal{V: 1, ID: wakeID, Reason: wake.ReasonHeartBeat, TriggeredAt: 1}
+	if err := runWithTranscript(sig, t.TempDir(), []string{"-p", "ignored"}, sessionUUID); err != nil {
+		t.Fatalf("runWithTranscript: %v", err)
+	}
+	store, _ := transcript.NewStore(trDir)
+	idx, err := store.ReadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(idx.Wakes) != 1 || idx.Wakes[0].SessionID != sessionUUID {
+		t.Fatalf("entry.SessionID = %q, want %q (idx=%+v)", idx.Wakes[0].SessionID, sessionUUID, idx)
+	}
+}
+
+func TestRunWithTranscript_ReturnsSessionNotFoundOnStderr(t *testing.T) {
+	streamFixture(t, `echo "Error: session not found" 1>&2
+exit 1`)
+	sig := wake.Signal{V: 1, ID: "snf-wake-1", Reason: wake.ReasonHeartBeat, TriggeredAt: 1}
+	err := runWithTranscript(sig, t.TempDir(), []string{"-p", "ignored"}, "some-uuid")
+	if err == nil {
+		t.Fatal("expected error from stub exit 1; got nil")
+	}
+	if !errors.Is(err, errSessionNotFound) {
+		t.Fatalf("expected errSessionNotFound; got %v", err)
 	}
 }

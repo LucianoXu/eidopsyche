@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 	"github.com/spf13/cobra"
@@ -57,6 +58,14 @@ func computeStatus(ctx context.Context, c forgectl.Client, name string) (string,
 	// the legacy `state: running` line so old images stay supported.
 	if rs, ok := fetchRuntimeState(ctx, c, cont); ok {
 		fmt.Fprintf(&sb, "phase:   %s\n", formatPhase(rs))
+		if rs.SessionID != "" {
+			short := rs.SessionID
+			if len(short) > 8 {
+				short = short[:8]
+			}
+			age := time.Since(time.Unix(rs.SessionStartedAt, 0)).Truncate(time.Second)
+			fmt.Fprintf(&sb, "session: %s (age %s, %d wakes)\n", short, age, rs.WakesInSession)
+		}
 	} else {
 		fmt.Fprintf(&sb, "state:   %s\n", state)
 	}

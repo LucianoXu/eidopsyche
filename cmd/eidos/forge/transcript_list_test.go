@@ -72,7 +72,7 @@ func TestTranscriptList_HumanTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "ID         REASON") {
+	if !strings.Contains(out, "ID         SESSION    REASON") {
 		t.Errorf("header missing: %q", out)
 	}
 	if !strings.Contains(out, "abcdef12") {

@@ -37,6 +37,7 @@ type Index struct {
 // Entry is one row in Index.Wakes — a finalized wake's metadata.
 type Entry struct {
 	ID             string   `json:"id"`
+	SessionID      string   `json:"session_id,omitempty"`
 	Reason         string   `json:"reason"`
 	StartedAt      int64    `json:"started_at"`
 	EndedAt        int64    `json:"ended_at"`

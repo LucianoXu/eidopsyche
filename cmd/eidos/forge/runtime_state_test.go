@@ -10,6 +10,7 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/internal/authstate"
 	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
+	"github.com/LucianoXu/eidopsyche/internal/sessionstate"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 )
 
@@ -200,5 +201,43 @@ func TestRuntimeStateCmd_JSONOutput(t *testing.T) {
 	}
 	if rs.Phase != "sleeping" {
 		t.Errorf("phase=%q", rs.Phase)
+	}
+}
+
+func TestComputeRuntimeState_SessionFieldsPresent(t *testing.T) {
+	dir := t.TempDir()
+	prev := sessionStateRuntimePath
+	sessionStateRuntimePath = filepath.Join(dir, "session.json")
+	t.Cleanup(func() { sessionStateRuntimePath = prev })
+
+	st, err := sessionstate.Mint(sessionStateRuntimePath, time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sessionstate.IncrementWake(sessionStateRuntimePath); err != nil {
+		t.Fatal(err)
+	}
+
+	rs := computeRuntimeState(time.Unix(1700001000, 0))
+	if rs.SessionID != st.SessionID {
+		t.Fatalf("SessionID = %q, want %q", rs.SessionID, st.SessionID)
+	}
+	if rs.SessionStartedAt != 1700000000 {
+		t.Fatalf("SessionStartedAt = %d", rs.SessionStartedAt)
+	}
+	if rs.WakesInSession != 1 {
+		t.Fatalf("WakesInSession = %d", rs.WakesInSession)
+	}
+}
+
+func TestComputeRuntimeState_SessionFieldsOmittedWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	prev := sessionStateRuntimePath
+	sessionStateRuntimePath = filepath.Join(dir, "session.json")
+	t.Cleanup(func() { sessionStateRuntimePath = prev })
+
+	rs := computeRuntimeState(time.Unix(1700000000, 0))
+	if rs.SessionID != "" || rs.SessionStartedAt != 0 || rs.WakesInSession != 0 {
+		t.Fatalf("expected zero session fields when session.json absent; got %+v", rs)
 	}
 }

@@ -102,6 +102,7 @@ func runWatchTail(ctx context.Context, out io.Writer, c forgectl.Client, cont, w
 	}
 
 	dumpedLatest := false
+	prevSessionID := ""
 	for {
 		select {
 		case <-ctx.Done():
@@ -113,7 +114,16 @@ func runWatchTail(ctx context.Context, out io.Writer, c forgectl.Client, cont, w
 		if follow {
 			args = append(args, "--follow")
 		}
-		emitted, streamErr := streamTranscript(ctx, out, c, cont, args, raw, opts)
+		wctx := buildWakeRenderCtx(ctx, c, cont, wakeArg)
+		if shouldRenderBoundary(prevSessionID, wctx.SessionID) {
+			for _, l := range renderSessionBoundary(wctx.SessionID) {
+				fmt.Fprintln(out, l)
+			}
+		}
+		if wctx.SessionID != "" {
+			prevSessionID = wctx.SessionID
+		}
+		emitted, streamErr := streamTranscript(ctx, out, c, cont, args, raw, opts, wctx)
 		if streamErr != nil && !errors.Is(streamErr, context.Canceled) {
 			return streamErr
 		}
@@ -131,7 +141,16 @@ func runWatchTail(ctx context.Context, out io.Writer, c forgectl.Client, cont, w
 		if wakeArg == "current" && !emitted && !dumpedLatest {
 			if latest := latestWakeID(ctx, c, cont); latest != "" {
 				latestArgs := []string{"eidos", "forge", "transcript-tail", "--wake", latest}
-				if _, err := streamTranscript(ctx, out, c, cont, latestArgs, raw, opts); err != nil && !errors.Is(err, context.Canceled) {
+				latestCtx := buildWakeRenderCtx(ctx, c, cont, latest)
+				if shouldRenderBoundary(prevSessionID, latestCtx.SessionID) {
+					for _, l := range renderSessionBoundary(latestCtx.SessionID) {
+						fmt.Fprintln(out, l)
+					}
+				}
+				if latestCtx.SessionID != "" {
+					prevSessionID = latestCtx.SessionID
+				}
+				if _, err := streamTranscript(ctx, out, c, cont, latestArgs, raw, opts, latestCtx); err != nil && !errors.Is(err, context.Canceled) {
 					return err
 				}
 			}
@@ -150,6 +169,65 @@ func runWatchTail(ctx context.Context, out io.Writer, c forgectl.Client, cont, w
 		// no-op once the file is final.
 		return nil
 	}
+}
+
+// buildWakeRenderCtx fetches index + runtime-state to build the per-wake
+// header context. Returns zero value when the lookups fail (the renderer
+// then falls back to the legacy header). The "current" wake uses
+// runtime-state's session info (the active session's UUID + an ordinal
+// of WakesInSession+1, matching what IncrementWake will record at the
+// end of the wake).
+func buildWakeRenderCtx(ctx context.Context, c forgectl.Client, cont, wakeArg string) wakeRenderCtx {
+	if wakeArg == "current" {
+		res, err := c.ContainerExec(ctx, cont, []string{"eidos", "forge", "runtime-state"})
+		if err != nil || res.ExitCode != 0 {
+			return wakeRenderCtx{}
+		}
+		var rs RuntimeState
+		if err := json.Unmarshal(res.Stdout, &rs); err != nil || rs.SessionID == "" {
+			return wakeRenderCtx{}
+		}
+		short := rs.SessionID
+		if len(short) > 8 {
+			short = short[:8]
+		}
+		wakeShort := rs.ActiveWakeID
+		if len(wakeShort) > 8 {
+			wakeShort = wakeShort[:8]
+		}
+		return wakeRenderCtx{
+			WakeID:    wakeShort,
+			SessionID: short,
+			Ordinal:   rs.WakesInSession + 1,
+		}
+	}
+	res, err := c.ContainerExec(ctx, cont, []string{"eidos", "forge", "transcript-list", "--json"})
+	if err != nil || res.ExitCode != 0 {
+		return wakeRenderCtx{}
+	}
+	var idx transcript.Index
+	if err := json.Unmarshal(res.Stdout, &idx); err != nil {
+		return wakeRenderCtx{}
+	}
+	for _, e := range idx.Wakes {
+		if e.ID != wakeArg || e.SessionID == "" {
+			continue
+		}
+		short := e.SessionID
+		if len(short) > 8 {
+			short = short[:8]
+		}
+		wakeShort := e.ID
+		if len(wakeShort) > 8 {
+			wakeShort = wakeShort[:8]
+		}
+		return wakeRenderCtx{
+			WakeID:    wakeShort,
+			SessionID: short,
+			Ordinal:   computeOrdinal(idx, e.SessionID, e.ID),
+		}
+	}
+	return wakeRenderCtx{}
 }
 
 // resolveWakeID expands a possibly-truncated wake id against the
@@ -218,7 +296,7 @@ var watchPollInterval = 1 * time.Second
 // stdout once exec completes — fine for one-shot reads, not for follow.
 // For --follow we need a streaming exec; we shell out to `docker exec`
 // directly to get a continuous pipe.
-func streamTranscript(ctx context.Context, out io.Writer, c forgectl.Client, cont string, args []string, raw bool, opts renderOpts) (emitted bool, err error) {
+func streamTranscript(ctx context.Context, out io.Writer, c forgectl.Client, cont string, args []string, raw bool, opts renderOpts, wctx wakeRenderCtx) (emitted bool, err error) {
 	dockerArgs := append([]string{"exec", cont}, args...)
 	cmd := exec.CommandContext(ctx, "docker", dockerArgs...) //nolint:gosec
 	cmd.Stderr = os.Stderr
@@ -231,7 +309,7 @@ func streamTranscript(ctx context.Context, out io.Writer, c forgectl.Client, con
 	}
 
 	cw := &countingWriter{w: out}
-	rerr := renderStream(cw, pipe, raw, opts)
+	rerr := renderStream(cw, pipe, raw, opts, wctx)
 	werr := cmd.Wait()
 	if rerr != nil && !errors.Is(rerr, io.EOF) {
 		return cw.n > 0, rerr
@@ -259,7 +337,7 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func renderStream(out io.Writer, src io.Reader, raw bool, opts renderOpts) error {
+func renderStream(out io.Writer, src io.Reader, raw bool, opts renderOpts, wctx wakeRenderCtx) error {
 	r := bufio.NewReaderSize(src, 1<<20)
 	for {
 		line, err := readLineUnbounded(r)
@@ -275,7 +353,7 @@ func renderStream(out io.Writer, src io.Reader, raw bool, opts renderOpts) error
 					// choose to investigate; renderer keeps going.
 					fmt.Fprintf(os.Stderr, "watch: parse: %v\n", perr)
 				} else {
-					for _, l := range renderEvent(ev, opts) {
+					for _, l := range renderEvent(ev, opts, wctx) {
 						fmt.Fprintln(out, l)
 					}
 				}

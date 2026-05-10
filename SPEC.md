@@ -87,7 +87,22 @@ Agent Skills 文件可以理解为基于自然语言的程序系统。
   - 规划信号。心智体自主规划的唤醒信号。
 - MindGate 信号的来源是 MindGate 的入站信息。MindGate 信号是否触发依赖于发信方的身份，由设置决定。
 - HeartBeat是一次唤醒心智体的信号，并由心智体决定做什么。它可以继续跟进和用户的对话，或者检查记忆，整理记忆，完成待做事项，休息娱乐，以及其他活动，并按自己的意愿决定进行多少事项、何时停止。它也可以在HeartBeat时选择做梦。HeartBeat 通过 cron 实现。
-- 做梦（Dream）是一种不响应外界、归纳整理本体文件自身的特殊活动。做梦时 MindForge 记录上下文对话、回忆情景记忆，归纳到语义记忆和skills，整理skills，并写一段散文式的梦到日志。做梦结束后心智体使用新的 session 和上下文。两次做梦间应当有一定时间间隔，并且应当尽量在用户睡觉的时候做梦。
+- 做梦（Dream）是一种不响应外界、归纳整理本体文件自身的特殊活动。做梦时 MindForge 记录上下文对话、回忆情景记忆，归纳到语义记忆和skills，整理skills，并写一段散文式的梦到日志。做梦结束后心智体使用新的 session 和上下文（具体机制见下方"唤醒上下文生命周期"）。两次做梦间应当有一定时间间隔，并且应当尽量在用户睡觉的时候做梦。
+
+### 唤醒上下文生命周期
+
+每次心智体被唤醒时，agent-runner 调用 `claude` 时绑定一个 **session**：从 dream-end 到下一次 dream-end 之间的所有 wake 共享同一个 Claude session（由 UUID 唯一标识，通过 `claude --resume <UUID>` 续接），从而保留 Claude 的工作记忆。`dream end` 命令清除 session 标记，使得下次 wake 用 `claude --session-id <new-UUID>` 起一个新 session，模型的工作记忆被重置；这一刻的 wake-message 会附带提示，告诉心智体"上一段记忆已经在 dream #N 中归纳，请按需读取磁盘上的 memory/journal/essence。"
+
+为什么需要两层持久化：
+- **session jsonl**（`<ontology>/.claude/projects/<encoded-cwd>/<UUID>.jsonl`）是 Claude 自己的对话日志，带给模型连续的"思考流"；
+- **磁盘本体**（`memory/`、`journal/`、`essence/`、`inbox/`）才是跨 session、跨容器、可被 `forge ontology export/import` 完整迁移的身份连续性载体。
+
+操作员可见面：
+- `eidos forge status <name>` 显示当前 session 的短 UUID、年龄、累计 wake 数；
+- `eidos forge watch <name> --list` 表格中新增 SESSION 列，session 边界一目了然；
+- `eidos forge watch <name>`（follow 模式）在 session 切换时渲染分隔条，每个 wake 的 header 标注 `(N of session <prefix>)`。
+
+容错（操作员透明）：session.json 缺失/损坏 → 下次 wake 自动 mint 新 session；session jsonl 文件丢失（备份不全）→ pre-flight stat 检测后 fallback 到 fresh；claude 自身报 session-not-found → 重置后重试一次。所有 fallback 都写入 docker logs warning。具体 spec 见 `docs/superpowers/specs/2026-05-10-persistent-wake-context-design.md`。
 - 本体文件通过 git 历史记录生命日志。每一次做梦结束后都应该 commit。
 - 心智体应当能够在本体文件的 .claude/ 文件夹下将重要记忆、习惯、程序记忆归纳为 skills。
 - 心智体应当有隐私和边界的概念。比如说，当它谈论自己（本体文件）时，coding agent 的规定不再适用。它应当避免明确指向、解释本体文件的内部结构。

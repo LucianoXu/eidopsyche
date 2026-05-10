@@ -4,6 +4,7 @@ package supervisor
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
+	"github.com/LucianoXu/eidopsyche/internal/sessionstate"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 )
 
@@ -26,6 +28,51 @@ func TestBuildWakeMessage(t *testing.T) {
 		if !bytes.Contains([]byte(got), []byte(want)) {
 			t.Errorf("wake message missing %q; got: %s", want, got)
 		}
+	}
+}
+
+func TestBuildWakeMessage_FirstWakeOfNewSession_AfterDream(t *testing.T) {
+	msg := buildWakeMessage(wakePromptInput{
+		Reason:                  "heartbeat",
+		IsFirstWakeOfNewSession: true,
+		DreamCount:              5,
+		LastDreamFinishedAt:     1700000000,
+	})
+	if !strings.Contains(msg, "first wake of a new session") {
+		t.Fatalf("want first-wake prefix, got %q", msg)
+	}
+	if !strings.Contains(msg, "dream #5") {
+		t.Fatalf("want dream #N reference, got %q", msg)
+	}
+	if !strings.Contains(msg, "Reason: heartbeat") {
+		t.Fatalf("want status snapshot after prefix, got %q", msg)
+	}
+}
+
+func TestBuildWakeMessage_FirstWakeNoPriorDream(t *testing.T) {
+	msg := buildWakeMessage(wakePromptInput{
+		Reason:                  "heartbeat",
+		IsFirstWakeOfNewSession: true,
+		DreamCount:              0,
+		LastDreamFinishedAt:     0,
+	})
+	if !strings.Contains(msg, "no prior dream") {
+		t.Fatalf("want no-prior-dream variant, got %q", msg)
+	}
+	if !strings.Contains(msg, "Reason: heartbeat") {
+		t.Fatalf("want status snapshot after prefix, got %q", msg)
+	}
+}
+
+func TestBuildWakeMessage_NotFirstWake_NoPrefix(t *testing.T) {
+	msg := buildWakeMessage(wakePromptInput{
+		Reason:                  "heartbeat",
+		IsFirstWakeOfNewSession: false,
+		DreamCount:              5,
+		LastDreamFinishedAt:     1700000000,
+	})
+	if strings.Contains(msg, "first wake of a new session") {
+		t.Fatalf("must not include prefix for non-first wake, got %q", msg)
 	}
 }
 
@@ -49,7 +96,7 @@ func TestBuildClaudeArgs_NoModel(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("log_level = \"info\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := buildClaudeArgs("identity-text", "wake-msg", cfgPath, false)
+	got := buildClaudeArgs("identity-text", "wake-msg", cfgPath, false, SessionMode{})
 	want := []string{
 		"--append-system-prompt", "identity-text",
 		"--dangerously-skip-permissions",
@@ -66,7 +113,7 @@ func TestBuildClaudeArgs_StreamJSON(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("log_level = \"info\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := buildClaudeArgs("ident", "msg", cfgPath, true)
+	got := buildClaudeArgs("ident", "msg", cfgPath, true, SessionMode{})
 	want := []string{
 		"--append-system-prompt", "ident",
 		"--dangerously-skip-permissions",
@@ -87,7 +134,7 @@ func TestBuildClaudeArgs_WithModel(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := buildClaudeArgs("identity", "msg", cfgPath, false)
+	got := buildClaudeArgs("identity", "msg", cfgPath, false, SessionMode{})
 	want := []string{
 		"--append-system-prompt", "identity",
 		"--dangerously-skip-permissions",
@@ -100,11 +147,122 @@ func TestBuildClaudeArgs_WithModel(t *testing.T) {
 }
 
 func TestBuildClaudeArgs_MissingConfig(t *testing.T) {
-	got := buildClaudeArgs("ident", "m", "/nonexistent/path/config.toml", false)
+	got := buildClaudeArgs("ident", "m", "/nonexistent/path/config.toml", false, SessionMode{})
 	want := []string{
 		"--append-system-prompt", "ident",
 		"--dangerously-skip-permissions",
 		"-p", "m",
+	}
+	if !slicesEqualStr(got, want) {
+		t.Errorf("argv = %v, want %v", got, want)
+	}
+}
+
+func TestBuildClaudeArgs_SessionNew(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	uuid := "00000000-1111-2222-3333-444444444444"
+	got := buildClaudeArgs("ident", "msg", cfgPath, false, SessionMode{Kind: SessionNew, UUID: uuid})
+	want := []string{
+		"--append-system-prompt", "ident",
+		"--dangerously-skip-permissions",
+		"--session-id", uuid,
+		"-p", "msg",
+	}
+	if !slicesEqualStr(got, want) {
+		t.Errorf("argv = %v, want %v", got, want)
+	}
+}
+
+func TestMatchSessionNotFound(t *testing.T) {
+	cases := []struct {
+		stderr string
+		want   bool
+	}{
+		{"Error: session not found\n", true},
+		{"Could not find session abc-123\n", true},
+		{"no such session\n", true},
+		{"some other error\n", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := matchSessionNotFound(c.stderr); got != c.want {
+			t.Errorf("matchSessionNotFound(%q) = %v, want %v", c.stderr, got, c.want)
+		}
+	}
+}
+
+func TestEncodeCWD(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"/eidos/ontology", "-eidos-ontology"},
+		{"abc123", "abc123"},
+		{"/path/with-dash", "-path-with-dash"},
+	}
+	for _, c := range cases {
+		if got := encodeCWD(c.in); got != c.want {
+			t.Errorf("encodeCWD(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestSessionJsonlPath(t *testing.T) {
+	got := sessionJsonlPath("/eidos/ontology", "abc-uuid")
+	want := "/eidos/ontology/.claude/projects/-eidos-ontology/abc-uuid.jsonl"
+	if got != want {
+		t.Errorf("sessionJsonlPath: got %q, want %q", got, want)
+	}
+	if got := sessionJsonlPath("", "abc-uuid"); got != "" {
+		t.Errorf("sessionJsonlPath with empty ontology: got %q, want empty", got)
+	}
+}
+
+func TestDecideSessionMode_NewWhenAbsent(t *testing.T) {
+	mode, first := decideSessionMode(sessionstate.State{}, nil, dreamstate.State{})
+	if !first || mode.Kind != SessionNew {
+		t.Fatalf("absent state → NEW; got %+v first=%v", mode, first)
+	}
+}
+
+func TestDecideSessionMode_NewWhenCorrupt(t *testing.T) {
+	mode, first := decideSessionMode(sessionstate.State{}, errors.New("corrupt"), dreamstate.State{})
+	if !first || mode.Kind != SessionNew {
+		t.Fatalf("corrupt state → NEW; got %+v first=%v", mode, first)
+	}
+}
+
+func TestDecideSessionMode_ResumeWhenSessionFresh(t *testing.T) {
+	sess := sessionstate.State{SessionID: "u-1", SessionStartedAt: 200}
+	ds := dreamstate.State{LastDreamFinishedAt: 100}
+	mode, first := decideSessionMode(sess, nil, ds)
+	if first || mode.Kind != SessionResume || mode.UUID != "u-1" {
+		t.Fatalf("fresh-session+old-dream → RESUME; got %+v first=%v", mode, first)
+	}
+}
+
+func TestDecideSessionMode_NewWhenDreamFinishedAfterSession(t *testing.T) {
+	sess := sessionstate.State{SessionID: "u-1", SessionStartedAt: 100}
+	ds := dreamstate.State{LastDreamFinishedAt: 200}
+	mode, first := decideSessionMode(sess, nil, ds)
+	if !first || mode.Kind != SessionNew {
+		t.Fatalf("stale-session+new-dream → NEW; got %+v first=%v", mode, first)
+	}
+}
+
+func TestBuildClaudeArgs_SessionResume(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	uuid := "00000000-1111-2222-3333-444444444444"
+	got := buildClaudeArgs("ident", "msg", cfgPath, true, SessionMode{Kind: SessionResume, UUID: uuid})
+	want := []string{
+		"--append-system-prompt", "ident",
+		"--dangerously-skip-permissions",
+		"--resume", uuid,
+		"--output-format", "stream-json",
+		"--verbose",
+		"--include-partial-messages",
+		"-p", "msg",
 	}
 	if !slicesEqualStr(got, want) {
 		t.Errorf("argv = %v, want %v", got, want)

@@ -2,15 +2,22 @@ package forge
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
+	"github.com/LucianoXu/eidopsyche/internal/sessionstate"
 	"github.com/spf13/cobra"
 )
 
 // dreamStatePath is the in-container dream-state.json path. var (not
 // const) so tests can redirect it to a temp file.
 var dreamStatePath = "/eidos/run/dream-state.json"
+
+// sessionStateForgePath is the in-container session.json path. The
+// dream-end command clears it so the next wake starts a fresh session.
+// var (not const) so tests can redirect it to a temp file.
+var sessionStateForgePath = "/eidos/run/session.json"
 
 func newDreamCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -82,6 +89,12 @@ func dreamEndEcho(path, note, prosePath string) (string, error) {
 	now := time.Now()
 	if err := dreamstate.End(path, now, note, prosePath); err != nil {
 		return "", err
+	}
+	// Reset the session-state so the next wake starts fresh. Failure here
+	// is not fatal: the next wake's fallback rule (LastDreamFinishedAt >
+	// SessionStartedAt) catches a stale session.json automatically.
+	if err := sessionstate.Clear(sessionStateForgePath); err != nil {
+		log.Printf("dream end: sessionstate.Clear failed (%v); next wake will reset via fallback", err)
 	}
 	st, _ := dreamstate.Read(path)
 	if prev.LastDreamStartedAt > 0 {

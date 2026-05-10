@@ -1,12 +1,14 @@
 package forge
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
+	"github.com/LucianoXu/eidopsyche/internal/sessionstate"
 )
 
 func TestNewDreamCmdHasBeginAndEnd(t *testing.T) {
@@ -91,5 +93,32 @@ func TestDreamEndEcho_WithoutBegin(t *testing.T) {
 	}
 	if !strings.Contains(out, "no prior begin") {
 		t.Errorf("expected 'no prior begin' note: %q", out)
+	}
+}
+
+func TestDreamEnd_ClearsSessionState(t *testing.T) {
+	dir := t.TempDir()
+	dreamPath := filepath.Join(dir, "dream-state.json")
+	sessPath := filepath.Join(dir, "session.json")
+
+	prevDream := dreamStatePath
+	prevSess := sessionStateForgePath
+	dreamStatePath = dreamPath
+	sessionStateForgePath = sessPath
+	t.Cleanup(func() {
+		dreamStatePath = prevDream
+		sessionStateForgePath = prevSess
+	})
+
+	if _, err := sessionstate.Mint(sessPath, time.Unix(1700000000, 0)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := dreamEndEcho(dreamPath, "consolidated test memory", ""); err != nil {
+		t.Fatalf("dreamEndEcho: %v", err)
+	}
+
+	if _, err := os.Stat(sessPath); !os.IsNotExist(err) {
+		t.Fatalf("session.json should be cleared after dream-end; stat err=%v", err)
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/internal/authstate"
 	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
+	"github.com/LucianoXu/eidopsyche/internal/sessionstate"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 	"github.com/spf13/cobra"
 )
@@ -18,10 +19,11 @@ import (
 // consts) so tests can substitute temp paths; mirrors plansDir /
 // dreamStatePath pattern.
 var (
-	wakeDir          = "/eidos/run/wake"
-	authStatePath    = authstate.Path
-	procStatPath     = "/proc/1/stat"
-	procBootTimePath = "/proc/stat"
+	wakeDir                 = "/eidos/run/wake"
+	authStatePath           = authstate.Path
+	procStatPath            = "/proc/1/stat"
+	procBootTimePath        = "/proc/stat"
+	sessionStateRuntimePath = "/eidos/run/session.json"
 )
 
 // RuntimeState is the JSON shape emitted by `eidos forge runtime-state`.
@@ -36,6 +38,13 @@ type RuntimeState struct {
 	AuthRequired            bool   `json:"auth_required"`
 	SincePhaseChangeSeconds *int64 `json:"since_phase_change_seconds,omitempty"`
 	ContainerStartedAt      int64  `json:"container_started_at"`
+
+	// Session fields, omitted when session.json is absent. Wake counter
+	// is the in-progress count (incremented after each wake completes).
+	// See docs/superpowers/specs/2026-05-10-persistent-wake-context-design.md.
+	SessionID        string `json:"session_id,omitempty"`
+	SessionStartedAt int64  `json:"session_started_at,omitempty"`
+	WakesInSession   int    `json:"wakes_in_session,omitempty"`
 }
 
 // newRuntimeStateCmd is an in-container hidden subcommand that prints the
@@ -107,6 +116,15 @@ func computeRuntimeState(now time.Time) RuntimeState {
 	}
 
 	rs.ContainerStartedAt = readContainerStartTime()
+
+	// Surface session info when session.json is present. A corrupt file
+	// is silently skipped (status command falls back gracefully).
+	if sess, err := sessionstate.Read(sessionStateRuntimePath); err == nil && sess.SessionID != "" {
+		rs.SessionID = sess.SessionID
+		rs.SessionStartedAt = sess.SessionStartedAt
+		rs.WakesInSession = sess.WakesInSession
+	}
+
 	return rs
 }
 
