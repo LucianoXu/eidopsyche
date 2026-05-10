@@ -43,5 +43,7 @@ func registerInContainer(root *cobra.Command) {
 		newDreamCmd(),
 		newStatusDetailCmd(),
 		newRuntimeStateCmd(),
+		newTranscriptListCmd(),
+		newTranscriptTailCmd(),
 	)
 }

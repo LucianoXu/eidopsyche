@@ -3,9 +3,12 @@
 package supervisor
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +19,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/authstate"
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
+	"github.com/LucianoXu/eidopsyche/internal/transcript"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 	"github.com/spf13/cobra"
 )
@@ -37,10 +41,32 @@ const dreamStateRuntimePath = "/eidos/run/dream-state.json"
 // agent invocation lands on the same singleton).
 const agentLockPath = "/eidos/run/agent.lock"
 
+// transcriptsRuntimeDir is the in-container path to the per-mindform
+// transcripts directory; agent-runner writes the per-wake NDJSON file
+// and the index there. Must live in the volume so the host's
+// `forge watch` (and post-mortem `forge transcript-tail`) can read it.
+//
+// var (not const) so tests can substitute a temp dir.
+var transcriptsRuntimeDir = "/eidos/run/transcripts"
+
 // EXIT_AUTH_REQUIRED is the exit code agent-runner uses when Claude's
 // /login token is expired or missing. The supervisor surfaces this state
 // via `eidos forge status`.
 const EXIT_AUTH_REQUIRED = 47
+
+// claudeMinVersion is the minimum claude CLI version known to emit a
+// stream-json schema we understand. Below this, agent-runner falls back
+// to plain `-p` mode and skips transcript capture. Var (not const) so
+// tests can lower the floor when stubbing claude.
+//
+// 2.1.0 covers the lineage in which `--include-partial-messages` is
+// documented. Older versions either lack the flag or shift event field
+// names; we don't try to second-guess them.
+var claudeMinVersion = [3]int{2, 1, 0}
+
+// claudeBin names the binary on PATH. Var so tests can substitute a
+// shell-script stub.
+var claudeBin = "claude"
 
 func newAgentRunnerCmd() *cobra.Command {
 	var wakeFile, ontologyDir string
@@ -108,30 +134,303 @@ func runAgent(wakeFile, ontologyDir string) error {
 		PlanID:                sig.Context.PlanID,
 	})
 
-	// The container is the trust boundary; --dangerously-skip-permissions
-	// is the documented sandbox path. Optional --model pins the model
-	// id when the operator has set mindform.model. See
-	// docs/superpowers/specs/2026-05-09-non-root-mindform-and-model-config-design.md.
-	args := buildClaudeArgs(string(identity), msg, gateConfigPath)
-	c := exec.Command("claude", args...)
+	streamJSON := claudeSupportsStreamJSON(claudeBin)
+	if !streamJSON {
+		log.Printf("agent-runner: stream-json unsupported (claude version below %d.%d.%d); transcripts disabled for this wake",
+			claudeMinVersion[0], claudeMinVersion[1], claudeMinVersion[2])
+	}
+
+	args := buildClaudeArgs(string(identity), msg, gateConfigPath, streamJSON)
+
+	if streamJSON {
+		return runWithTranscript(sig, ontologyDir, args)
+	}
+	return runWithoutTranscript(ontologyDir, args)
+}
+
+// runWithoutTranscript runs claude with stdout wired straight through
+// to docker logs (the legacy behaviour). Used when the claude version
+// pre-dates stream-json support.
+func runWithoutTranscript(ontologyDir string, args []string) error {
+	c := exec.Command(claudeBin, args...) //nolint:gosec
 	c.Dir = ontologyDir
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 	c.Env = append(os.Environ(), "CLAUDE_DIR="+filepath.Join(ontologyDir, ".claude"))
 	if err := c.Run(); err != nil {
-		if isAuthError(err, c.ProcessState) {
-			// Best-effort: persist the auth-required marker so future
-			// wakes self-gate (above) and `eidos forge status <slug>`
-			// can surface it to the operator. Failure to write the
-			// marker is logged but doesn't change the exit path.
-			if werr := authstate.Write(time.Now()); werr != nil {
-				fmt.Fprintf(os.Stderr, "agent-runner: write %s: %v\n", authstate.Path, werr)
-			}
-			os.Exit(EXIT_AUTH_REQUIRED)
-		}
-		return fmt.Errorf("claude exited: %w", err)
+		return handleClaudeExit(err, c.ProcessState)
 	}
 	return nil
+}
+
+// runWithTranscript runs claude with --output-format stream-json and tees
+// its stdout into the per-wake NDJSON file under transcripts/. Lifecycle
+// summaries are emitted to log.Printf (docker logs).
+func runWithTranscript(sig wake.Signal, ontologyDir string, args []string) error {
+	startedAt := time.Now().Unix()
+
+	store, err := transcript.NewStore(transcriptsRuntimeDir)
+	if err != nil {
+		log.Printf("agent-runner: transcripts unavailable (%v); falling back to plain stdout", err)
+		return runWithoutTranscript(ontologyDir, plainClaudeArgs(args))
+	}
+	if err := store.Recover(); err != nil {
+		log.Printf("agent-runner: transcripts recover: %v", err)
+	}
+
+	wakeID := sig.ID
+	if wakeID == "" {
+		wakeID = fmt.Sprintf("%d-%s", startedAt, sig.Reason)
+	}
+
+	out, err := store.Open(wakeID)
+	if err != nil {
+		log.Printf("agent-runner: transcripts open(%s): %v; falling back", wakeID, err)
+		return runWithoutTranscript(ontologyDir, plainClaudeArgs(args))
+	}
+	// Ensure the file is closed even on panic; double-close is harmless
+	// (it's a *os.File).
+	closed := false
+	closeOnce := func() {
+		if !closed {
+			_ = out.Close()
+			closed = true
+		}
+	}
+	defer closeOnce()
+
+	c := exec.Command(claudeBin, args...) //nolint:gosec
+	c.Dir = ontologyDir
+	c.Stderr = os.Stderr
+	c.Env = append(os.Environ(), "CLAUDE_DIR="+filepath.Join(ontologyDir, ".claude"))
+
+	stdoutPipe, err := c.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("stdout pipe: %w", err)
+	}
+
+	log.Printf("agent-runner: wake-id=%s reason=%s starting", wakeID, sig.Reason)
+
+	if err := c.Start(); err != nil {
+		return fmt.Errorf("start claude: %w", err)
+	}
+
+	counter := &transcript.Counter{}
+	drainErr := make(chan error, 1)
+	go func() {
+		drainErr <- drainStreamJSON(stdoutPipe, out, counter, wakeID)
+	}()
+
+	// Per os/exec.Cmd.StdoutPipe: must drain BEFORE Wait, otherwise
+	// Wait closes the pipe and the drain races into "file already
+	// closed" instead of clean EOF.
+	derr := <-drainErr
+	runErr := c.Wait()
+	closeOnce() // flush the transcript file before we hand it to Finalize.
+	if derr != nil {
+		log.Printf("agent-runner: wake-id=%s drain: %v", wakeID, derr)
+	}
+
+	exitCode := 0
+	if runErr != nil {
+		var exitErr *exec.ExitError
+		if errors.As(runErr, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+
+	endedAt := time.Now().Unix()
+	cfg, _ := config.Load(gateConfigPath)
+	maxCount, maxBytes := transcriptLimits(cfg)
+	finalEntry := transcript.Entry{
+		ID:             wakeID,
+		Reason:         string(sig.Reason),
+		StartedAt:      startedAt,
+		EndedAt:        endedAt,
+		OK:             runErr == nil,
+		ExitCode:       exitCode,
+		ToolUseCount:   counter.ToolUseCount,
+		ThinkingBlocks: counter.ThinkingBlocks,
+	}
+	if counter.Result != nil {
+		finalEntry.OK = runErr == nil && counter.Result.OK
+		finalEntry.CostUSD = counter.Result.TotalCostUSD
+	}
+	if ferr := store.Finalize(finalEntry, maxCount, maxBytes); ferr != nil {
+		log.Printf("agent-runner: wake-id=%s finalize: %v", wakeID, ferr)
+	}
+
+	statusStr := "ok"
+	if !finalEntry.OK {
+		statusStr = fmt.Sprintf("failed(%d)", exitCode)
+	}
+	costStr := "-"
+	if finalEntry.CostUSD != nil && *finalEntry.CostUSD > 0 {
+		costStr = fmt.Sprintf("$%.4f", *finalEntry.CostUSD)
+	}
+	log.Printf("agent-runner: wake-id=%s completed cost=%s dur_s=%d tools=%d %s",
+		wakeID, costStr, endedAt-startedAt, counter.ToolUseCount, statusStr)
+
+	return handleClaudeExit(runErr, c.ProcessState)
+}
+
+// transcriptLimits resolves the per-mindform transcripts caps from
+// config, falling back to package defaults when unset.
+func transcriptLimits(cfg config.Config) (maxCount int, maxBytes int64) {
+	maxCount = transcript.DefaultMaxCount
+	maxBytes = transcript.DefaultMaxBytes
+	if cfg.MindForm.TranscriptsMaxCount > 0 {
+		maxCount = cfg.MindForm.TranscriptsMaxCount
+	}
+	if cfg.MindForm.TranscriptsMaxBytes != "" {
+		if b, err := config.ParseByteSize(cfg.MindForm.TranscriptsMaxBytes); err == nil && b > 0 {
+			maxBytes = b
+		}
+	}
+	return maxCount, maxBytes
+}
+
+// drainStreamJSON tees src to dst line-by-line while folding each event
+// into counter and emitting a per-event lifecycle summary to log.Printf.
+// Uses bufio.Reader.ReadSlice in a loop so individual NDJSON lines have
+// no upper size limit (a 1 MiB tool_result is normal).
+func drainStreamJSON(src io.Reader, dst io.Writer, counter *transcript.Counter, wakeID string) error {
+	r := bufio.NewReaderSize(src, 1<<20) // 1 MiB starting buffer
+	for {
+		line, err := readLineUnbounded(r)
+		if len(line) > 0 {
+			if _, werr := dst.Write(line); werr != nil {
+				return werr
+			}
+			if ev, perr := transcript.ParseEvent(line); perr == nil {
+				counter.Observe(ev)
+				emitLifecycle(wakeID, ev)
+			}
+		}
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+}
+
+// readLineUnbounded reads up to and including the next '\n' from r,
+// stitching together as many ReadSlice chunks as needed. A trailing
+// partial line at EOF is returned with (line, io.EOF).
+func readLineUnbounded(r *bufio.Reader) ([]byte, error) {
+	var buf []byte
+	for {
+		chunk, err := r.ReadSlice('\n')
+		buf = append(buf, chunk...)
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		return buf, err
+	}
+}
+
+// emitLifecycle writes one summarised log line per interesting event so
+// the operator scrolling docker logs can follow what claude is doing
+// without reading raw NDJSON.
+func emitLifecycle(wakeID string, ev transcript.Event) {
+	switch ev.Type {
+	case transcript.TypeSystem:
+		if ev.Subtype == "init" {
+			log.Printf("agent-runner: wake-id=%s init model=%q tools=%d mcp=%d",
+				wakeID, ev.Model, len(ev.Tools), len(ev.MCPServers))
+		}
+	case transcript.TypeAssistant:
+		if ev.Message == nil {
+			return
+		}
+		for _, b := range ev.Message.Content {
+			if b.Type == transcript.BlockToolUse {
+				log.Printf("agent-runner: wake-id=%s tool=%s", wakeID, b.Name)
+			}
+		}
+	case transcript.TypeResult:
+		// The big "completed" line is emitted by runWithTranscript after
+		// we know the process exit code; here we keep silent to avoid
+		// duplicate noise.
+	}
+}
+
+// claudeSupportsStreamJSON probes claude's --version output. Returns
+// true when the parsed semver is at or above claudeMinVersion. Any
+// failure (binary missing, exec error, unparseable output) yields false
+// → caller falls back to plain `-p` mode.
+func claudeSupportsStreamJSON(bin string) bool {
+	out, err := exec.Command(bin, "--version").CombinedOutput() //nolint:gosec
+	if err != nil {
+		return false
+	}
+	return parseClaudeVersion(string(out))
+}
+
+// parseClaudeVersion scans s for a `MAJOR.MINOR.PATCH` token and reports
+// whether it is at or above claudeMinVersion. Pre-release suffixes
+// (`-beta1`) are stripped before comparison.
+func parseClaudeVersion(s string) bool {
+	for _, tok := range strings.Fields(s) {
+		tok = strings.TrimPrefix(tok, "v")
+		if i := strings.Index(tok, "-"); i > 0 {
+			tok = tok[:i]
+		}
+		var maj, min, pat int
+		if n, err := fmt.Sscanf(tok, "%d.%d.%d", &maj, &min, &pat); err == nil && n == 3 {
+			return semverGE([3]int{maj, min, pat}, claudeMinVersion)
+		}
+	}
+	return false
+}
+
+func semverGE(a, b [3]int) bool {
+	for i := 0; i < 3; i++ {
+		if a[i] != b[i] {
+			return a[i] > b[i]
+		}
+	}
+	return true
+}
+
+// plainClaudeArgs strips stream-json flags from args, restoring the
+// `-p msg` form. Used when stream-json setup fails after the version
+// probe was optimistic.
+func plainClaudeArgs(args []string) []string {
+	out := make([]string, 0, len(args))
+	skipNext := false
+	for _, a := range args {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		switch a {
+		case "--output-format":
+			skipNext = true
+			continue
+		case "--verbose", "--include-partial-messages":
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+// handleClaudeExit converts claude's exit error into the supervisor's
+// auth-required exit-code path or a generic wrapped error.
+func handleClaudeExit(err error, st *os.ProcessState) error {
+	if err == nil {
+		return nil
+	}
+	if isAuthError(err, st) {
+		if werr := authstate.Write(time.Now()); werr != nil {
+			fmt.Fprintf(os.Stderr, "agent-runner: write %s: %v\n", authstate.Path, werr)
+		}
+		os.Exit(EXIT_AUTH_REQUIRED)
+	}
+	return fmt.Errorf("claude exited: %w", err)
 }
 
 // computeContext folds quiet-hours, dream-state, and plan-id into the
@@ -244,7 +543,11 @@ func releaseAgentLock(f *os.File) {
 // verbatim — host-side commands (forge create / forge config) validate
 // the id; a stale / hand-edited config with an unknown id surfaces at
 // the next wake when claude itself rejects it.
-func buildClaudeArgs(identity, msg, configPath string) []string {
+//
+// streamJSON=true appends `--output-format stream-json --verbose
+// --include-partial-messages` so the supervisor can capture the
+// structured event stream into the per-wake transcript file.
+func buildClaudeArgs(identity, msg, configPath string, streamJSON bool) []string {
 	args := []string{
 		"--append-system-prompt", identity,
 		"--dangerously-skip-permissions",
@@ -253,6 +556,9 @@ func buildClaudeArgs(identity, msg, configPath string) []string {
 		if model := cfg.MindForm.Model; model != "" {
 			args = append(args, "--model", model)
 		}
+	}
+	if streamJSON {
+		args = append(args, "--output-format", "stream-json", "--verbose", "--include-partial-messages")
 	}
 	args = append(args, "-p", msg)
 	return args
