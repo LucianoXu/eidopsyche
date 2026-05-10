@@ -343,7 +343,11 @@ func (d *Daemon) subscriptionURLs(ctx context.Context) ([]string, error) {
 			rows.Close()
 			return nil, err
 		}
-		roles[u] = r
+		// Normalize defensively: rows written before the
+		// card.Parse / AddOwnRelay canonicalization fix could
+		// still hold trailing-slash URLs, and the dedup below
+		// keys on the exact string.
+		roles[normRelayURL(u)] = r
 	}
 	rows.Close()
 	contactRelays, err := d.Repo.AllRelaysUnion(ctx)
@@ -351,11 +355,13 @@ func (d *Daemon) subscriptionURLs(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	for _, u := range contactRelays {
+		u = normRelayURL(u)
 		if _, taken := roles[u]; !taken {
 			roles[u] = "contact"
 		}
 	}
 	for _, u := range d.Cfg.Subscribe.ExtraRelays {
+		u = normRelayURL(u)
 		if _, taken := roles[u]; !taken {
 			roles[u] = "extra"
 		}

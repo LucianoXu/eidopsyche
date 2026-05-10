@@ -48,6 +48,34 @@ func TestParseRejectsMissingNpub(t *testing.T) {
 	}
 }
 
+// TestParseCanonicalizesRelay locks the invariant that an encoded
+// trailing slash (`%2F`) and a literal trailing slash produce the same
+// Card.Relay. Regression for the bug where a hand-crafted URI with
+// `wss%3A%2F%2Frelay%2F` registered as a separate relay endpoint from
+// `wss://relay`, breaking the daemon's per-URL connection registry.
+func TestParseCanonicalizesRelay(t *testing.T) {
+	cases := []struct {
+		name string
+		uri  string
+	}{
+		{"encoded slash", "mindgate://npub1abc@wss%3A%2F%2Frelay.example%2F?label=A"},
+		{"literal slash", "mindgate://npub1abc@wss%3A%2F%2Frelay.example/?label=A"},
+		{"no slash", "mindgate://npub1abc@wss%3A%2F%2Frelay.example?label=A"},
+	}
+	const want = "wss://relay.example"
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := card.Parse(tc.uri)
+			if err != nil {
+				t.Fatalf("Parse(%q): %v", tc.uri, err)
+			}
+			if c.Relay != want {
+				t.Errorf("Relay=%q, want %q", c.Relay, want)
+			}
+		})
+	}
+}
+
 // ---- TOML form tests ----
 
 func TestCard_TOML_RoundTrip(t *testing.T) {

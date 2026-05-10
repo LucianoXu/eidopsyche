@@ -192,7 +192,7 @@ func (d *Daemon) InviteRedeem(ctx context.Context, token string) (*InviteRedeemR
 		Pubkey: issuerHex,
 		Label:  payload.IssuerLabelHint,
 		Tier:   contacts.TierFriend,
-		Relays: []string{payload.IssuerRelay},
+		Relays: []string{normRelayURL(payload.IssuerRelay)},
 	}
 	if addErr := d.Repo.Add(ctx, contact); addErr != nil && !errors.Is(addErr, contacts.ErrExists) {
 		return nil, fmt.Errorf("add issuer contact: %w", addErr)

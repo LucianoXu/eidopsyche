@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/dashboard"
+	gnostr "github.com/nbd-wtf/go-nostr"
 )
 
 // OwnRelayRow is the typed shape returned by ListOwnRelays. AddedAt is a
@@ -65,6 +66,7 @@ func (d *Daemon) AddOwnRelay(ctx context.Context, rawURL, role string) error {
 	if !isRelayURL(rawURL) {
 		return errOwnRelayInvalidURL
 	}
+	rawURL = normRelayURL(rawURL)
 	if role != "home" && role != "fallback" {
 		return errOwnRelayInvalidRole
 	}
@@ -138,6 +140,27 @@ func (d *Daemon) RemoveOwnRelay(ctx context.Context, rawURL string) error {
 	d.Refresh()
 	d.emitDashEvent(dashboard.Event{Kind: "relay.removed"})
 	return nil
+}
+
+// normRelayURL returns the canonical form of a relay URL: lowercased
+// scheme/host, no trailing slash on the empty path. Callers should use
+// it before any database write or in-memory dedup-keyed-by-URL — without
+// it, `wss://x` and `wss://x/` register as distinct relay endpoints and
+// the daemon opens two redundant WebSocket connections (one of which
+// often 503s, depending on the relay's HTTP handler).
+//
+// Returns the input unchanged when it doesn't parse as a relay URL, so
+// validation errors surface from isRelayURL (the existing gate) rather
+// than turning into empty-string ghosts in the relay registry.
+func normRelayURL(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return s
+	}
+	if n := gnostr.NormalizeURL(s); n != "" {
+		return n
+	}
+	return s
 }
 
 // isRelayURL reports whether s is a ws:// or wss:// URL with a host.

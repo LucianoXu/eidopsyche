@@ -95,11 +95,18 @@ func Parse(s string) (Card, error) {
 	} else {
 		relayPart = tail
 	}
-	relayPart = strings.TrimSuffix(relayPart, "/")
 	relay, err := url.PathUnescape(relayPart)
 	if err != nil {
 		return Card{}, fmt.Errorf("unescape relay: %w", err)
 	}
+	// Trim AFTER unescape so an encoded `%2F` and a literal `/` produce
+	// the same Card.Relay. Pre-unescape trimming missed the encoded form,
+	// which then registered as a distinct relay endpoint downstream
+	// (`wss://x/` opens a second WebSocket alongside `wss://x` and 503s
+	// at relays whose handler is path-sensitive). TrimRight handles
+	// double-slashes (`%2F/` after URI()'s separator). Scheme/host
+	// validation still flows through Validate — no http→ws coercion.
+	relay = strings.TrimRight(relay, "/")
 	c := Card{Npub: npub, Relay: relay}
 	if queryPart != "" {
 		q, err := url.ParseQuery(queryPart)

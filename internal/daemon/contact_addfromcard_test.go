@@ -11,7 +11,7 @@ import (
 
 func TestContactAddFromCard_FreshContact(t *testing.T) {
 	d := newTestDaemon(t)
-	uri, pk := makeTestCard(t, "alice", "wss://relay.example/")
+	uri, pk := makeTestCard(t, "alice", "wss://relay.example")
 
 	var c contacts.Contact
 	if err := d.Call(context.Background(), "contact.add-from-card",
@@ -27,14 +27,14 @@ func TestContactAddFromCard_FreshContact(t *testing.T) {
 	if c.Tier != contacts.TierFriend {
 		t.Errorf("Tier=%q, want friend", c.Tier)
 	}
-	if len(c.Relays) != 1 || c.Relays[0] != "wss://relay.example/" {
-		t.Errorf("Relays=%v, want [wss://relay.example/]", c.Relays)
+	if len(c.Relays) != 1 || c.Relays[0] != "wss://relay.example" {
+		t.Errorf("Relays=%v, want [wss://relay.example]", c.Relays)
 	}
 }
 
 func TestContactAddFromCard_LabelOverride(t *testing.T) {
 	d := newTestDaemon(t)
-	uri, _ := makeTestCard(t, "alice", "wss://relay.example/")
+	uri, _ := makeTestCard(t, "alice", "wss://relay.example")
 
 	var c contacts.Contact
 	if err := d.Call(context.Background(), "contact.add-from-card",
@@ -48,7 +48,7 @@ func TestContactAddFromCard_LabelOverride(t *testing.T) {
 
 func TestContactAddFromCard_UpsertPreservesTierAddsRelay(t *testing.T) {
 	d := newTestDaemon(t)
-	uri, pk := makeTestCard(t, "alice", "wss://relay.example/")
+	uri, pk := makeTestCard(t, "alice", "wss://relay.example")
 
 	// First insert directly at a non-default tier so we can verify
 	// upsert leaves the tier alone.
@@ -74,7 +74,7 @@ func TestContactAddFromCard_UpsertPreservesTierAddsRelay(t *testing.T) {
 	}
 	hasNew, hasOld := false, false
 	for _, r := range refreshed.Relays {
-		if r == "wss://relay.example/" {
+		if r == "wss://relay.example" {
 			hasNew = true
 		}
 		if r == "wss://other.example/" {
@@ -98,7 +98,7 @@ func TestContactAddFromCard_GarbageURI_RejectedAsCardInvalid(t *testing.T) {
 
 func TestContactAddFromCard_NoLabelAnywhereRejected(t *testing.T) {
 	d := newTestDaemon(t)
-	uri, _ := makeTestCard(t, "", "wss://relay.example/")
+	uri, _ := makeTestCard(t, "", "wss://relay.example")
 	err := d.Call(context.Background(), "contact.add-from-card",
 		ContactAddFromCardParams{URI: uri}, nil)
 	var ipcErr *ipc.Error

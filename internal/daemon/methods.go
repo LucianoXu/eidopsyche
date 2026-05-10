@@ -81,6 +81,10 @@ func contactAddFromCard(ctx context.Context, d *Daemon, _ *ipc.Conn, params json
 	if err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrCardInvalid, Message: err.Error()}
 	}
+	// card.Parse canonicalizes Relay; re-normalize defensively so any
+	// other Card construction path (TOML Decode, future inputs) still
+	// keys a single registry entry per relay endpoint.
+	c.Relay = normRelayURL(c.Relay)
 	pk, err := identity.DecodeNpub(c.Npub)
 	if err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidNpub, Message: err.Error()}
