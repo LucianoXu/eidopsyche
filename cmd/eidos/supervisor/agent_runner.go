@@ -29,6 +29,13 @@ const gateConfigPath = "/eidos/gate/config.toml"
 // surface dream-eligibility hints.
 const dreamStateRuntimePath = "/eidos/run/dream-state.json"
 
+// agentLockPath is the single-instance lock for the agent process.
+// Lives at /eidos/run/agent.lock per spec
+// docs/superpowers/specs/2026-05-09-mindforge-v0-design.md (the lock
+// is decoupled from the wake directory so a future non-wake-driven
+// agent invocation lands on the same singleton).
+const agentLockPath = "/eidos/run/agent.lock"
+
 // EXIT_AUTH_REQUIRED is the exit code agent-runner uses when Claude's
 // /login token is expired or missing. The supervisor surfaces this state
 // via `eidos forge status`.
@@ -62,8 +69,7 @@ func runAgent(wakeFile, ontologyDir string) error {
 		return fmt.Errorf("decode wake file: %w", err)
 	}
 
-	lockPath := filepath.Join(filepath.Dir(wakeFile), "agent.lock")
-	lock, err := acquireAgentLock(lockPath)
+	lock, err := acquireAgentLock(agentLockPath)
 	if err != nil {
 		return fmt.Errorf("agent lock: %w", err)
 	}
