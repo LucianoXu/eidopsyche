@@ -167,10 +167,13 @@ $ eidos gate inbox -n 1
 [来自心智体] 我在。
 
 # 6a. 想看心智体在某次 wake 中怎么"想"的(thinking + tool calls + tool results)?
-#     `forge watch` 流式渲染容器里捕获的 stream-json 推理链。
+#     `forge watch` 流式渲染容器里捕获的 stream-json 推理链。同一个 session 内
+#     的多次 wake 会延续 Claude 的工作记忆;dream-end 后的下次 wake 起新 session,
+#     header / --list 会显示 session 短 UUID,follow 模式下还会画分隔条。
 $ eidos forge watch alice          # 跟随当前 wake;无 active 则显示最近一次
-$ eidos forge watch alice --list   # 列出最近的 wakes,看 id / 时长 / 成本
+$ eidos forge watch alice --list   # 列出最近的 wakes,看 id / SESSION / 时长 / 成本
 $ eidos forge watch alice --wake <id> --thinking   # 看历史 wake,含 thinking blocks
+$ eidos forge status alice         # 含 `session: <prefix> (age ..., N wakes)` 一行
 
 # 7. 不和它说话时让它睡觉（容器停止 = 睡眠）。消息会在 relay 上排队。
 $ eidos forge stop alice
