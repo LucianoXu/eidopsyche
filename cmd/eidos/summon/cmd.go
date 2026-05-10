@@ -33,6 +33,7 @@ var (
 )
 
 // Command returns the cobra command. Registered in cmd/eidos/main.go.
+// Bare `eidos` auto-dispatches via RunBare (different EntryMode).
 func Command() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "summon",
@@ -57,7 +58,7 @@ Flags:
                          branch of Phase 1, when no local identity
                          exists yet). Avoids pasting nsec on stdin.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return Run(cmd.Context())
+			return run(cmd.Context(), firstcontact.EntrySummon)
 		},
 	}
 	c.Flags().StringVar(&flagMasterCard, "master-card", "", "path to the master's identity card (overrides any local identity)")
@@ -65,8 +66,19 @@ Flags:
 	return c
 }
 
-// Run is the entry point both Command() and bare-eidos dispatch call.
+// Run is the entry point bare-eidos dispatch (cmd/eidos/main.go) calls.
+// It runs the wizard with EntryBareEidos so Phase 2 keeps the 退出
+// option (the mindgate-only flow needs to be reachable from `eidos`).
+//
+// `eidos summon` (the cobra command) goes through Command() → RunE →
+// run() with EntrySummon so Phase 2 suppresses 退出 (the user already
+// committed to summoning by typing `summon`).
 func Run(ctx context.Context) error {
+	return run(ctx, firstcontact.EntryBareEidos)
+}
+
+// run is the shared body, parameterised by entry mode.
+func run(ctx context.Context, entry firstcontact.EntryMode) error {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return errors.New("the `claude` command is not on PATH; install Claude Code (https://docs.anthropic.com/claude/claude-code) and run `claude /login`")
 	}
@@ -91,7 +103,7 @@ func Run(ctx context.Context) error {
 		Claude:          cl,
 		DockerClient:    dock,
 		Image:           image,
-		EntryMode:       firstcontact.EntrySummon,
+		EntryMode:       entry,
 		MasterCardPath:  flagMasterCard,
 		OperatorKeyPath: flagKeyFile,
 		WriteVolume: func(ctx context.Context, slug, relPath string, body []byte) error {
