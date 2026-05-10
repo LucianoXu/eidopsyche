@@ -39,7 +39,7 @@ func (f *fakeRenderer) PromptChoice(_ string, _ []render.ChoiceOption) (int, err
 	f.choices = f.choices[1:]
 	return v, nil
 }
-func (f *fakeRenderer) Status(string) render.StatusHandle  { return noopStatus{} }
+func (f *fakeRenderer) Status(string) render.StatusHandle   { return noopStatus{} }
 func (f *fakeRenderer) Logo(context.Context, time.Duration) {}
 
 type noopStatus struct{}
