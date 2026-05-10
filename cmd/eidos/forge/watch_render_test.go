@@ -148,7 +148,7 @@ func TestRenderListTableForWatch(t *testing.T) {
 		{ID: "feeb", Reason: "heartbeat", StartedAt: 1698000000, OK: false, ExitCode: 7},
 	}}
 	out := strings.Join(renderListTableForWatch(idx, 0), "\n")
-	for _, want := range []string{"ID         REASON", "abcdef12", "$0.0500", "crashed", "failed(7)"} {
+	for _, want := range []string{"ID         SESSION    REASON", "abcdef12", "$0.0500", "crashed", "failed(7)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("list table missing %q: %s", want, out)
 		}
@@ -171,5 +171,25 @@ func TestRenderListTableForWatch_Limit(t *testing.T) {
 	// 1 header + 2 rows = 3 lines.
 	if len(got) != 3 {
 		t.Errorf("limit=2: got %d lines, want 3: %v", len(got), got)
+	}
+}
+
+func TestRenderListTableForWatch_HasSessionColumn(t *testing.T) {
+	idx := transcript.Index{V: 1, Wakes: []transcript.Entry{
+		{ID: "abc12345", SessionID: "7d2f6f2e1b2a4c3d", Reason: "heartbeat", StartedAt: 1700000000, EndedAt: 1700000010, OK: true, ExitCode: 0},
+		{ID: "abc12344", SessionID: "", Reason: "heartbeat", StartedAt: 1699999000, EndedAt: 1699999005, OK: true, ExitCode: 0},
+	}}
+	lines := renderListTableForWatch(idx, 0)
+	if len(lines) < 3 {
+		t.Fatalf("expected header + 2 rows; got %v", lines)
+	}
+	if !strings.Contains(lines[0], "SESSION") {
+		t.Fatalf("header missing SESSION column: %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "7d2f6f2e") {
+		t.Fatalf("row 1 should contain session prefix; got %q", lines[1])
+	}
+	if !strings.Contains(lines[2], "-") {
+		t.Fatalf("row 2 (legacy entry) should render `-` in SESSION; got %q", lines[2])
 	}
 }

@@ -232,11 +232,18 @@ func renderListTableForWatch(idx transcript.Index, limit int) []string {
 	if len(wakes) == 0 {
 		return []string{"no wakes recorded yet"}
 	}
-	out := []string{"ID         REASON      STARTED              DUR    COST      STATUS"}
+	out := []string{"ID         SESSION    REASON      STARTED              DUR    COST      STATUS"}
 	for _, w := range wakes {
 		id := w.ID
 		if len(id) > 8 {
 			id = id[:8]
+		}
+		sess := "-"
+		if w.SessionID != "" {
+			sess = w.SessionID
+			if len(sess) > 8 {
+				sess = sess[:8]
+			}
 		}
 		started := unixToISOZ(w.StartedAt)
 		dur := "-"
@@ -255,8 +262,8 @@ func renderListTableForWatch(idx transcript.Index, limit int) []string {
 				status = "crashed"
 			}
 		}
-		out = append(out, fmt.Sprintf("%-10s %-11s %-20s %-6s %-9s %s",
-			id, w.Reason, started, dur, cost, status))
+		out = append(out, fmt.Sprintf("%-10s %-10s %-11s %-20s %-6s %-9s %s",
+			id, sess, w.Reason, started, dur, cost, status))
 	}
 	return out
 }

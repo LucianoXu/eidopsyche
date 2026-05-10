@@ -54,11 +54,18 @@ func renderListTable(cmd *cobra.Command, idx transcript.Index) error {
 		fmt.Fprintln(out, "no wakes recorded yet")
 		return nil
 	}
-	fmt.Fprintln(out, "ID         REASON      STARTED              DUR    COST      STATUS")
+	fmt.Fprintln(out, "ID         SESSION    REASON      STARTED              DUR    COST      STATUS")
 	for _, w := range idx.Wakes {
 		id := w.ID
 		if len(id) > 8 {
 			id = id[:8]
+		}
+		sess := "-"
+		if w.SessionID != "" {
+			sess = w.SessionID
+			if len(sess) > 8 {
+				sess = sess[:8]
+			}
 		}
 		started := time.Unix(w.StartedAt, 0).UTC().Format("2006-01-02 15:04:05")
 		dur := "-"
@@ -76,8 +83,8 @@ func renderListTable(cmd *cobra.Command, idx transcript.Index) error {
 				status = fmt.Sprintf("failed(%d)", w.ExitCode)
 			}
 		}
-		fmt.Fprintf(out, "%-10s %-11s %-20s %-6s %-9s %s\n",
-			id, w.Reason, started, dur, cost, status)
+		fmt.Fprintf(out, "%-10s %-10s %-11s %-20s %-6s %-9s %s\n",
+			id, sess, w.Reason, started, dur, cost, status)
 	}
 	return nil
 }
