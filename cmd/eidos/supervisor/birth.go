@@ -71,7 +71,19 @@ func drainBirthIfPresent(ctx context.Context, wakeDir, ontologyDir string, handl
 // message; book + calling-words as the user prompt), and runs claude.
 // Verifies the agent set essence/born_at — if not, returns an error so
 // the supervisor's next iteration retries.
+//
+// Self-gates on /eidos/run/auth_required.json: if claude auth has
+// failed previously (either in a normal wake or a prior birth attempt),
+// don't invoke claude again — return an error that drainBirthIfPresent
+// keeps birth.json around for, but the operator gets a clear forge-
+// status signal and isn't billed for failed retries.
 func productionBirthHandler(ctx context.Context, sig wake.BirthSignal, ontologyDir string) error {
+	if state, err := authstate.Read(); err == nil && state != nil {
+		return fmt.Errorf(
+			"birth handler: claude auth required (since %s); run `eidos forge login <slug>` to clear %s",
+			time.Unix(state.Since, 0).UTC().Format(time.RFC3339), authstate.Path)
+	}
+
 	prompt, err := os.ReadFile(birthPromptPath)
 	if err != nil {
 		return fmt.Errorf("read birth prompt: %w", err)
