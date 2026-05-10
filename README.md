@@ -104,6 +104,11 @@ Disable update notifications with `EIDOS_NO_UPDATE_CHECK=1`, by setting
 `[update] check = false` in `~/.config/eidos/config.toml`, or by running in
 any environment that sets `CI=true`.
 
+The First Contact wizard renders as a Bubble Tea TUI on real terminals
+and falls back to a plain CLI on non-TTY / dumb terminals / narrow
+windows / `CI` set. To force the CLI fallback explicitly, set
+`EIDOS_NO_TUI=1`.
+
 ## Quick start
 
 The fastest path is the **First Contact wizard** — bare `eidos` on a

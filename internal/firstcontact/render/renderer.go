@@ -52,3 +52,22 @@ type Renderer interface {
 	Status(message string) StatusHandle
 	Logo(ctx context.Context, d time.Duration)
 }
+
+// TUIRenderer is implemented by renderers whose lifecycle requires
+// owning the main goroutine (Bubble Tea). Surfaces detect this via
+// type-assertion and call RunWithPhases instead of running the phase
+// driver directly. The plain Renderer interface (Prompt, Show, etc.)
+// is unchanged so phase logic doesn't need to know about the
+// distinction.
+type TUIRenderer interface {
+	Renderer
+	RunWithPhases(ctx context.Context, fn func(context.Context, Renderer) error) error
+}
+
+// MarkdownRenderer is implemented by renderers that can render
+// markdown bodies (e.g. the TUI via glamour). Surfaces opt in via
+// type-assertion; the CLI does not implement this and falls back to
+// plain Typewriter.
+type MarkdownRenderer interface {
+	RenderMarkdown(ctx context.Context, body string)
+}
