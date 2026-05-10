@@ -59,6 +59,142 @@ func TestExtractTarRoundTrip(t *testing.T) {
 	}
 }
 
+// singleEntryTar produces an in-memory tar archive holding one header (and
+// optional body). Used by the hardening tests below to feed extractTar a
+// hostile entry without dragging in a fixture file.
+func singleEntryTar(t *testing.T, h tar.Header, body []byte) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if body != nil {
+		h.Size = int64(len(body))
+	}
+	if err := tw.WriteHeader(&h); err != nil {
+		t.Fatal(err)
+	}
+	if body != nil {
+		if _, err := tw.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return &buf
+}
+
+// noExtraSiblings asserts that target's parent directory has no entries
+// other than target itself — i.e. nothing was written outside target.
+func noExtraSiblings(t *testing.T, target string) {
+	t.Helper()
+	parent := filepath.Dir(target)
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if filepath.Join(parent, e.Name()) != target {
+			t.Errorf("unexpected sibling under %s: %s", parent, e.Name())
+		}
+	}
+}
+
+// TestExtractTarRejectsParentTraversal: a tar entry whose Name escapes the
+// target dir via `..` must error and write nothing outside target.
+// Regression guard for the path-traversal gap codex flagged on 2026-05-10.
+func TestExtractTarRejectsParentTraversal(t *testing.T) {
+	buf := singleEntryTar(t, tar.Header{
+		Name:     "../escape.txt",
+		Mode:     0o600,
+		Typeflag: tar.TypeReg,
+	}, []byte("pwn"))
+
+	parent := t.TempDir()
+	target := filepath.Join(parent, "victim")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := extractTar(buf, target); err == nil {
+		t.Fatal("expected extractTar to reject parent traversal, got nil")
+	}
+	noExtraSiblings(t, target)
+}
+
+// TestExtractTarRejectsAbsolutePath: a tar entry with an absolute Name
+// (`/etc/passwd`) must be rejected; absolute paths short-circuit
+// filepath.Join's "rooted under target" intent.
+func TestExtractTarRejectsAbsolutePath(t *testing.T) {
+	buf := singleEntryTar(t, tar.Header{
+		Name:     "/etc/passwd",
+		Mode:     0o600,
+		Typeflag: tar.TypeReg,
+	}, []byte("root::0:0::/:/bin/sh\n"))
+
+	target := t.TempDir()
+	if err := extractTar(buf, target); err == nil {
+		t.Fatal("expected extractTar to reject absolute path, got nil")
+	}
+	if _, err := os.Stat("/etc/passwd.tartest"); err == nil {
+		t.Fatal("test leaked outside target")
+	}
+}
+
+// TestExtractTarRejectsSneakyTraversal: an entry whose Name cleans to
+// inside target but whose RAW form contains `..` segments
+// (`good/../../escape.txt`) must still be rejected. Defense-in-depth
+// against tools that strip `..` only on the outermost prefix.
+func TestExtractTarRejectsSneakyTraversal(t *testing.T) {
+	buf := singleEntryTar(t, tar.Header{
+		Name:     "good/../../escape.txt",
+		Mode:     0o600,
+		Typeflag: tar.TypeReg,
+	}, []byte("pwn"))
+
+	parent := t.TempDir()
+	target := filepath.Join(parent, "victim")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := extractTar(buf, target); err == nil {
+		t.Fatal("expected extractTar to reject sneaky traversal, got nil")
+	}
+	noExtraSiblings(t, target)
+}
+
+// TestExtractTarRejectsSymlink: symlink and hardlink headers must error
+// rather than silently dropping. Silent skip was prior behavior (only
+// TypeDir/TypeReg were handled) — making it explicit prevents a malicious
+// tar from sneaking a symlink past a future maintainer who adds Symlink
+// handling without re-checking the path validation.
+func TestExtractTarRejectsSymlink(t *testing.T) {
+	buf := singleEntryTar(t, tar.Header{
+		Name:     "trap",
+		Mode:     0o600,
+		Typeflag: tar.TypeSymlink,
+		Linkname: "/etc/passwd",
+	}, nil)
+
+	target := t.TempDir()
+	if err := extractTar(buf, target); err == nil {
+		t.Fatal("expected extractTar to reject symlink header, got nil")
+	}
+}
+
+// TestExtractTarRejectsHardlink: same fail-loud contract for hardlinks.
+func TestExtractTarRejectsHardlink(t *testing.T) {
+	buf := singleEntryTar(t, tar.Header{
+		Name:     "trap",
+		Mode:     0o600,
+		Typeflag: tar.TypeLink,
+		Linkname: "/etc/passwd",
+	}, nil)
+
+	target := t.TempDir()
+	if err := extractTar(buf, target); err == nil {
+		t.Fatal("expected extractTar to reject hardlink header, got nil")
+	}
+}
+
 // TestChownTreeIdempotent walks a tmpdir and asserts every entry
 // post-chownTree has the requested uid/gid, both first call and second.
 // Tests don't run as root, so we chown to the current uid/gid.

@@ -204,6 +204,37 @@ func applyModelEnv(cfgPath, model string) error {
 	return config.Save(cfgPath, cfg)
 }
 
+// safeTarPath validates a tar entry name and returns the joined destination
+// rooted under target. Returns an error for absolute paths, paths whose raw
+// form contains "..", or paths whose cleaned form escapes target. Treating
+// raw `..` segments as fatal (not just post-clean escapes) defends against
+// tools that strip outermost `..` only.
+func safeTarPath(target, name string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("tar entry has empty Name")
+	}
+	if filepath.IsAbs(name) || strings.HasPrefix(name, "/") {
+		return "", fmt.Errorf("tar entry rejected (absolute path): %q", name)
+	}
+	// Normalize separators (tar archives canonically use forward slashes)
+	// and check for ".." anywhere in the raw segments.
+	normalized := filepath.ToSlash(name)
+	for _, seg := range strings.Split(normalized, "/") {
+		if seg == ".." {
+			return "", fmt.Errorf("tar entry rejected (parent traversal): %q", name)
+		}
+	}
+	dst := filepath.Join(target, filepath.FromSlash(normalized))
+	rel, err := filepath.Rel(target, dst)
+	if err != nil {
+		return "", fmt.Errorf("tar entry %q: %w", name, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("tar entry escapes target after clean: %q", name)
+	}
+	return dst, nil
+}
+
 func extractTar(r io.Reader, target string) error {
 	tr := tar.NewReader(r)
 	for {
@@ -214,7 +245,10 @@ func extractTar(r io.Reader, target string) error {
 		if err != nil {
 			return err
 		}
-		dst := filepath.Join(target, h.Name)
+		dst, err := safeTarPath(target, h.Name)
+		if err != nil {
+			return err
+		}
 		switch h.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(dst, fs.FileMode(h.Mode)|0o700); err != nil {
@@ -235,6 +269,13 @@ func extractTar(r io.Reader, target string) error {
 			if err := f.Close(); err != nil {
 				return err
 			}
+		default:
+			// Fail loud on symlinks, hardlinks, char/block devices, FIFOs.
+			// Previous behavior was a silent skip, which would let a hostile
+			// tar quietly drop unexpected payloads — and is one careless
+			// future "case tar.TypeSymlink: os.Symlink(...)" away from a
+			// real escape. Refuse instead.
+			return fmt.Errorf("tar entry %q has unsupported type 0x%x", h.Name, h.Typeflag)
 		}
 	}
 }
