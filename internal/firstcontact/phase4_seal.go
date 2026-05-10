@@ -245,7 +245,12 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	}
 
 	// Add MindForm to the operator's host contacts (bootstrap exception).
-	if d.AddContact != nil {
+	// Only relevant when the host has its own gate identity (Phase 1 =
+	// create / import). The Phase 1 = skip path leaves OperatorPresent
+	// false: there's no host contacts list to add to, so a call would
+	// fail with a noisy "state.db not found" warning that misrepresents
+	// the by-design mind-form-only deployment as a problem.
+	if d.AddContact != nil && s.OperatorPresent {
 		if addErr := d.AddContact(ctx, s.MindFormNpub, s.SummonedName, s.HomeRelay); addErr != nil {
 			// Non-fatal: ritual is complete even if contact-add fails;
 			// the operator can run `eidos gate add-contact` later.
