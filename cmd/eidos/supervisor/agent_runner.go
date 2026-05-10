@@ -152,6 +152,25 @@ func runAgent(wakeFile, ontologyDir string) error {
 		}
 		sessionUUID = fresh.SessionID
 		mode.UUID = fresh.SessionID
+	} else {
+		// Pre-flight: if the on-disk jsonl is gone (ontology import lost
+		// it, operator manually nuked CLAUDE_DIR, etc.) Claude --resume
+		// will fail. Detect the common case here and reset proactively.
+		if jsonl := sessionJsonlPath(ontologyDir, sessionUUID); jsonl != "" {
+			if _, statErr := os.Stat(jsonl); errors.Is(statErr, fs.ErrNotExist) {
+				log.Printf("agent-runner: session jsonl for %s missing; resetting and retrying as new session", sessionUUID)
+				if cErr := sessionstate.Clear(sessionStatePath); cErr != nil {
+					log.Printf("agent-runner: session-state clear before mint: %v", cErr)
+				}
+				fresh, mErr := sessionstate.Mint(sessionStatePath, time.Now())
+				if mErr != nil {
+					return fmt.Errorf("session-state mint after fallback: %w", mErr)
+				}
+				sessionUUID = fresh.SessionID
+				isFirstWake = true
+				mode = SessionMode{Kind: SessionNew, UUID: sessionUUID}
+			}
+		}
 	}
 
 	msg := rebuildWakeMessage(sig, cfg, ds, isFirstWake)
@@ -637,6 +656,34 @@ func acquireAgentLock(path string) (*os.File, error) {
 func releaseAgentLock(f *os.File) {
 	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 	_ = f.Close()
+}
+
+// encodeCWD replaces every non-alphanumeric char with '-', per Claude
+// Code's documented session-storage scheme. Idempotent.
+func encodeCWD(cwd string) string {
+	var b strings.Builder
+	b.Grow(len(cwd))
+	for _, r := range cwd {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	return b.String()
+}
+
+// sessionJsonlPath is the absolute path Claude Code uses for a session
+// jsonl: <CLAUDE_DIR>/projects/<encoded-cwd>/<uuid>.jsonl with
+// CLAUDE_DIR = <ontologyDir>/.claude (matches the env we export for
+// the claude subprocess). Returns "" when ontologyDir is empty.
+func sessionJsonlPath(ontologyDir, uuid string) string {
+	if ontologyDir == "" {
+		return ""
+	}
+	claudeDir := filepath.Join(ontologyDir, ".claude")
+	return filepath.Join(claudeDir, "projects", encodeCWD(ontologyDir), uuid+".jsonl")
 }
 
 // SessionKind selects how a wake's claude invocation is bound to a

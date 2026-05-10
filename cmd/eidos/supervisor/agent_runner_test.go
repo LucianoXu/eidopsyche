@@ -174,6 +174,32 @@ func TestBuildClaudeArgs_SessionNew(t *testing.T) {
 	}
 }
 
+func TestEncodeCWD(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"/eidos/ontology", "-eidos-ontology"},
+		{"abc123", "abc123"},
+		{"/path/with-dash", "-path-with-dash"},
+	}
+	for _, c := range cases {
+		if got := encodeCWD(c.in); got != c.want {
+			t.Errorf("encodeCWD(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestSessionJsonlPath(t *testing.T) {
+	got := sessionJsonlPath("/eidos/ontology", "abc-uuid")
+	want := "/eidos/ontology/.claude/projects/-eidos-ontology/abc-uuid.jsonl"
+	if got != want {
+		t.Errorf("sessionJsonlPath: got %q, want %q", got, want)
+	}
+	if got := sessionJsonlPath("", "abc-uuid"); got != "" {
+		t.Errorf("sessionJsonlPath with empty ontology: got %q, want empty", got)
+	}
+}
+
 func TestDecideSessionMode_NewWhenAbsent(t *testing.T) {
 	mode, first := decideSessionMode(sessionstate.State{}, nil, dreamstate.State{})
 	if !first || mode.Kind != SessionNew {
