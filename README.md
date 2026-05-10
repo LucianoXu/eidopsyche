@@ -106,6 +106,27 @@ any environment that sets `CI=true`.
 
 ## Quick start
 
+The fastest path is the **First Contact wizard** — bare `eidos` on a
+fresh install drops you straight into a guided ritual that summons your
+first mind-form:
+
+```sh
+eidos
+```
+
+The wizard collects your operator label and home relay, asks you to
+describe the character you want to summon, generates a displaying
+paragraph and a calling-words incantation via Claude Code, and brings
+the new mind-form online with its own private secret. Run
+`eidos summon` to summon a 2nd, 3rd, ... mind-form once your operator
+state exists. The wizard requires `claude` (Claude Code) to be on
+PATH and logged in.
+
+If you'd rather drive everything by hand (scripted setups, advanced
+topologies), the two-command bootstrap path below remains supported.
+
+### Manual bootstrap (advanced)
+
 `eidos gate init` requires `--label` and `--home`. The home URL is the
 relay peers will dial to reach you — pick the topology that fits your
 host:

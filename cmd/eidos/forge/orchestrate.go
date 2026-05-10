@@ -17,8 +17,13 @@ import (
 // default; eidos forge create warns when host version != image tag.
 var DefaultImage = "ghcr.io/lucianoxu/eidopsyche-mindform:dev"
 
-// orchestrate is the testable seam for `eidos forge create`.
-func orchestrate(ctx context.Context, c forgectl.Client, name string, o createOpts) error {
+// Orchestrate is the testable seam for `eidos forge create` and the
+// First Contact wizard's phase 3. The wizard imports it directly as a
+// sanctioned bootstrap exception (see CLAUDE.md "Single Call Path"):
+// container creation does not flow through the daemon's methodTable
+// today, and adding an IPC method just to wrap docker is out of scope
+// for this milestone.
+func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOpts) error {
 	vol := forgectl.VolumeName(name)
 	cont := forgectl.ContainerName(name)
 	if exists, err := c.VolumeExists(ctx, vol); err != nil {
@@ -32,7 +37,7 @@ func orchestrate(ctx context.Context, c forgectl.Client, name string, o createOp
 		return fmt.Errorf("container %s already exists", cont)
 	}
 
-	image := o.image
+	image := o.Image
 	if image == "" {
 		image = DefaultImage
 	}
@@ -60,15 +65,27 @@ func orchestrate(ctx context.Context, c forgectl.Client, name string, o createOp
 	go func() {
 		defer pipeW.Close()
 		err := ontology.TarStream(pipeW, ontology.Params{
-			Label:       o.label,
-			OwnerNpub:   o.owner,
-			CreatedDate: time.Now().UTC().Format("2006-01-02"),
+			Label:        o.Label,
+			OwnerNpub:    o.Owner,
+			CreatedDate:  time.Now().UTC().Format("2006-01-02"),
+			JournalEntry: o.JournalEntry,
 		})
 		if err != nil {
 			_ = pipeW.CloseWithError(err)
 		}
 	}()
 
+	env := []string{
+		"EIDOS_IN_CONTAINER=1",
+		"EIDOS_FORGE_NAME=" + name,
+		"EIDOS_FORGE_LABEL=" + o.Label,
+		"EIDOS_FORGE_OWNER=" + o.Owner,
+		"EIDOS_FORGE_RELAY=" + o.Relay,
+		"EIDOS_FORGE_MODEL=" + o.Model,
+	}
+	if o.KeyHex != "" {
+		env = append(env, "EIDOS_FORGE_KEY_HEX="+o.KeyHex)
+	}
 	res, err := c.RunInit(ctx, forgectl.RunInitOpts{
 		Image: image,
 		Mount: forgectl.Mount{VolumeName: vol, Target: "/eidos"},
@@ -76,15 +93,8 @@ func orchestrate(ctx context.Context, c forgectl.Client, name string, o createOp
 		// clone the bundle, and git-init the parent ontology with full
 		// privileges. Its last step chowns /eidos to 1000:1000; the
 		// persistent container then starts as the image's USER (eidos).
-		User: "0:0",
-		Env: []string{
-			"EIDOS_IN_CONTAINER=1",
-			"EIDOS_FORGE_NAME=" + name,
-			"EIDOS_FORGE_LABEL=" + o.label,
-			"EIDOS_FORGE_OWNER=" + o.owner,
-			"EIDOS_FORGE_RELAY=" + o.relay,
-			"EIDOS_FORGE_MODEL=" + o.model,
-		},
+		User:  "0:0",
+		Env:   env,
 		Cmd:   []string{"eidos", "forge", "init-volume"},
 		Stdin: pipeR,
 	})
@@ -111,21 +121,21 @@ func orchestrate(ctx context.Context, c forgectl.Client, name string, o createOp
 
 // runCreate2 is the cobra-level entry: creates a real Docker client,
 // orchestrates, and prints post-create UX.
-func runCreate2(cmd *cobra.Command, name string, o createOpts) error {
+func runCreate2(cmd *cobra.Command, name string, o CreateOpts) error {
 	c, err := forgectl.New()
 	if err != nil {
 		return err
 	}
 	ctx := cmd.Context()
-	if err := orchestrate(ctx, c, name, o); err != nil {
+	if err := Orchestrate(ctx, c, name, o); err != nil {
 		return err
 	}
-	cmd.Printf("created mind-form %q (label %q)\n", name, o.label)
+	cmd.Printf("created mind-form %q (label %q)\n", name, o.Label)
 	cmd.Printf("  volume: %s\n", forgectl.VolumeName(name))
-	cmd.Printf("  master: %s\n", o.owner)
-	cmd.Printf("  relay : %s\n", o.relay)
+	cmd.Printf("  master: %s\n", o.Owner)
+	cmd.Printf("  relay : %s\n", o.Relay)
 	cmd.Printf("\nNext: print its card with `eidos forge status %s`, start it with `eidos forge start %s`.\n", name, name)
-	if !o.noLogin {
+	if !o.NoLogin {
 		cmd.Printf("\nRun `eidos forge login %s` now to log Claude Code into this mind-form.\n", name)
 	}
 	return nil

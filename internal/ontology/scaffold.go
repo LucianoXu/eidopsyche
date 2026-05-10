@@ -18,6 +18,15 @@ type Params struct {
 	Label       string
 	OwnerNpub   string
 	CreatedDate string
+
+	// JournalEntry, if non-empty, is appended to the tar stream produced
+	// by TarStream as a literal file at journal/0000-summoning.md. It is
+	// NOT run through text/template — the wizard's pre-rendered markdown
+	// can contain `{{` literals (in user-provided text or claude-generated
+	// paragraphs) that would otherwise break the template engine. Used
+	// by the First Contact wizard to seed the new MindForm's volume with
+	// its summoning book.
+	JournalEntry string
 }
 
 // Scaffold writes the v0 ontology template into dir, rendering any .tpl
@@ -120,6 +129,23 @@ func TarStream(w io.Writer, params Params) error {
 	if walkErr != nil {
 		tw.Close() //nolint:errcheck // best-effort; return the walk error
 		return walkErr
+	}
+	if params.JournalEntry != "" {
+		body := []byte(params.JournalEntry)
+		if err := tw.WriteHeader(&tar.Header{
+			Name:     "journal/0000-summoning.md",
+			Mode:     0o600,
+			Size:     int64(len(body)),
+			Typeflag: tar.TypeReg,
+			ModTime:  now,
+		}); err != nil {
+			tw.Close() //nolint:errcheck
+			return err
+		}
+		if _, err := tw.Write(body); err != nil {
+			tw.Close() //nolint:errcheck
+			return err
+		}
 	}
 	return tw.Close()
 }

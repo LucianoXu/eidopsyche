@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	"github.com/LucianoXu/eidopsyche/cmd/eidos/forge"
 	"github.com/LucianoXu/eidopsyche/cmd/eidos/gate"
 	"github.com/LucianoXu/eidopsyche/cmd/eidos/relay"
+	"github.com/LucianoXu/eidopsyche/cmd/eidos/summon"
 	"github.com/LucianoXu/eidopsyche/cmd/eidos/supervisor"
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/update"
 )
 
@@ -23,6 +27,10 @@ The single eidos binary delivers three component roles via subcommands:
   eidos gate        MindGate: decentralized comms over Nostr
   eidos supervisor  Container PID 1: cron + gate daemon + agent spawn
   eidos relay       Stand-alone Nostr relay (infrastructure, not an entity)
+  eidos summon      First Contact wizard: guided ritual to summon a new mind-form
+
+When run with no subcommand AND no existing state, eidos auto-launches
+the First Contact wizard. Returning users see this help message instead.
 
 See https://github.com/LucianoXu/eidopsyche for documentation.`,
 	SilenceUsage:  true,
@@ -34,6 +42,7 @@ func init() {
 	rootCmd.AddCommand(forge.Command())
 	rootCmd.AddCommand(supervisor.Command())
 	rootCmd.AddCommand(relay.Command())
+	rootCmd.AddCommand(summon.Command())
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(selfUpdateCmd)
 }
@@ -42,6 +51,15 @@ func main() {
 	// Kick off an async update-check refresh; never blocks the user's command.
 	// The result lands in the cache for the next invocation to read.
 	update.MaybeRefreshAsync(buildInfo())
+
+	if shouldDispatchToWizard() {
+		if err := summon.Run(context.Background()); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		update.MaybePrompt(buildInfo(), os.Stderr, false)
+		return
+	}
 
 	err := rootCmd.Execute()
 
@@ -53,4 +71,22 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+}
+
+// shouldDispatchToWizard reports whether bare `eidos` (no subcommand,
+// no flags) should auto-launch the First Contact wizard. Trigger
+// conditions: argv has no subcommand AND <state-dir>/state.db is
+// absent. Returning operators see cobra's standard help.
+func shouldDispatchToWizard() bool {
+	if len(os.Args) != 1 {
+		return false
+	}
+	dir, err := config.ResolveStateDir("")
+	if err != nil {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(dir, "state.db")); err == nil {
+		return false
+	}
+	return true
 }

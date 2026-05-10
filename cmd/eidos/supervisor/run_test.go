@@ -100,4 +100,13 @@ func TestWatchPromotesPendingAndSpawns(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("agent not spawned within 2s")
 	}
+	// Cancel and wait for the watcher goroutine to exit before the test
+	// returns — otherwise t.TempDir's cleanup races with the still-active
+	// fsnotify watcher and intermittently sees "directory not empty".
+	cancel()
+	select {
+	case <-loopErr:
+	case <-time.After(time.Second):
+		t.Logf("watcher goroutine did not exit within 1s of cancel")
+	}
 }

@@ -32,6 +32,10 @@ const (
 	ReasonMindGate  Reason = "mindgate"
 	ReasonHeartBeat Reason = "heartbeat"
 	ReasonManual    Reason = "manual"
+	// ReasonBirth marks a one-shot birth-wake — see internal/wake/birth.go
+	// and the First Contact design (docs/superpowers/specs/
+	// 2026-05-09-first-contact-wizard-design.md §5.1).
+	ReasonBirth Reason = "birth"
 )
 
 // String returns the wake reason as a string. Useful in tests and logs.
