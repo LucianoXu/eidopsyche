@@ -107,7 +107,7 @@ func run(ctx context.Context, entry firstcontact.EntryMode) error {
 			if err != nil {
 				return fmt.Errorf("docker client: %w", err)
 			}
-			image := forge.DefaultImage
+			image := forge.DefaultImage()
 			d.DockerClient = dock
 			d.Image = image
 			d.WriteVolume = func(ctx context.Context, slug, relPath string, body []byte) error {

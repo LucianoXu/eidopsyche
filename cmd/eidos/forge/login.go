@@ -63,7 +63,7 @@ func newLoginCmd() *cobra.Command {
 			}
 			img := image
 			if img == "" {
-				img = DefaultImage
+				img = DefaultImage()
 			}
 
 			// Explicit file path wins over everything.
