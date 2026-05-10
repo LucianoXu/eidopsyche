@@ -103,15 +103,11 @@ func run(ctx context.Context, entry firstcontact.EntryMode) error {
 		OperatorKeyPath: flagKeyFile,
 		AddContact:      addContactDirect(stateDir),
 		EnsureSummonReady: func(d *firstcontact.Deps) error {
-			if _, err := exec.LookPath("claude"); err != nil {
-				return errors.New("the `claude` command is not on PATH; install Claude Code (https://docs.anthropic.com/claude/claude-code) and run `claude /login`")
-			}
 			dock, err := forgectl.New()
 			if err != nil {
 				return fmt.Errorf("docker client: %w", err)
 			}
 			image := forge.DefaultImage
-			d.Claude = &firstcontact.Claude{Run: firstcontact.ProductionRunner}
 			d.DockerClient = dock
 			d.Image = image
 			d.WriteVolume = func(ctx context.Context, slug, relPath string, body []byte) error {
@@ -153,6 +149,13 @@ func run(ctx context.Context, entry firstcontact.EntryMode) error {
 				},
 				HomeRelayURL: firstcontact.PublicHomeRelay,
 			}
+			return nil
+		},
+		EnsureClaudeReady: func(d *firstcontact.Deps) error {
+			if _, err := exec.LookPath("claude"); err != nil {
+				return errors.New("the `claude` command is not on PATH; install Claude Code (https://docs.anthropic.com/claude/claude-code) and run `claude /login`")
+			}
+			d.Claude = &firstcontact.Claude{Run: firstcontact.ProductionRunner}
 			return nil
 		},
 	}

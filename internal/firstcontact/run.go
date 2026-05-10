@@ -10,6 +10,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/firstcontact/render"
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
+	"github.com/LucianoXu/eidopsyche/internal/ontology"
 	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
@@ -57,19 +58,29 @@ type Deps struct {
 	OperatorKeyPath string
 
 	// EnsureSummonReady is called after Phase 2 returns a summon action
-	// (Local or Card) and before Phase 3 starts. The cmd-side uses it
-	// to defer summon-only prerequisites — claude on PATH, docker
-	// daemon, volume writers — until the user has actually committed
-	// to summoning. This is what makes the mindgate-only flow (Phase
-	// 2 = Exit) reachable on hosts that don't have claude / docker
-	// installed.
+	// (Local or Card) and before Phase 2.5 starts. The cmd-side uses
+	// it to defer docker-side prerequisites — daemon connection,
+	// volume writers — until the user has actually committed to
+	// summoning. This is what makes the mindgate-only flow (Phase 2
+	// = Exit) reachable on hosts that don't have docker installed.
+	//
+	// Claude on PATH is intentionally NOT validated here; see
+	// EnsureClaudeReady below.
 	//
 	// The callback receives a pointer to the Deps so it can populate
-	// Claude / DockerClient / WriteVolume / StartContainer /
-	// ResponseWait / AddContact / ExistingSlugs / Image / ReadyDeps
-	// in place. nil callback = the caller has already populated those
-	// fields (test path).
+	// DockerClient / WriteVolume / StartContainer / ResponseWait /
+	// AddContact / ExistingSlugs / Image / ReadyDeps in place. nil
+	// callback = the caller has already populated those fields (test
+	// path).
 	EnsureSummonReady func(*Deps) error
+
+	// EnsureClaudeReady is called after Phase 2.5 returns
+	// ScaffoldScratch, and before Phase 3's claude-driven flow runs.
+	// The cmd-side uses it to defer claude-on-PATH validation until
+	// the operator commits to the scratch path — so an operator
+	// picking a prefab on a host without claude installed can still
+	// proceed. nil callback = caller already populated d.Claude.
+	EnsureClaudeReady func(*Deps) error
 }
 
 // Run drives the wizard end-to-end through the four-phase tree:
@@ -122,18 +133,47 @@ func Run(ctx context.Context, d Deps) (*Summoning, []byte, error) {
 		return s, nil, nil
 	}
 
-	// User committed to summoning. NOW resolve claude / docker / etc.
+	// User committed to summoning. NOW resolve docker / volume helpers
+	// (claude is resolved later, only on the scratch branch).
 	if d.EnsureSummonReady != nil {
 		if err := d.EnsureSummonReady(&d); err != nil {
 			return s, nil, fmt.Errorf("summon prerequisites: %w", err)
 		}
 	}
 
-	ready := StartBackground(ctx, d.ReadyDeps)
-	existing, _ := d.ExistingSlugs()
-	if err := Phase3(ctx, s, d.Renderer, d.Claude, Phase3BookDeps{ExistingSlugs: existing}); err != nil {
+	choice, err := Phase2Half(ctx, s, d.Renderer)
+	if err != nil {
 		return s, nil, err
 	}
+	if choice == ScaffoldExit {
+		return s, nil, nil
+	}
+
+	ready := StartBackground(ctx, d.ReadyDeps)
+	existing, _ := d.ExistingSlugs()
+
+	if choice == ScaffoldPrefab {
+		metas, listErr := ontology.List()
+		if listErr != nil {
+			return s, nil, fmt.Errorf("list prefabs: %w", listErr)
+		}
+		if err := Phase3Prefab(ctx, s, d.Renderer, Phase3PrefabDeps{
+			Catalogue:     metas,
+			ExistingSlugs: existing,
+		}); err != nil {
+			return s, nil, err
+		}
+	} else {
+		if d.EnsureClaudeReady != nil {
+			if err := d.EnsureClaudeReady(&d); err != nil {
+				return s, nil, fmt.Errorf("claude prerequisites: %w", err)
+			}
+		}
+		if err := Phase3(ctx, s, d.Renderer, d.Claude, Phase3BookDeps{ExistingSlugs: existing}); err != nil {
+			return s, nil, err
+		}
+	}
+
 	body, err := Phase4(ctx, s, d.Renderer, d.Claude, ready, Phase4Deps{
 		DockerClient: d.DockerClient, Image: d.Image,
 		WriteVolume: d.WriteVolume, ContainerStart: d.StartContainer,
