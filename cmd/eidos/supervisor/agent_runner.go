@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -184,6 +185,15 @@ func runWithTranscript(sig wake.Signal, ontologyDir string, args []string) error
 	}
 
 	out, err := store.Open(wakeID)
+	if err != nil && errors.Is(err, fs.ErrExist) {
+		// Same-second same-reason collision (rare under the wake-dir
+		// flock + coalescing rules but theoretically possible). Try once
+		// more with a process-unique suffix before giving up on capture.
+		altID := fmt.Sprintf("%s-dup-%d-%d", wakeID, os.Getpid(), time.Now().UnixNano())
+		log.Printf("agent-runner: transcripts open(%s) collided; retrying as %s", wakeID, altID)
+		wakeID = altID
+		out, err = store.Open(wakeID)
+	}
 	if err != nil {
 		log.Printf("agent-runner: transcripts open(%s): %v; falling back", wakeID, err)
 		return runWithoutTranscript(ontologyDir, plainClaudeArgs(args))

@@ -295,6 +295,8 @@ func (s *Store) Recover() error {
 			}
 		}
 		idx.Wakes = upsertEntry(idx.Wakes, entry)
+		known[id] = true // freshly recovered → treat as known so the
+		// symlink-clean block below sees this wake as final.
 		added = true
 	}
 	if added {
@@ -303,13 +305,17 @@ func (s *Store) Recover() error {
 		}
 	}
 
-	// Clear dangling current symlink.
+	// Clear dangling current symlink. Three cases lead to removal:
+	//   1. Target file is missing → unambiguously stale.
+	//   2. Target exists AND is in the index (whether it was already
+	//      finalised or just synthesised by Recover above) → the writer
+	//      is gone, so the symlink is stale.
+	//   3. Otherwise leave it alone (a live wake's writer may legitimately
+	//      hold the symlink open).
 	if target, err := os.Readlink(s.CurrentPath()); err == nil {
 		if _, err := os.Stat(filepath.Join(s.Dir, target)); errors.Is(err, fs.ErrNotExist) {
 			_ = os.Remove(s.CurrentPath())
 		} else if err == nil {
-			// Symlink target exists; if it's already in the index, the wake
-			// completed cleanly and the symlink is a stale leftover. Drop it.
 			id := strings.TrimSuffix(strings.TrimPrefix(target, "wake-"), ".ndjson")
 			if known[id] {
 				_ = os.Remove(s.CurrentPath())

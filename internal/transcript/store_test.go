@@ -233,6 +233,25 @@ func TestStore_RecoverClearsDanglingCurrent(t *testing.T) {
 	}
 }
 
+// TestStore_RecoverClearsCurrentForOrphan verifies that when Recover
+// synthesises an index entry for a crashed wake, it ALSO clears the
+// stale `current` symlink that pointed at it. Without this, a follower
+// of `--wake current` will treat the recovered wake as still active and
+// wait forever for growth that never comes.
+func TestStore_RecoverClearsCurrentForOrphan(t *testing.T) {
+	s, _ := NewStore(t.TempDir())
+	writeOrphan(t, s, "crashed", `{"type":"system"}`+"\n")
+	if err := os.Symlink("wake-crashed.ndjson", s.CurrentPath()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(s.CurrentPath()); err == nil {
+		t.Errorf("current symlink should be cleared once orphan is indexed")
+	}
+}
+
 func TestStore_RecoverHandlesLargeLine(t *testing.T) {
 	s, _ := NewStore(t.TempDir())
 	// 200KB tool_result content — exercises the unbounded line reader.
