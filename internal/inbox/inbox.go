@@ -59,11 +59,24 @@ func (s *Store) appendJSONL(path string, v any) error {
 }
 
 // ListInbox returns inbox messages newest-first up to limit.
+//
+// Rows are collapsed by EventID so duplicates persisted across daemon
+// restarts (see Daemon.dedupe / hydrate rationale) appear once. The
+// scan stays streaming newest-first and short-circuits as soon as
+// limit collapsed rows have been emitted, so a small dashboard page
+// load still costs O(limit) rather than O(total inbox history).
+//
+// Newest-wins semantics: when the same EventID is seen in older files,
+// later occurrences are dropped. The bubble timestamp reflects the
+// most recent ingestion (typically the post-restart replay) and the
+// surviving Malformed / RejectReason fields reflect the current
+// decoder's verdict — a clean replay supersedes a stale soft-reject.
 func (s *Store) ListInbox(since *time.Time, from string, limit int) ([]Message, error) {
 	files, err := s.daysDescending(s.inboxDir())
 	if err != nil {
 		return nil, err
 	}
+	seen := make(map[string]struct{})
 	out := make([]Message, 0, limit)
 	for _, f := range files {
 		msgs, err := readInboxFile(f)
@@ -77,6 +90,12 @@ func (s *Store) ListInbox(since *time.Time, from string, limit int) ([]Message, 
 			}
 			if from != "" && m.From != from {
 				continue
+			}
+			if m.EventID != "" {
+				if _, dup := seen[m.EventID]; dup {
+					continue
+				}
+				seen[m.EventID] = struct{}{}
 			}
 			out = append(out, m)
 			if limit > 0 && len(out) >= limit {
@@ -104,6 +123,83 @@ func readInboxFile(path string) ([]Message, error) {
 		out = append(out, m)
 	}
 	return out, sc.Err()
+}
+
+// EventIDs returns the set of distinct inbox EventIDs persisted on disk.
+//
+// Used by the daemon at startup to rebuild its in-memory dedupe map so a
+// relay re-delivering an event after daemon restart doesn't append a
+// duplicate inbox row. Without this, every restart bloats inbox.jsonl
+// with replays the relay sends as part of its since=<lastseen> backlog.
+//
+// Memory is bounded by the active event population — a 32-byte event id
+// per row, typically well under 1 MB even for years of personal usage.
+func (s *Store) EventIDs() (map[string]struct{}, error) {
+	files, err := s.daysDescending(s.inboxDir())
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]struct{})
+	for _, f := range files {
+		msgs, err := readInboxFile(f)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range msgs {
+			if m.EventID != "" {
+				out[m.EventID] = struct{}{}
+			}
+		}
+	}
+	return out, nil
+}
+
+// SelfWrapIDs returns the set of distinct self-copy wrap event ids the
+// local gate has published (Sent.SelfEventID).
+//
+// Used by the daemon at startup to rebuild its in-memory selfWrapIDs
+// map so a relay echoing back our own self-copy wrap after daemon
+// restart doesn't trip the inbound path and re-persist our outbox into
+// our inbox under our own pubkey. Mirrors the runtime guard set up by
+// recordSelfWrap, which records ONLY the self-copy event id.
+//
+// We deliberately skip Sent.EventID — the recipient-bound wrap. For a
+// cross-addressed send (Bob → Alice) it never returns to Bob's
+// subscription, so hydrating it is harmless but pointless. For a
+// self-addressed send (Bob → Bob) it IS the legitimate delivery the
+// subscription is meant to dispatch as a self-chat / self-command;
+// adding it to selfWrapIDs would silently drop the operator's own
+// messages after a restart.
+func (s *Store) SelfWrapIDs() (map[string]struct{}, error) {
+	files, err := s.daysDescending(s.outboxDir())
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]struct{})
+	for _, f := range files {
+		fp, err := os.Open(f)
+		if err != nil {
+			return nil, err
+		}
+		sc := bufio.NewScanner(fp)
+		sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+		for sc.Scan() {
+			var o Sent
+			if err := json.Unmarshal(sc.Bytes(), &o); err != nil {
+				fp.Close()
+				return nil, fmt.Errorf("decode %s: %w", f, err)
+			}
+			if o.SelfEventID != "" {
+				out[o.SelfEventID] = struct{}{}
+			}
+		}
+		if err := sc.Err(); err != nil {
+			fp.Close()
+			return nil, err
+		}
+		fp.Close()
+	}
+	return out, nil
 }
 
 func (s *Store) daysDescending(base string) ([]string, error) {

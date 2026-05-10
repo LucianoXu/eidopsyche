@@ -26,6 +26,7 @@ func registerHost(root *cobra.Command) {
 		newPurgeCmd(),
 		newConfigCmd(),
 		newPlanHostCmd(),
+		newWatchCmd(),
 	)
 }
 
@@ -42,5 +43,8 @@ func registerInContainer(root *cobra.Command) {
 		newPlanInContainerCmd(),
 		newDreamCmd(),
 		newStatusDetailCmd(),
+		newRuntimeStateCmd(),
+		newTranscriptListCmd(),
+		newTranscriptTailCmd(),
 	)
 }

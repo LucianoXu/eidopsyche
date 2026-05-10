@@ -1,6 +1,7 @@
 package forge
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -27,10 +28,27 @@ func newListCmd() *cobra.Command {
 			}
 			for _, v := range vols {
 				name := strings.TrimPrefix(v, forgectl.VolumePrefix)
-				state, _ := c.ContainerInspectState(cmd.Context(), forgectl.ContainerName(name))
-				fmt.Fprintf(cmd.OutOrStdout(), "%-32s %s\n", name, state)
+				fmt.Fprintf(cmd.OutOrStdout(), "%-32s %s\n", name, listPhase(cmd.Context(), c, name))
 			}
 			return nil
 		},
 	}
+}
+
+// listPhase returns the second column of `forge list`: a phase derived
+// from runtime-state JSON when the container is up and the in-container
+// subcommand exists; falls back to the raw docker state on older images.
+//
+// Wake reason is intentionally omitted to keep the column narrow — run
+// `forge status <name>` for the full breakdown.
+func listPhase(ctx context.Context, c forgectl.Client, name string) string {
+	cont := forgectl.ContainerName(name)
+	state, _ := c.ContainerInspectState(ctx, cont)
+	if state != "running" {
+		return "offline"
+	}
+	if rs, ok := fetchRuntimeState(ctx, c, cont); ok {
+		return rs.Phase
+	}
+	return state
 }

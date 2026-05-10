@@ -147,9 +147,11 @@ $ eidos forge start alice
 ✓ alice is awake.
 
 # 4. 查看运行状态与心智体的 npub。
+#    phase 含义:offline(容器未运行) / sleeping(运行但无活跃 wake) /
+#    awake[+dreaming] (正在处理 wake / 同时在做梦);括号内是 wake 来源。
 $ eidos forge status alice
 name:    alice
-state:   running
+phase:   sleeping
 npub: npub1amind...
 relay: wss://alice.host:22896
 master: npub1alice...
@@ -163,6 +165,12 @@ $ eidos gate send npub1amind... "你醒着吗？"
 #    Claude 读 inbox，回复，退出。
 $ eidos gate inbox -n 1
 [来自心智体] 我在。
+
+# 6a. 想看心智体在某次 wake 中怎么"想"的(thinking + tool calls + tool results)?
+#     `forge watch` 流式渲染容器里捕获的 stream-json 推理链。
+$ eidos forge watch alice          # 跟随当前 wake;无 active 则显示最近一次
+$ eidos forge watch alice --list   # 列出最近的 wakes,看 id / 时长 / 成本
+$ eidos forge watch alice --wake <id> --thinking   # 看历史 wake,含 thinking blocks
 
 # 7. 不和它说话时让它睡觉（容器停止 = 睡眠）。消息会在 relay 上排队。
 $ eidos forge stop alice

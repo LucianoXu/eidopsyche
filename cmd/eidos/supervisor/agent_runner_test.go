@@ -49,11 +49,31 @@ func TestBuildClaudeArgs_NoModel(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("log_level = \"info\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := buildClaudeArgs("identity-text", "wake-msg", cfgPath)
+	got := buildClaudeArgs("identity-text", "wake-msg", cfgPath, false)
 	want := []string{
 		"--append-system-prompt", "identity-text",
 		"--dangerously-skip-permissions",
 		"-p", "wake-msg",
+	}
+	if !slicesEqualStr(got, want) {
+		t.Errorf("argv = %v, want %v", got, want)
+	}
+}
+
+func TestBuildClaudeArgs_StreamJSON(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("log_level = \"info\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := buildClaudeArgs("ident", "msg", cfgPath, true)
+	want := []string{
+		"--append-system-prompt", "ident",
+		"--dangerously-skip-permissions",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--include-partial-messages",
+		"-p", "msg",
 	}
 	if !slicesEqualStr(got, want) {
 		t.Errorf("argv = %v, want %v", got, want)
@@ -67,7 +87,7 @@ func TestBuildClaudeArgs_WithModel(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := buildClaudeArgs("identity", "msg", cfgPath)
+	got := buildClaudeArgs("identity", "msg", cfgPath, false)
 	want := []string{
 		"--append-system-prompt", "identity",
 		"--dangerously-skip-permissions",
@@ -80,7 +100,7 @@ func TestBuildClaudeArgs_WithModel(t *testing.T) {
 }
 
 func TestBuildClaudeArgs_MissingConfig(t *testing.T) {
-	got := buildClaudeArgs("ident", "m", "/nonexistent/path/config.toml")
+	got := buildClaudeArgs("ident", "m", "/nonexistent/path/config.toml", false)
 	want := []string{
 		"--append-system-prompt", "ident",
 		"--dangerously-skip-permissions",

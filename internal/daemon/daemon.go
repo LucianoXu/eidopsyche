@@ -127,6 +127,26 @@ func Start(stateDir string) (*Daemon, error) {
 		relayHealth:   newRelayHealthStore(),
 		wakeDir:       cfg.Wake.Dir,
 	}
+	// Hydrate the in-memory dedupe maps from on-disk inbox/outbox so a
+	// relay re-delivering events after daemon restart doesn't re-process
+	// them: incoming wraps would otherwise get appended a second time
+	// (Daemon.dedupe), and our own published wraps would echo back into
+	// our inbox under our own pubkey (Daemon.selfWrapIDs).
+	//
+	// Best-effort: a malformed jsonl row aborts the scan with an error
+	// here, but the in-process maps fall back to empty and the runtime
+	// guards still work for the current session — daemon startup never
+	// blocks on hydrate failure.
+	if seen, err := d.Box.EventIDs(); err == nil {
+		d.dedupe = seen
+	} else {
+		d.Log.Warn("hydrate inbox dedupe", "err", err)
+	}
+	if seen, err := d.Box.SelfWrapIDs(); err == nil {
+		d.selfWrapIDs = seen
+	} else {
+		d.Log.Warn("hydrate self-wrap ids", "err", err)
+	}
 	// Wire Pool's per-URL state hook so transitions surface in d.relayHealth
 	// AND in the dashboard SSE hub. The hook runs from inside the Pool's
 	// per-URL Subscribe pumps; emitting the dashboard event here keeps the
