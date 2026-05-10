@@ -147,6 +147,13 @@ func installFromHost(name, image string, runSetupToken bool) error {
 			return err
 		}
 	}
+	if err := clearAuthRequiredInVolume(name, image); err != nil {
+		// Non-fatal: credentials are installed, marker stays. Operator's
+		// next wake will discover the mismatch (agent-runner self-gates
+		// on the marker before invoking claude); we surface the warning
+		// rather than fail login over a cleanup error.
+		fmt.Fprintf(os.Stderr, "(warning: could not clear auth_required marker: %v)\n", err)
+	}
 	fmt.Printf("✓ credentials installed into eidos-mindform-%s\n", name)
 	return nil
 }
@@ -161,7 +168,29 @@ func installCredentialsFromFile(name, image, path string) error {
 	if err := writeIntoVolume(name, image, "/eidos/claude/.claude.json", f); err != nil {
 		return err
 	}
+	if err := clearAuthRequiredInVolume(name, image); err != nil {
+		fmt.Fprintf(os.Stderr, "(warning: could not clear auth_required marker: %v)\n", err)
+	}
 	fmt.Printf("✓ credentials installed into eidos-mindform-%s from %s\n", name, path)
+	return nil
+}
+
+// clearAuthRequiredInVolume removes /eidos/run/auth_required.json
+// inside the mind-form's volume after a successful login. Uses a
+// one-shot helper container (works regardless of whether the
+// long-running container is up) and tolerates absence (rm -f).
+func clearAuthRequiredInVolume(name, image string) error {
+	c := exec.Command("docker", "run", "--rm",
+		"--mount", "source="+forgectl.VolumeName(name)+",target=/eidos",
+		"--entrypoint", "sh",
+		image,
+		"-c", "rm -f /eidos/run/auth_required.json",
+	) //nolint:gosec // argv built from validated inputs
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	if err := c.Run(); err != nil {
+		return fmt.Errorf("clear auth_required marker: %w", err)
+	}
 	return nil
 }
 

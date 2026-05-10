@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/authstate"
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
@@ -60,6 +61,18 @@ func newAgentRunnerCmd() *cobra.Command {
 }
 
 func runAgent(wakeFile, ontologyDir string) error {
+	// Self-gate on the auth_required marker BEFORE doing any other work.
+	// If a previous wake hit a claude auth failure, we exit immediately
+	// with EXIT_AUTH_REQUIRED so the supervisor doesn't repeatedly invoke
+	// claude (and bill the user for nothing) until `eidos forge login`
+	// clears the marker.
+	if state, err := authstate.Read(); err == nil && state != nil {
+		fmt.Fprintf(os.Stderr,
+			"agent-runner: claude auth required (since %s); skipping wake until `eidos forge login` clears %s\n",
+			time.Unix(state.Since, 0).UTC().Format(time.RFC3339), authstate.Path)
+		os.Exit(EXIT_AUTH_REQUIRED)
+	}
+
 	body, err := os.ReadFile(wakeFile)
 	if err != nil {
 		return fmt.Errorf("read wake file: %w", err)
@@ -107,6 +120,13 @@ func runAgent(wakeFile, ontologyDir string) error {
 	c.Env = append(os.Environ(), "CLAUDE_DIR="+filepath.Join(ontologyDir, ".claude"))
 	if err := c.Run(); err != nil {
 		if isAuthError(err, c.ProcessState) {
+			// Best-effort: persist the auth-required marker so future
+			// wakes self-gate (above) and `eidos forge status <slug>`
+			// can surface it to the operator. Failure to write the
+			// marker is logged but doesn't change the exit path.
+			if werr := authstate.Write(time.Now()); werr != nil {
+				fmt.Fprintf(os.Stderr, "agent-runner: write %s: %v\n", authstate.Path, werr)
+			}
 			os.Exit(EXIT_AUTH_REQUIRED)
 		}
 		return fmt.Errorf("claude exited: %w", err)
