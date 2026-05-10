@@ -239,5 +239,13 @@ func runInContainerLogin(name, image, method string) error {
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
-	return c.Run()
+	if err := c.Run(); err != nil {
+		return err
+	}
+	if err := clearAuthRequiredInVolume(name, image); err != nil {
+		// Non-fatal: in-container login succeeded, marker stays.
+		// Operator's next wake will discover the mismatch.
+		fmt.Fprintf(os.Stderr, "(warning: could not clear auth_required marker: %v)\n", err)
+	}
+	return nil
 }
