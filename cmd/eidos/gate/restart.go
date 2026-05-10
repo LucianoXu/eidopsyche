@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/LucianoXu/eidopsyche/internal/ipc"
 	"github.com/LucianoXu/eidopsyche/internal/service"
 )
 
@@ -57,10 +58,33 @@ Auto-restart after self-update can be disabled with 'eidos self-update
 // search to system scope only, even with --if-running. Without
 // --if-running, --system is respected verbatim — the user is asking us
 // to act on a specific scope and we should not silently widen.
+//
+// With --if-running, an additional fast path runs first: we ask the
+// running daemon (if any) to syscall.Exec into the freshly-installed
+// binary in place via IPC. This covers the unmanaged-daemon case (user
+// started the daemon directly with `eidos gate daemon &` instead of
+// `eidos gate start`) where systemctl / launchctl / SCM have nothing to
+// restart. The fast path is silent on any failure — the managed-service
+// path below is still attempted as a fallback, so older daemons (where
+// the IPC method is not registered) and not-currently-running daemons
+// behave exactly as before.
 func runRestart(ctx context.Context, w io.Writer, ifRunning bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+
+	if ifRunning {
+		if ok, err := tryIPCExecReplace(w); ok {
+			return nil
+		} else if err != nil && !errors.Is(err, errNoDaemonRunning) && !errors.Is(err, errExecReplaceUnsupported) {
+			// IPC reached the daemon but the call failed for a reason
+			// other than "method not registered" — surface it to the
+			// operator so a real bug (binary missing, permissions, race
+			// against another exec-replace) is not papered over.
+			fmt.Fprintf(w, "gate restart: in-place exec via IPC failed: %v\n", err)
+		}
+	}
+
 	scopes := scopesToTry(ifRunning, useSystemServices)
 	tried := 0
 	acted := false
@@ -177,4 +201,64 @@ func init() {
 	restartCmd.Flags().BoolVar(&restartIfRunning, "if-running", false,
 		"no-op (exit 0 with a hint) when the daemon isn't installed as a managed service; intended for install-script automation")
 	rootCmd.AddCommand(restartCmd)
+}
+
+// errNoDaemonRunning marks the "IPC socket unreachable" branch of
+// tryIPCExecReplace so the caller can distinguish "daemon not running" from
+// "daemon ran the call but rejected it" — only the latter is worth
+// surfacing to the operator.
+var errNoDaemonRunning = errors.New("daemon not running on IPC socket")
+
+// errExecReplaceUnsupported marks the "older daemon, method not registered"
+// branch. Same reason as errNoDaemonRunning: the caller swallows it because
+// the managed-service path below is the right fallback.
+var errExecReplaceUnsupported = errors.New("daemon does not support exec-replace")
+
+// tryIPCExecReplaceFn is a swappable seam so unit tests can drive the
+// runRestart fast path without dialing the developer's real daemon socket
+// at $HOME/.eidos/gate/sock — a bug there would syscall.Exec the actual
+// running daemon every test invocation. Production leaves it nil and
+// dispatches to defaultTryIPCExecReplace below.
+var tryIPCExecReplaceFn func(io.Writer) (bool, error)
+
+func tryIPCExecReplace(w io.Writer) (bool, error) {
+	if tryIPCExecReplaceFn != nil {
+		return tryIPCExecReplaceFn(w)
+	}
+	return defaultTryIPCExecReplace(w)
+}
+
+// defaultTryIPCExecReplace asks the running daemon to syscall.Exec into
+// the freshly-installed binary in place. Used as a --if-running fast path
+// so `install.sh` can pick up the new code on unmanaged daemons (started
+// with `eidos gate daemon &` rather than via `eidos gate start`).
+//
+// Returns ok=true on success. On failure, returns ok=false plus a typed
+// error: errNoDaemonRunning when the IPC socket is unreachable,
+// errExecReplaceUnsupported when the daemon is older and lacks the method,
+// or a wrapped error otherwise. Callers gate on the first two to fall
+// through to the managed-service path silently; surface anything else.
+func defaultTryIPCExecReplace(w io.Writer) (bool, error) {
+	client, err := newClient()
+	if err != nil {
+		return false, fmt.Errorf("%w: %v", errNoDaemonRunning, err)
+	}
+	defer client.Close()
+
+	var result struct {
+		Binary string `json:"binary"`
+		Pid    int    `json:"pid"`
+	}
+	ipcErr, callErr := client.Call("daemon.exec-replace", nil, &result)
+	if callErr != nil {
+		return false, fmt.Errorf("%w: %v", errNoDaemonRunning, callErr)
+	}
+	if ipcErr != nil {
+		if ipcErr.Code == ipc.ErrUnknownMethod {
+			return false, errExecReplaceUnsupported
+		}
+		return false, fmt.Errorf("%s: %s", ipcErr.Code, ipcErr.Message)
+	}
+	fmt.Fprintf(w, "✓ gate daemon re-exec'd in place (pid=%d, binary=%s)\n", result.Pid, result.Binary)
+	return true, nil
 }

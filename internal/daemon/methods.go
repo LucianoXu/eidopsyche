@@ -54,6 +54,7 @@ func init() {
 	register("lifecycle.run", lifecycleRunMethod)
 	register("lifecycle.status", lifecycleStatusMethod)
 	register("contact.add-from-card", contactAddFromCard)
+	register("daemon.exec-replace", daemonExecReplace)
 }
 
 // ContactAddFromCardParams is the parameter shape for the

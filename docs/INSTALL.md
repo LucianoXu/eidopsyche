@@ -51,12 +51,22 @@ to reinstall the current version unconditionally. Disable update
 notifications with `EIDOS_NO_UPDATE_CHECK=1`.
 
 After the new binary is in place the install script runs
-`eidos gate restart --if-running` so a managed gate daemon (systemd /
-launchd) picks up the new code automatically. Pass `--no-restart` to
-`eidos self-update`, or export `EIDOS_NO_RESTART=1` before running the
-install script directly, to suppress the auto-restart — the install
-completes either way, but the running daemon stays on the old binary
-until you restart it manually with `eidos gate restart`.
+`eidos gate restart --if-running`. Two paths are tried, in order:
+
+1. If a daemon is responding on the IPC socket, it is asked to
+   `syscall.Exec` itself with the new binary, preserving its PID. This
+   covers daemons started directly with `eidos gate daemon` (no managed
+   service backing them).
+2. Otherwise — daemon stopped, or older daemon predating this fast
+   path — a managed-service restart is attempted via systemd / launchd
+   / SCM. If no managed service exists either, the command is a silent
+   no-op (so a fresh-install machine doesn't error out).
+
+Pass `--no-restart` to `eidos self-update`, or export
+`EIDOS_NO_RESTART=1` before running the install script directly, to
+suppress the auto-restart — the install completes either way, but the
+running daemon stays on the old binary until you restart it manually
+with `eidos gate restart`.
 
 ## Build from source
 

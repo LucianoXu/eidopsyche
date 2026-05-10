@@ -268,12 +268,17 @@ Service lifecycle:
   units (systemd on Linux, launchd on macOS)
 - `eidos gate stop` — stop without uninstalling
 - `eidos gate restart` — restart the daemon so a freshly-installed binary
-  takes effect (idempotent: starts the daemon if it was stopped). The
+  takes effect (idempotent: starts the daemon if it was stopped). With
+  `--if-running`, an IPC fast path tries to ask a running daemon to
+  `syscall.Exec` itself in place — that covers daemons started via
+  `eidos gate daemon` directly, where the service-manager path has
+  nothing to bounce. Falls through to the managed-service path
+  (systemd / launchd / SCM) when the daemon isn't reachable on IPC. The
   install script invokes `eidos gate restart --if-running` automatically
-  after `eidos self-update` so a managed daemon picks up the new code
+  after `eidos self-update` so the running daemon picks up the new code
   without manual intervention; pass `--if-running` yourself when
-  scripting against it to make the call a no-op on hosts where the
-  daemon is not installed as a service
+  scripting against it to make the call a no-op on hosts where neither
+  path applies
 - `eidos gate status` — show installed / enabled / active state per unit
 - `eidos gate purge` — stop, uninstall units, and delete the state directory
   (`--yes` skips the confirmation prompt; `--system` operates on
@@ -306,9 +311,11 @@ Top-level:
 - `eidos self-update` — upgrade to the latest published release; no-op when
   already on latest. Pass `--force` to reinstall the same version. After
   the new binary is in place the install script runs `eidos gate restart
-  --if-running` so a managed daemon picks up the new code automatically;
-  pass `--no-restart` (or export `EIDOS_NO_RESTART=1`) to suppress that
-  step.
+  --if-running` so the running daemon picks up the new code automatically
+  (managed daemons are bounced via the service manager; unmanaged daemons
+  are asked over IPC to exec the new binary in place, preserving their
+  PID); pass `--no-restart` (or export `EIDOS_NO_RESTART=1`) to suppress
+  that step.
 
 ### Flags common to most commands
 

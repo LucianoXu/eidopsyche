@@ -92,8 +92,11 @@ to reinstall the current version (useful for repairing a corrupted binary
 or pinning via `EIDOS_VERSION=...`).
 
 After the new binary is in place the install script runs
-`eidos gate restart --if-running` so a managed daemon picks up the new
-code automatically. Pass `--no-restart` (or export `EIDOS_NO_RESTART=1`)
+`eidos gate restart --if-running`. The daemon is restarted in two ways:
+managed services (systemd / launchd / SCM) are bounced via the service
+manager; an unmanaged daemon (started directly via `eidos gate daemon`)
+is asked over IPC to `syscall.Exec` itself with the new binary in place,
+preserving its PID. Pass `--no-restart` (or export `EIDOS_NO_RESTART=1`)
 to suppress the auto-restart; you can run `eidos gate restart` yourself
 later to apply the upgrade.
 
