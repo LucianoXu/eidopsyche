@@ -675,7 +675,7 @@ func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	final := pre
 	final.AcceptedBy = accepted
 	final.Final = true
-	_ = d.Box.AppendOutbox(final)
+	d.finalizeOutboxOrLog(ctx, final, wrapBob.ID, pk)
 	// No SSE emit here either — the POST /send response already rendered
 	// the ✓ bubble (deps.Send only returns nil when at least one relay
 	// accepted, so the dashboard handler can safely set Status="sent").
@@ -684,6 +684,21 @@ func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 		EventID:    wrapBob.ID,
 		AcceptedBy: accepted,
 	}, nil
+}
+
+// finalizeOutboxOrLog writes the publish-finalization outbox row and logs
+// any error rather than failing the RPC. Publish has already succeeded by
+// the time we reach this point, so failing the RPC would mislead callers
+// into thinking the network publish itself had failed. A local-write error
+// here usually means disk full / permission / filesystem trouble and is
+// what causes the "stuck in pending" UI symptom — the log breadcrumb
+// gives operators something to chase. Prior code silently discarded this
+// error (`_ = d.Box.AppendOutbox(final)`); see codex review 2026-05-10.
+func (d *Daemon) finalizeOutboxOrLog(ctx context.Context, sent inbox.Sent, eventID, to string) {
+	if err := d.Box.AppendOutbox(sent); err != nil {
+		d.Log.ErrorContext(ctx, "send: finalize outbox write failed after publish",
+			"err", err.Error(), "event_id", eventID, "to", to)
+	}
 }
 
 // inboxList returns inbox messages filtered by since/from/limit.
