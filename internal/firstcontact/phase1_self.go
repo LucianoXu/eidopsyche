@@ -36,7 +36,7 @@ func Phase1(ctx context.Context, s *Summoning, r render.Renderer, d Phase1Deps) 
 	if err != nil {
 		return err
 	}
-	s.OperatorLabel = label
+	s.MasterLabel = label
 
 	idx, err := r.PromptChoice(stringFor(s.Lang, "phase1_relay_q"), []render.ChoiceOption{
 		{Label: stringFor(s.Lang, "phase1_relay_public"), Hint: PublicHomeRelay},
@@ -66,10 +66,11 @@ func Phase1(ctx context.Context, s *Summoning, r render.Renderer, d Phase1Deps) 
 		}
 	}
 
-	npub, err := identity.Bootstrap(d.StateDir, s.OperatorLabel, s.HomeRelay)
+	npub, err := identity.Bootstrap(d.StateDir, s.MasterLabel, s.HomeRelay)
 	if err != nil {
 		return fmt.Errorf("bootstrap operator identity: %w", err)
 	}
-	s.OperatorNpub = npub
+	s.MasterNpub = npub
+	s.OperatorPresent = true
 	return nil
 }

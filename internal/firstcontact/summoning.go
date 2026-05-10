@@ -18,12 +18,22 @@ type CharacterProfile struct {
 // Summoning is the in-memory state machine for one ritual. Fields are
 // populated phase-by-phase. The struct is never persisted; if Run()
 // returns before reaching the end, all of these fields are discarded
-// (except what phase 1 already wrote to disk via identity.Bootstrap).
+// (except what Phase 1's identity.Bootstrap already committed to disk).
+//
+// Master vs Operator: the *master* is the new mind-form's owner — what
+// gets burned into journal/0000-summoning.md and forge.CreateOpts.Owner.
+// The *operator* is the local user of the host running this wizard.
+// In the simple path they are the same identity. They differ only when
+// Phase 2 picks a card-as-master path (the local operator hosts a
+// mind-form whose master lives elsewhere). OperatorPresent records
+// whether a local identity exists at all on this host (Phase 1's
+// 跳过 branch produces OperatorPresent=false).
 type Summoning struct {
 	Lang            string
-	OperatorLabel   string
-	OperatorNpub    string
-	HomeRelay       string
+	OperatorPresent bool
+	MasterLabel     string
+	MasterNpub      string
+	HomeRelay       string // master's home relay; doubles as mind-form's per spec § 4.4.2
 	CharacterPrompt string
 	Profile         CharacterProfile
 	Displaying      string

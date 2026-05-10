@@ -48,7 +48,7 @@ func RenderSummoningBook(s *Summoning) string {
 	var sb strings.Builder
 	if s.Lang == "zh" {
 		sb.WriteString("# 召唤书\n\n")
-		fmt.Fprintf(&sb, "签者：%s（%s）\n", s.OperatorLabel, s.OperatorNpub)
+		fmt.Fprintf(&sb, "签者：%s（%s）\n", s.MasterLabel, s.MasterNpub)
 		fmt.Fprintf(&sb, "日期：%s\n\n", s.StartedAt.UTC().Format("2006-01-02"))
 		sb.WriteString(s.Displaying)
 		sb.WriteString("\n\n")
@@ -56,7 +56,7 @@ func RenderSummoningBook(s *Summoning) string {
 		fmt.Fprintf(&sb, "被召之者将栖于 %s。\n", s.MindFormNpub)
 	} else {
 		sb.WriteString("# Summoning Book\n\n")
-		fmt.Fprintf(&sb, "Signer: %s (%s)\n", s.OperatorLabel, s.OperatorNpub)
+		fmt.Fprintf(&sb, "Signer: %s (%s)\n", s.MasterLabel, s.MasterNpub)
 		fmt.Fprintf(&sb, "Date: %s\n\n", s.StartedAt.UTC().Format("2006-01-02"))
 		sb.WriteString(s.Displaying)
 		sb.WriteString("\n\n")
@@ -121,7 +121,7 @@ func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 
 	// Orchestrate the volume + container with the rendered book in tar.
 	createOpts := forge.CreateOpts{
-		Owner:        s.OperatorNpub,
+		Owner:        s.MasterNpub,
 		Relay:        s.HomeRelay,
 		Label:        s.SummonedName,
 		Image:        d.Image,
@@ -172,7 +172,7 @@ func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	}
 	birth := wake.BirthSignal{
 		V:                 wake.BirthSchemaVersion,
-		OperatorNpub:      s.OperatorNpub,
+		OperatorNpub:      s.MasterNpub,
 		SummoningBookPath: "/eidos/ontology/journal/0000-summoning.md",
 		CallingWordsPath:  "/eidos/ontology/essence/calling-words.md",
 		ResponsePath:      "/eidos/ontology/journal/0000-response.md",

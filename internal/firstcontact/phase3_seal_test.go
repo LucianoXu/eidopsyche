@@ -14,8 +14,8 @@ import (
 func TestRenderSummoningBook_ZH(t *testing.T) {
 	s := &firstcontact.Summoning{
 		Lang:          "zh",
-		OperatorLabel: "alice",
-		OperatorNpub:  "npub1op",
+		MasterLabel:   "alice",
+		MasterNpub:    "npub1op",
 		Displaying:    "薄雾里有一道身影。",
 		SummonedName:  "雨",
 		MindFormNpub:  "npub1mf",
@@ -32,8 +32,8 @@ func TestRenderSummoningBook_ZH(t *testing.T) {
 func TestRenderSummoningBook_EN(t *testing.T) {
 	s := &firstcontact.Summoning{
 		Lang:          "en",
-		OperatorLabel: "alice",
-		OperatorNpub:  "npub1op",
+		MasterLabel:   "alice",
+		MasterNpub:    "npub1op",
 		Displaying:    "A figure stands in the mist.",
 		SummonedName:  "Rain",
 		MindFormNpub:  "npub1mf",
