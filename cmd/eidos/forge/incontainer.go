@@ -25,6 +25,7 @@ func registerHost(root *cobra.Command) {
 		newOntologyCmd(),
 		newPurgeCmd(),
 		newConfigCmd(),
+		newPlanHostCmd(),
 	)
 }
 
@@ -38,5 +39,8 @@ func registerInContainer(root *cobra.Command) {
 		newOntologyStatusCmd(),
 		newWakeInContainerCmd(),
 		newInitVolumeCmd(),
+		newPlanInContainerCmd(),
+		newDreamCmd(),
+		newStatusDetailCmd(),
 	)
 }

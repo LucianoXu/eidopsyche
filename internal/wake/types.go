@@ -31,6 +31,7 @@ type Reason string
 const (
 	ReasonMindGate  Reason = "mindgate"
 	ReasonHeartBeat Reason = "heartbeat"
+	ReasonPlanned   Reason = "planned"
 	ReasonManual    Reason = "manual"
 	// ReasonBirth marks a one-shot birth-wake — see internal/wake/birth.go
 	// and the First Contact design (docs/superpowers/specs/
@@ -49,6 +50,19 @@ type Context struct {
 	SinceLastWakeSeconds int64  `json:"since_last_wake_seconds"`
 	LastWakeReason       Reason `json:"last_wake_reason,omitempty"`
 	Scheduled            bool   `json:"scheduled"`
+
+	// Hints derived at wake time by agent-runner from
+	// /eidos/gate/config.toml ([mindform] quiet_*) and
+	// /eidos/run/dream-state.json. Surfaced so the agent can decide
+	// whether this wake is a good moment to dream or to be quiet.
+	MasterLikelyAsleep    bool  `json:"master_likely_asleep,omitempty"`
+	SinceLastDreamSeconds int64 `json:"since_last_dream_seconds,omitempty"`
+	DreamEligible         bool  `json:"dream_eligible,omitempty"`
+
+	// PlanID is set only when Reason == ReasonPlanned. It identifies
+	// the plan file that fired this wake; the agent can read
+	// /eidos/run/plans/fired/<id>.json for the original payload.
+	PlanID string `json:"plan_id,omitempty"`
 }
 
 // Signal is the on-disk wake payload.

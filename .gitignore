@@ -22,6 +22,7 @@ coverage.out
 /deploy-test/*
 !/deploy-test/deploy-test-script.md
 !/deploy-test/test_script_Alice_Bob.sh
+!/deploy-test/test_script_heartbeat_plans_dreams.sh
 !/deploy-test/playwright/
 !/deploy-test/playwright/**
 

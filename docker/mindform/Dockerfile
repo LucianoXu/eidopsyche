@@ -91,10 +91,16 @@ COPY docker/mindform/prompts/birth.txt /usr/local/lib/eidos/prompts/birth.txt
 # (presumably to prevent privilege escalation by tampering with the
 # spool). The supervisor then runs crond as root via sudo so it can
 # setuid into eidos to run the heartbeat.
-COPY docker/mindform/crontab /var/spool/cron/crontabs/eidos
+#
+# The crontab body is rendered at runtime by the supervisor from the
+# mind-form's [heartbeat] interval config — see
+# cmd/eidos/supervisor/crontab.go. We pre-create the spool dir with
+# the right permissions and clear any stray default crontabs so cron
+# starts clean.
 RUN chmod +x /usr/local/bin/entrypoint.sh \
- && chown root:root /var/spool/cron/crontabs/eidos \
- && chmod 0600 /var/spool/cron/crontabs/eidos \
+ && mkdir -p /var/spool/cron/crontabs \
+ && chown root:root /var/spool/cron/crontabs \
+ && chmod 0755 /var/spool/cron/crontabs \
  && rm -f /etc/crontabs/root
 
 # Volatile COPYs last: every code change rebuilds these two layers but
