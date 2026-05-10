@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -376,14 +377,29 @@ func (m *model) wrap(text string) string {
 	return wrapDisplayWidth(text, width)
 }
 
-// wrapCondition treats East Asian ambiguous-width characters (em-dash
-// `—`, fullwidth punctuation, certain symbols) as 2 cells. Real
-// terminals running in CJK locales render those glyphs at 2 cells, so
-// using the narrower width would underestimate line length and let
-// CJK narrative overrun the right edge — which is exactly the bug
-// reported from a tmux smoke. The default runewidth.Condition's
-// EastAsianWidth flag depends on LANG / LC_ALL at startup; we pin it
-// to true so the wrap is correct regardless of the user's locale.
+// init pins runewidth's GLOBAL DefaultCondition to EastAsianWidth=true
+// for the whole binary. Two reasons we need this beyond the package-
+// local wrapCondition below:
+//
+//  1. glamour (used to render the agent's response markdown) wraps via
+//     muesli/reflow/wordwrap, which calls runewidth.StringWidth — i.e.
+//     it consults the GLOBAL DefaultCondition, not anything we hand it.
+//     Without this init, glamour underestimates CJK line widths by 2x
+//     and the response runs off the right edge in narrow terminals.
+//  2. The textinput / textarea bubbles also measure widths via the
+//     global default. Same fix benefits them.
+//
+// runewidth's package-level default normally tracks LANG / LC_ALL,
+// which means the CI host's locale (often C) gives wrong widths even
+// when the *user's* terminal is rendering at 2 cells. Pinning to true
+// is the safe default for a tool that emits CJK punctuation.
+func init() {
+	runewidth.DefaultCondition.EastAsianWidth = true
+}
+
+// wrapCondition is kept as an explicit knob for our own wrap logic
+// below, so the contract is visible at the call site even if the
+// global condition were ever changed elsewhere.
 var wrapCondition = &runewidth.Condition{EastAsianWidth: true}
 
 // wrapDisplayWidth wraps each paragraph to fit within `width` display
@@ -445,14 +461,25 @@ func renderMarkdown(body string, width int) (string, error) {
 	if width < 40 {
 		width = 80
 	}
+	// Disable glamour's internal word-wrap and post-process with
+	// ansi.Wrap, which is display-width-aware AND preserves ANSI
+	// styling. Glamour's reflow-based wrap silently fails on
+	// space-less CJK paragraphs because reflow's word-wrap can't
+	// find any break points; ansi.Wrap falls back to hard-break by
+	// rune when no space fits in the line, so even pure-CJK
+	// paragraphs wrap correctly.
 	r, err := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(width-4),
+		glamour.WithWordWrap(0),
 	)
 	if err != nil {
 		return "", err
 	}
-	return r.Render(body)
+	rendered, err := r.Render(body)
+	if err != nil {
+		return "", err
+	}
+	return ansi.Wrap(rendered, width-4, " "), nil
 }
 
 func indentBlock(s, indent string) string {
