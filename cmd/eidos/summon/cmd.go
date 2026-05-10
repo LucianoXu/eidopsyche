@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -133,7 +134,11 @@ func run(ctx context.Context, entry firstcontact.EntryMode) error {
 					if exists, _ := dock.ImageExists(ctx, image); exists {
 						return nil
 					}
-					return dock.ImagePull(ctx, image, os.Stderr)
+					// Discard pull progress: it would otherwise leak
+					// JSON status lines to stderr while the wizard's
+					// interactive menus are on stdout. The wizard
+					// reports pull state via ReadyState in Phase 4.
+					return dock.ImagePull(ctx, image, io.Discard)
 				},
 				GenerateKey: func() (string, string, error) {
 					k, err := identity.Generate()
