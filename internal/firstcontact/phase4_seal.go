@@ -138,14 +138,21 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	}
 
 	// Orchestrate the volume + container with the rendered book in tar.
+	// PrefabID switches Orchestrate to stream prefab/<id>/ instead of
+	// the canonical template; OwnerLabel + MindFormNpub feed the prefab
+	// .tpl substitution surface (no-op for the scratch path's
+	// template/, which doesn't reference them).
 	createOpts := forge.CreateOpts{
 		Owner:        s.MasterNpub,
+		OwnerLabel:   s.MasterLabel,
+		MindFormNpub: s.MindFormNpub,
 		Relay:        s.HomeRelay,
 		Label:        s.SummonedName,
 		Image:        d.Image,
 		KeyHex:       s.MindFormKeyHex,
 		JournalEntry: book,
 		NoLogin:      true,
+		PrefabID:     s.PrefabID,
 	}
 	if err := forge.Orchestrate(ctx, d.DockerClient, s.Slug, createOpts); err != nil {
 		return nil, fmt.Errorf("forge.Orchestrate: %w", err)
@@ -172,21 +179,24 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 		return nil, fmt.Errorf("install claude credentials: %w", err)
 	}
 
-	// Calling-words.
-	st := r.Status(stringFor(s.Lang, "phase4_words_status"))
-	words, err := c.CallText(ctx, buildCallingWordsPrompt(book, s.Lang))
-	st.Stop()
-	if err != nil {
-		purge()
-		return nil, fmt.Errorf("calling-words: %w", err)
-	}
-	s.CallingWords = words
-	r.Typewriter(ctx, words)
-
-	// Write calling-words and birth.json into the volume.
-	if err := d.WriteVolume(ctx, s.Slug, "ontology/essence/calling-words.md", []byte(words)); err != nil {
-		purge()
-		return nil, fmt.Errorf("write calling-words: %w", err)
+	// Calling-words. Scratch path generates them via claude; prefab
+	// path receives them inside the prefab's own essence/calling-words.md
+	// (already in the tar stream baked by Orchestrate), so we skip
+	// generation + the post-orchestrate write entirely.
+	if s.PrefabID == "" {
+		st := r.Status(stringFor(s.Lang, "phase4_words_status"))
+		words, err := c.CallText(ctx, buildCallingWordsPrompt(book, s.Lang))
+		st.Stop()
+		if err != nil {
+			purge()
+			return nil, fmt.Errorf("calling-words: %w", err)
+		}
+		s.CallingWords = words
+		r.Typewriter(ctx, words)
+		if err := d.WriteVolume(ctx, s.Slug, "ontology/essence/calling-words.md", []byte(words)); err != nil {
+			purge()
+			return nil, fmt.Errorf("write calling-words: %w", err)
+		}
 	}
 	birth := wake.BirthSignal{
 		V:                 wake.BirthSchemaVersion,
