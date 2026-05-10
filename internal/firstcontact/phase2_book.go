@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/LucianoXu/eidopsyche/internal/firstcontact/render"
-	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 )
 
 // Phase2Deps are the inputs Phase2 cannot derive from Summoning.
@@ -15,9 +14,11 @@ type Phase2Deps struct {
 	ExistingSlugs []string
 }
 
-// Phase2 runs the four-step summoning-book core: character question
+// Phase2 runs the three-step summoning-book core: character question
 // → claude research → claude displaying paragraph (typewriter) →
-// naming + slug confirmation. Mutates s in place.
+// naming. The system handle (slug) is auto-derived from the name so
+// the ritual's high point — naming the to-be-summoned — is not
+// followed by a second, prosaic prompt.
 func Phase2(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, d Phase2Deps) error {
 	// Step 1: character question (multiline).
 	prompt, err := r.Prompt(stringFor(s.Lang, "phase2_character_q"), render.PromptOpts{Multiline: true})
@@ -44,53 +45,14 @@ func Phase2(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, d P
 	st.Stop()
 	r.Typewriter(ctx, displaying)
 
-	// Step 4: naming + slug confirmation.
+	// Step 4: naming. Slug is derived silently; we never ask for it.
 	name, err := r.Prompt(stringFor(s.Lang, "phase2_naming_q"), render.PromptOpts{})
 	if err != nil {
 		return err
 	}
 	s.SummonedName = name
-	derived := Derive(name, d.ExistingSlugs)
-	confirmed, err := confirmSlug(r, s.Lang, derived, d.ExistingSlugs)
-	if err != nil {
-		return err
-	}
-	s.Slug = confirmed
+	s.Slug = Derive(name, d.ExistingSlugs)
 	return nil
-}
-
-// confirmSlug shows the operator the derived slug and lets them
-// override. Empty input (Enter) accepts the derived value. Invalid or
-// taken slugs re-prompt with a one-line reason.
-func confirmSlug(r render.Renderer, lang, derived string, existing []string) (string, error) {
-	for {
-		input, err := r.Prompt(
-			fmt.Sprintf(stringFor(lang, "phase2_slug_q"), derived),
-			render.PromptOpts{AllowEmpty: true},
-		)
-		if err != nil {
-			return "", err
-		}
-		if input == "" {
-			return derived, nil
-		}
-		if err := forgectl.ValidateName(input); err != nil {
-			r.Show(stringFor(lang, "phase2_slug_invalid"))
-			continue
-		}
-		taken := false
-		for _, e := range existing {
-			if e == input {
-				taken = true
-				break
-			}
-		}
-		if taken {
-			r.Show(stringFor(lang, "phase2_slug_taken"))
-			continue
-		}
-		return input, nil
-	}
 }
 
 func buildResearchPrompt(userText, lang string) string {
@@ -107,15 +69,18 @@ Return ONLY the JSON object, no prose. Language for archetype/temperament/world:
 }
 
 func buildDisplayingPrompt(p CharacterProfile, lang string) string {
-	return fmt.Sprintf(`The operator is writing a summoning book and a figure is taking shape in its words. Write 3 to 5 sentences of the figure's "displaying" — the moment they appear in the book's lines, before they have arrived to speak.
+	return fmt.Sprintf(`The operator just described a character they want to summon. Write 3 to 5 sentences sketching this character — what they look like, where they are, what they happen to be doing. Write the way one person might quietly tell another what they are seeing.
 
 Constraints (HARD):
-- The figure does NOT speak.
+- The figure does NOT speak yet; they have not arrived.
 - Do NOT name any source work or original character.
 - No attribute lists, no bold, no headings.
-- Imagery should evoke: %v (settings); %v (imagery).
+- Settings to draw on: %v
+- Imagery to draw on: %v
 - Temperament: %s. World: %s. Archetype: %s.
 
-Language: %s. Tone: poetic, restrained.`,
+Language: %s.
+
+Tone: plain and sincere, the way a real person speaks. No "宛如 / 仿佛 / 朦胧 / 缥缈" stacking, no archaic register, no elevated diction, no theatrical solemnity. Short sentences are fine. If a line sounds like it was written for a poetry recital, rewrite it. The reader should feel they could meet this person on a Tuesday afternoon, not only in a dream.`,
 		p.Settings, p.Imagery, p.Temperament, p.World, p.Archetype, lang)
 }

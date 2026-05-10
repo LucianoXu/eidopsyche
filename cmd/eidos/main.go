@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/cmd/eidos/summon"
 	"github.com/LucianoXu/eidopsyche/cmd/eidos/supervisor"
 	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/firstcontact"
 	"github.com/LucianoXu/eidopsyche/internal/update"
 )
 
@@ -74,9 +74,12 @@ func main() {
 }
 
 // shouldDispatchToWizard reports whether bare `eidos` (no subcommand,
-// no flags) should auto-launch the First Contact wizard. Trigger
-// conditions: argv has no subcommand AND <state-dir>/state.db is
-// absent. Returning operators see cobra's standard help.
+// no flags) should auto-launch the First Contact wizard. Triggers when
+// argv has no subcommand AND the state directory is not yet
+// initialized. "Initialized" uses the same predicate the wizard itself
+// uses to decide subsequent-run mode (firstcontact.IsSubsequentRun) so
+// the two layers cannot drift: an operator with a complete identity
+// always sees cobra's help on bare `eidos`, never the wizard.
 func shouldDispatchToWizard() bool {
 	if len(os.Args) != 1 {
 		return false
@@ -85,8 +88,5 @@ func shouldDispatchToWizard() bool {
 	if err != nil {
 		return false
 	}
-	if _, err := os.Stat(filepath.Join(dir, "state.db")); err == nil {
-		return false
-	}
-	return true
+	return !firstcontact.IsSubsequentRun(dir)
 }

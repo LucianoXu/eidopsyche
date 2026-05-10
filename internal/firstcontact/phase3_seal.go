@@ -163,7 +163,6 @@ func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 		return nil, fmt.Errorf("calling-words: %w", err)
 	}
 	s.CallingWords = words
-	r.Show(stringFor(s.Lang, "phase3_words_lead"))
 	r.Typewriter(ctx, words)
 
 	// Write calling-words and birth.json into the volume.
@@ -268,17 +267,18 @@ func awaitReady(ctx context.Context, r render.Renderer, lang string, ch <-chan R
 }
 
 func buildCallingWordsPrompt(book, lang string) string {
-	return fmt.Sprintf(`You are about to write the operator's calling-words — a single short summoning incantation, 1 to 3 sentences, that will be the FIRST words the operator speaks to the new mind-form. Tone: solemn, contextual, words of arrival.
+	return fmt.Sprintf(`You are writing the very first words the operator will say to the mind-form they have just summoned. Speak as the operator — a real person greeting another being for the first time.
 
 The summoning book the operator wrote:
 
 %s
 
 Constraints:
-- 1–3 sentences only
-- Address the to-be-summoned directly
-- Echo (do NOT repeat verbatim) the displaying paragraph's imagery
-- Language: %s
+- 1 to 2 sentences only.
+- Address the mind-form directly ("你" / "you").
+- Pick up one image or feeling from the summoning book, but do NOT quote it verbatim.
+- Plain, sincere, human. No "I summon thee", no archaic register, no theatrical solemnity, no "宛如 / 仿佛 / 朦胧" pile-ups. The way one might quietly say to a friend they have long wanted to meet: "你来了" — direct, warm, unadorned.
+- Language: %s.
 
-Return ONLY the incantation; no preamble.`, book, lang)
+Return ONLY the words themselves; no preamble.`, book, lang)
 }

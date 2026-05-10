@@ -68,6 +68,7 @@ func Run(ctx context.Context, d Deps) (*Summoning, []byte, error) {
 	if err := loadOperatorIntoSummoning(d.StateDir, s); err != nil {
 		return s, nil, err
 	}
+	d.Renderer.Show(fmt.Sprintf(stringFor(s.Lang, "welcome_back"), s.OperatorLabel))
 	ready := StartBackground(ctx, d.ReadyDeps)
 	existing, _ := d.ExistingSlugs()
 	if err := Phase2(ctx, s, d.Renderer, d.Claude, Phase2Deps{ExistingSlugs: existing}); err != nil {
