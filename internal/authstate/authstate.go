@@ -6,8 +6,9 @@
 //
 // Producers:  agent-runner (writes on EXIT_AUTH_REQUIRED).
 // Consumers:  agent-runner (self-gate at startup),
-//             eidos forge status-detail (in-container, surfaces to host),
-//             eidos forge login (clears on successful credential install).
+//
+//	eidos forge status-detail (in-container, surfaces to host),
+//	eidos forge login (clears on successful credential install).
 //
 // The file lives in /eidos/run/, which is in the mind-form's volume —
 // so the host can clear it via a one-shot `docker run --rm --mount`
