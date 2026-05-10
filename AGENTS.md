@@ -38,6 +38,9 @@ eidopsyche/
 │   ├── update/               # Update check, cache, prompt, self-update wrapper
 │   └── config/               # Shared configuration loading
 ├── pkg/                      # Stable public interfaces (empty — promote from internal/ as APIs stabilize)
+├── template/                 # Canonical clean ontology tree, embedded into the binary
+├── prefab/                   # Pre-authored mind-form catalogues (one dir per prefab id)
+├── embed.go                  # Top-level //go:embed bundling template/ + prefab/
 ├── docker/
 │   ├── Dockerfile            # Multi-stage; distroless-static final image
 │   └── entrypoint.sh
@@ -50,6 +53,41 @@ eidopsyche/
 ├── EXAMPLE.md                # Minimum deployment walkthrough
 └── CLAUDE.md                 # This file
 ```
+
+
+## Prefab catalogue (top-level `prefab/`)
+
+The summon wizard's "pick a preset" branch reads from `prefab/<id>/`.
+Each prefab is a complete, self-contained ontology tree with one
+sidecar `prefab.toml` for metadata (display name, kind, tagline,
+preview text). The wizard streams the tree into the new mind-form's
+docker volume via `internal/ontology.TarStreamPrefab`, rendering
+`.tpl` files with `text/template` and `Option("missingkey=error")` —
+typos in `.tpl` references fail loud rather than ship blank
+substitutions.
+
+Authoring conventions:
+- `prefab/<id>/prefab.toml` keys: `id`, `kind` (`m` | `f` | `spirit`),
+  `[display]`, `[tagline]`, `[preview]` — language-keyed maps; `zh`
+  and `en` are the supported keys today.
+- The substitution surface is `ontology.Params`: `Label`, `OwnerNpub`,
+  `OwnerLabel`, `MindFormNpub`, `HomeRelay`, `CreatedDate`. Any other
+  reference fails the missingkey check.
+- Do **not** ship `journal/0000-summoning.md.tpl` in a prefab. The
+  wizard renders the operator's seal book and writes it to that path
+  via `forge.CreateOpts.JournalEntry`; if both a templated file and
+  the literal entry are present, the literal entry wins (last-writer
+  in tar) and the prefab's templated journal will be silently
+  overwritten. Author the prefab's narrative in `essence/` or
+  `memory/` instead.
+- Top-level prefab dirs whose name starts with `_` are hidden from
+  `ontology.List()` (so the menu is clean) but remain readable by
+  `ontology.MetaFor` and `ontology.TarStreamPrefab` — used for test
+  fixtures (`prefab/_test_fixture/`).
+- The canonical clean ontology lives at `template/` (sibling of
+  `prefab/`); prefab `CLAUDE.md` files are independent copies that
+  authors are free to specialise. There is no automated check that
+  these stay in sync — drift is accepted until it bites.
 
 ## Build, Test, and Development Commands
 

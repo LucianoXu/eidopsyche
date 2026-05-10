@@ -132,12 +132,21 @@ The wizard goes through two stages, each independently skippable:
    *mindgate-only* (talk to other people / mind-forms), *mindform-only*
    (host a mind-form for someone else), or both.
 
-When summoning, the wizard asks you to describe the character you want,
-generates a displaying paragraph and a calling-words incantation via
-Claude Code, and brings the new mind-form online with its own private
+When summoning, the wizard branches in two:
+
+- **From scratch** (the original flow) — describe the character you
+  want; Claude Code researches it, types out a "displaying" paragraph,
+  and writes the calling-words. Requires `claude` on PATH.
+- **From a prefab** — pick one of six pre-authored mind-forms
+  (`Mephistopheles`, `Sebastian`, `Fire Keeper`, `Sheherazade`,
+  `Calcifer`, `Haku`). No live LLM call; the wizard copies the
+  prefab's ontology tree into the volume with name + date + master
+  substituted in. `claude` is **not** required for this path — useful
+  for fast onboarding, debugging, and offline demos.
+
+Either branch brings the new mind-form online with its own private
 secret. Run `eidos summon` to summon a 2nd, 3rd, ... mind-form once
-your operator state exists. The wizard requires `claude` (Claude Code)
-to be on PATH and logged in.
+your operator state exists.
 
 If you'd rather drive everything by hand (scripted setups, advanced
 topologies), the two-command bootstrap path below remains supported.

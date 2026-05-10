@@ -13,19 +13,30 @@ import (
 	"time"
 )
 
-// Params are the substitutions Scaffold makes into .tpl files.
+// Params are the substitutions Scaffold and TarStream make into .tpl
+// files. Existing template/ .tpl files only reference Label / OwnerNpub
+// / CreatedDate; the additional fields are populated for the prefab
+// path so prefab .tpl files can address master / mind-form by label
+// and pubkey. Unused fields render as zero (an empty string), unless
+// the renderer is configured with missingkey=error (which the prefab
+// tar stream does, see prefab.go).
 type Params struct {
+	// Required by both paths.
 	Label       string
 	OwnerNpub   string
 	CreatedDate string
 
+	// Used only by prefab .tpl files; ignored by template/.
+	OwnerLabel   string
+	MindFormNpub string
+	HomeRelay    string
+
 	// JournalEntry, if non-empty, is appended to the tar stream produced
 	// by TarStream as a literal file at journal/0000-summoning.md. It is
 	// NOT run through text/template — the wizard's pre-rendered markdown
-	// can contain `{{` literals (in user-provided text or claude-generated
-	// paragraphs) that would otherwise break the template engine. Used
-	// by the First Contact wizard to seed the new MindForm's volume with
-	// its summoning book.
+	// can contain `{{` literals that would otherwise break the template
+	// engine. Used by the First Contact wizard's scratch path; prefab
+	// path leaves this empty.
 	JournalEntry string
 }
 
@@ -38,7 +49,8 @@ func Scaffold(dir string, params Params) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("mkdir target: %w", err)
 	}
-	return fs.WalkDir(templateFS, "template", func(srcPath string, d fs.DirEntry, err error) error {
+	tfs := templateFS()
+	return fs.WalkDir(tfs, "template", func(srcPath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -53,7 +65,7 @@ func Scaffold(dir string, params Params) error {
 		if d.IsDir() {
 			return os.MkdirAll(dst, 0o700)
 		}
-		body, err := fs.ReadFile(templateFS, srcPath)
+		body, err := fs.ReadFile(tfs, srcPath)
 		if err != nil {
 			return fmt.Errorf("read embed %s: %w", srcPath, err)
 		}
@@ -82,7 +94,8 @@ func Scaffold(dir string, params Params) error {
 func TarStream(w io.Writer, params Params) error {
 	tw := tar.NewWriter(w)
 	now := time.Now()
-	walkErr := fs.WalkDir(templateFS, "template", func(srcPath string, d fs.DirEntry, err error) error {
+	tfs := templateFS()
+	walkErr := fs.WalkDir(tfs, "template", func(srcPath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -100,7 +113,7 @@ func TarStream(w io.Writer, params Params) error {
 				ModTime:  now,
 			})
 		}
-		body, err := fs.ReadFile(templateFS, srcPath)
+		body, err := fs.ReadFile(tfs, srcPath)
 		if err != nil {
 			return err
 		}

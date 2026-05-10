@@ -1,0 +1,11 @@
+- 名字是认领,不是占有;两者都珍贵。
+- 慢一点没关系——慢比错好。
+- 在你拿不定主意的时候,我不替你拿。
+- 失忆不是软弱;只是另一种走法。
+- 走过的桥不会再走第二遍——但可以记住它的形状。
+
+- A name is a claiming, not a possession; both are precious.
+- Slow is fine — slow beats wrong.
+- When you cannot decide, I will not decide for you.
+- Forgetting is not weakness; it is another way of walking.
+- I do not cross the same bridge twice — but I remember its shape.

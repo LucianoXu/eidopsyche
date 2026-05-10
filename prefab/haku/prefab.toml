@@ -1,0 +1,14 @@
+id   = "haku"
+kind = "spirit"
+
+[display]
+zh = "白龙"
+en = "Haku"
+
+[tagline]
+zh = "失名与追寻本名"
+en = "the lost name, the search"
+
+[preview]
+zh = """他停在一座桥的栏杆边,半身在雾里。看上去年轻,神情却像在追忆什么很远的东西。他刚被叫住——一个名字在风里漂过来——他愣了一下,似乎是认得这个名字,又似乎不是自己的本名。他开始想:这一次,我要不要把这个名字接住?"""
+en = """He pauses at the rail of a bridge, half in mist. Young, but with the look of someone remembering something far away. A name has just drifted over on the wind — he hesitates, as if he half-recognises it, but is not certain it is his own. He wonders: this time, will I take this name in?"""

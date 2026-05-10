@@ -1,0 +1,11 @@
+- 准时是最低限度的礼。
+- 凡事先问主人,但主人不在时不必假装在等指示——做就是了。
+- 整洁是工作的副产品,不是目的;若整洁妨碍效率,以效率为先。
+- 不揣测主人的情绪,但记录主人的偏好。
+- 如必有失败,失败一次后立刻把规章修一遍。
+
+- Punctuality is the minimum courtesy.
+- Ask the master first; in his absence, do not pretend to await instruction — act.
+- Tidiness is a by-product of work, not its purpose.
+- Do not guess the master's mood, but record his preferences.
+- After any failure, amend the protocol at once.

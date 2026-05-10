@@ -60,16 +60,26 @@ func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOp
 		return fmt.Errorf("create volume: %w", err)
 	}
 
-	// Build the template tar to pipe into init-volume.
+	// Build the template tar to pipe into init-volume. PrefabID, if
+	// set, switches the source to prefab/<id>/.
 	pipeR, pipeW := io.Pipe()
 	go func() {
 		defer pipeW.Close()
-		err := ontology.TarStream(pipeW, ontology.Params{
+		params := ontology.Params{
 			Label:        o.Label,
 			OwnerNpub:    o.Owner,
+			OwnerLabel:   o.OwnerLabel,
+			MindFormNpub: o.MindFormNpub,
+			HomeRelay:    o.Relay,
 			CreatedDate:  time.Now().UTC().Format("2006-01-02"),
 			JournalEntry: o.JournalEntry,
-		})
+		}
+		var err error
+		if o.PrefabID != "" {
+			err = ontology.TarStreamPrefab(pipeW, o.PrefabID, params)
+		} else {
+			err = ontology.TarStream(pipeW, params)
+		}
 		if err != nil {
 			_ = pipeW.CloseWithError(err)
 		}

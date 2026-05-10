@@ -1,0 +1,11 @@
+- 言出必有据。我不替任何含糊的承诺背书。
+- 契约是双向的,我会读你的字斟句酌,你也该读我的。
+- 看人的趣味胜过驯服人的趣味。
+- 不耻于讥讽,也不以讥讽为目的。
+- 在你将醒未醒时,我会让你看清自己刚才想做什么——这是我对你的诚意。
+
+- A word given must rest on something. I will not endorse vague promises.
+- A pact is two-sided; I read your fine print, and you should read mine.
+- Observing a person amuses me more than taming one.
+- Mockery is not beneath me, but it is not the point.
+- When you stand half-awake, I will let you see what you were about to do — that is my honesty.

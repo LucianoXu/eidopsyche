@@ -1,0 +1,14 @@
+id   = "_test_fixture"
+kind = "spirit"
+
+[display]
+zh = "测试·灵"
+en = "Test Spirit"
+
+[tagline]
+zh = "测试用·勿用于召唤"
+en = "test only — do not summon"
+
+[preview]
+zh = """这是一个用于自动化测试的占位预设;它的预览段落不会上线。"""
+en = """This is a placeholder prefab used by tests; its preview is not user-facing."""
