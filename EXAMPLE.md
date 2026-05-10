@@ -147,9 +147,11 @@ $ eidos forge start alice
 ✓ alice is awake.
 
 # 4. 查看运行状态与心智体的 npub。
+#    phase 含义:offline(容器未运行) / sleeping(运行但无活跃 wake) /
+#    awake[+dreaming] (正在处理 wake / 同时在做梦);括号内是 wake 来源。
 $ eidos forge status alice
 name:    alice
-state:   running
+phase:   sleeping
 npub: npub1amind...
 relay: wss://alice.host:22896
 master: npub1alice...
