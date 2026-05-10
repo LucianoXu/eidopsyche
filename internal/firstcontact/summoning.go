@@ -44,4 +44,9 @@ type Summoning struct {
 	CallingWords    string
 	StartedAt       time.Time
 	Subsequent      bool
+
+	// PrefabID is set by Phase 3's prefab branch; empty on the scratch
+	// path. Phase 4 inspects it to choose the tar source and to skip
+	// claude-driven calling-words generation.
+	PrefabID string
 }

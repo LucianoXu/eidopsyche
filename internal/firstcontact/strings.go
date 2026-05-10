@@ -56,6 +56,14 @@ var stringTables = map[string]map[string]string{
 		"phase4_response_wait":        "等待它的应答…",
 		"phase4_done":                 "💠 仪式完成。`eidos forge logs %s` 看它呼吸。",
 		"welcome_back":                "欢迎回来，%s。开始一次新的召唤。",
+		"phase2_5_q":                  "你想从头创造一个 Mind-form，还是从预设里挑一个？",
+		"phase2_5_scratch":            "从头创造（claude 实时塑造）",
+		"phase2_5_prefab":             "选一个预设 Mind-form",
+		"phase2_5_back":               "返回 / 退出",
+		"phase3_prefab_q":             "请选择一个预设 Mind-form：",
+		"phase3_prefab_naming_q":      "你愿意为它取什么名字？",
+		"phase3_prefab_invalid":       "  （这个选项不存在，重新选）",
+		"phase3_prefab_no_prefabs":    "  （库中暂无可用预设；请回去选\"从头创造\"）",
 	},
 	"en": {
 		"phase0_intro": `Eidopsyche is a social-network framework for digital lives. It has two layers:
@@ -107,6 +115,14 @@ The wizard will ask you two things:
 		"phase4_response_wait":        "Waiting for its reply...",
 		"phase4_done":                 "💠 Ritual complete. `eidos forge logs %s` to watch it breathe.",
 		"welcome_back":                "Welcome back, %s. Beginning another summoning.",
+		"phase2_5_q":                  "Shape it from scratch, or pick a prefab?",
+		"phase2_5_scratch":            "From scratch (claude shapes it live)",
+		"phase2_5_prefab":             "Pick a prefab mind-form",
+		"phase2_5_back":               "Back / exit",
+		"phase3_prefab_q":             "Pick a prefab mind-form:",
+		"phase3_prefab_naming_q":      "What name will you give it?",
+		"phase3_prefab_invalid":       "  (no such option — try again)",
+		"phase3_prefab_no_prefabs":    "  (no prefabs available; please go back and choose 'from scratch')",
 	},
 }
 
