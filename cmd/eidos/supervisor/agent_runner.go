@@ -141,7 +141,9 @@ func runAgent(wakeFile, ontologyDir string) error {
 			claudeMinVersion[0], claudeMinVersion[1], claudeMinVersion[2])
 	}
 
-	args := buildClaudeArgs(string(identity), msg, gateConfigPath, streamJSON)
+	// Session mode is wired in a later step; pass an empty UUID for now
+	// so buildClaudeArgs emits no session flag and behaviour matches today.
+	args := buildClaudeArgs(string(identity), msg, gateConfigPath, streamJSON, SessionMode{})
 
 	if streamJSON {
 		return runWithTranscript(sig, ontologyDir, args)
@@ -544,6 +546,27 @@ func releaseAgentLock(f *os.File) {
 	_ = f.Close()
 }
 
+// SessionKind selects how a wake's claude invocation is bound to a
+// Claude Code session.
+type SessionKind int
+
+const (
+	// SessionNew creates a new session with the given UUID via
+	// `--session-id <UUID>`. Used for the first wake of a session
+	// (fresh ontology, post-purge, or first wake after dream-end).
+	SessionNew SessionKind = iota
+	// SessionResume continues an existing session via
+	// `--resume <UUID>`. Used for every wake within a session.
+	SessionResume
+)
+
+// SessionMode describes how the upcoming claude invocation should bind
+// to a Claude Code session. UUID is required for both kinds.
+type SessionMode struct {
+	Kind SessionKind
+	UUID string
+}
+
 // buildClaudeArgs constructs the argv passed to `claude` for one wake.
 // Reads the mind-form config to pick up an optional model pin.
 //
@@ -557,10 +580,23 @@ func releaseAgentLock(f *os.File) {
 // streamJSON=true appends `--output-format stream-json --verbose
 // --include-partial-messages` so the supervisor can capture the
 // structured event stream into the per-wake transcript file.
-func buildClaudeArgs(identity, msg, configPath string, streamJSON bool) []string {
+//
+// sess controls session continuity: SessionNew creates a session with
+// the given UUID via `--session-id`; SessionResume picks up an existing
+// one via `--resume`. An empty UUID emits no session flag (legacy
+// behaviour, for tests / pre-flag callers).
+func buildClaudeArgs(identity, msg, configPath string, streamJSON bool, sess SessionMode) []string {
 	args := []string{
 		"--append-system-prompt", identity,
 		"--dangerously-skip-permissions",
+	}
+	if sess.UUID != "" {
+		switch sess.Kind {
+		case SessionNew:
+			args = append(args, "--session-id", sess.UUID)
+		case SessionResume:
+			args = append(args, "--resume", sess.UUID)
+		}
 	}
 	if cfg, err := config.Load(configPath); err == nil {
 		if model := cfg.MindForm.Model; model != "" {

@@ -49,7 +49,7 @@ func TestBuildClaudeArgs_NoModel(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("log_level = \"info\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := buildClaudeArgs("identity-text", "wake-msg", cfgPath, false)
+	got := buildClaudeArgs("identity-text", "wake-msg", cfgPath, false, SessionMode{})
 	want := []string{
 		"--append-system-prompt", "identity-text",
 		"--dangerously-skip-permissions",
@@ -66,7 +66,7 @@ func TestBuildClaudeArgs_StreamJSON(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte("log_level = \"info\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := buildClaudeArgs("ident", "msg", cfgPath, true)
+	got := buildClaudeArgs("ident", "msg", cfgPath, true, SessionMode{})
 	want := []string{
 		"--append-system-prompt", "ident",
 		"--dangerously-skip-permissions",
@@ -87,7 +87,7 @@ func TestBuildClaudeArgs_WithModel(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := buildClaudeArgs("identity", "msg", cfgPath, false)
+	got := buildClaudeArgs("identity", "msg", cfgPath, false, SessionMode{})
 	want := []string{
 		"--append-system-prompt", "identity",
 		"--dangerously-skip-permissions",
@@ -100,11 +100,46 @@ func TestBuildClaudeArgs_WithModel(t *testing.T) {
 }
 
 func TestBuildClaudeArgs_MissingConfig(t *testing.T) {
-	got := buildClaudeArgs("ident", "m", "/nonexistent/path/config.toml", false)
+	got := buildClaudeArgs("ident", "m", "/nonexistent/path/config.toml", false, SessionMode{})
 	want := []string{
 		"--append-system-prompt", "ident",
 		"--dangerously-skip-permissions",
 		"-p", "m",
+	}
+	if !slicesEqualStr(got, want) {
+		t.Errorf("argv = %v, want %v", got, want)
+	}
+}
+
+func TestBuildClaudeArgs_SessionNew(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	uuid := "00000000-1111-2222-3333-444444444444"
+	got := buildClaudeArgs("ident", "msg", cfgPath, false, SessionMode{Kind: SessionNew, UUID: uuid})
+	want := []string{
+		"--append-system-prompt", "ident",
+		"--dangerously-skip-permissions",
+		"--session-id", uuid,
+		"-p", "msg",
+	}
+	if !slicesEqualStr(got, want) {
+		t.Errorf("argv = %v, want %v", got, want)
+	}
+}
+
+func TestBuildClaudeArgs_SessionResume(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	uuid := "00000000-1111-2222-3333-444444444444"
+	got := buildClaudeArgs("ident", "msg", cfgPath, true, SessionMode{Kind: SessionResume, UUID: uuid})
+	want := []string{
+		"--append-system-prompt", "ident",
+		"--dangerously-skip-permissions",
+		"--resume", uuid,
+		"--output-format", "stream-json",
+		"--verbose",
+		"--include-partial-messages",
+		"-p", "msg",
 	}
 	if !slicesEqualStr(got, want) {
 		t.Errorf("argv = %v, want %v", got, want)
