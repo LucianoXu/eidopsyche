@@ -26,7 +26,7 @@ func TestPersistSoftReject_LogsPeerLabel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d.persistSoftReject(&gnostr.Event{ID: "ev"}, &gnostr.Event{PubKey: senderHex}, "not_envelope")
+	d.persistSoftReject(context.Background(), &gnostr.Event{ID: "ev"}, &gnostr.Event{PubKey: senderHex}, "not_envelope")
 
 	if got := buf.String(); !strings.Contains(got, `peer="alice (abc1234…)"`) {
 		t.Errorf("expected peer label in log, got: %s", got)
