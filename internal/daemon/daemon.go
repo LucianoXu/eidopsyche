@@ -389,7 +389,7 @@ func (d *Daemon) handleIncoming(ctx context.Context, ev *gnostr.Event) {
 	case 25001:
 		d.handleInviteRedemption(ctx, ev, rumor)
 	default:
-		d.Log.Warn("ignored unknown rumor kind", "kind", rumor.Kind, "from", rumor.PubKey)
+		d.Log.Warn("ignored unknown rumor kind", "kind", rumor.Kind, "from", rumor.PubKey, "peer", d.peerLabel(ctx, rumor.PubKey))
 	}
 }
 
@@ -407,7 +407,7 @@ func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *
 		case errors.Is(err, envelope.ErrUnsupportedVersion):
 			reason = "unsupported_version"
 		}
-		d.persistSoftReject(ev, rumor, reason)
+		d.persistSoftReject(ctx, ev, rumor, reason)
 		return
 	}
 
@@ -419,7 +419,7 @@ func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *
 		if rumor.PubKey != d.Key.PublicHex {
 			c, err := d.Repo.Get(ctx, rumor.PubKey)
 			if err != nil || c.Tier == contacts.TierBlocked {
-				d.Log.Debug("dropped non-contact / blocked", "from", rumor.PubKey)
+				d.Log.Debug("dropped non-contact / blocked", "from", rumor.PubKey, "peer", d.peerLabel(ctx, rumor.PubKey))
 				return
 			}
 			senderContact = c
@@ -442,7 +442,7 @@ func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *
 				d.Log.Warn("wake submit", "err", err)
 			}
 		}
-		d.broadcastInbox(msg)
+		d.broadcastInbox(ctx, msg)
 		// Tier-2: emit ack to non-self whitelisted senders. senderContact is
 		// nil only for self-copies (rumor.PubKey == self), which we skip.
 		if senderContact != nil {
@@ -455,12 +455,12 @@ func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *
 
 	case envelope.TypeCommand:
 		if rumor.PubKey != d.Key.PublicHex {
-			d.persistSoftReject(ev, rumor, "unauthorized_command")
+			d.persistSoftReject(ctx, ev, rumor, "unauthorized_command")
 			return
 		}
 		reply, ok, runErr := dispatchCommand(ctx, d, env.Command.Name, env.Command.Args)
 		if !ok {
-			d.persistSoftReject(ev, rumor, "unknown_command")
+			d.persistSoftReject(ctx, ev, rumor, "unknown_command")
 			return
 		}
 		if runErr != nil {
@@ -475,8 +475,8 @@ func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *
 // persistSoftReject appends the rumor to inbox with Malformed=true and the
 // given reason, then broadcasts. The Content field stores rumor.Content
 // as-received so operators can debug interop issues.
-func (d *Daemon) persistSoftReject(ev *gnostr.Event, rumor *gnostr.Event, reason string) {
-	d.Log.Info("soft-reject", "reason", reason, "from", rumor.PubKey, "event_id", ev.ID)
+func (d *Daemon) persistSoftReject(ctx context.Context, ev *gnostr.Event, rumor *gnostr.Event, reason string) {
+	d.Log.Info("soft-reject", "reason", reason, "from", rumor.PubKey, "peer", d.peerLabel(ctx, rumor.PubKey), "event_id", ev.ID)
 	msg := inbox.Message{
 		EventID:      ev.ID,
 		InnerID:      rumor.ID,
@@ -497,7 +497,7 @@ func (d *Daemon) persistSoftReject(ev *gnostr.Event, rumor *gnostr.Event, reason
 			d.Log.Warn("wake submit (soft-reject)", "err", err)
 		}
 	}
-	d.broadcastInbox(msg)
+	d.broadcastInbox(ctx, msg)
 }
 
 // sendChatReply wraps text in a v1 chat envelope and publishes a NIP-17
@@ -620,7 +620,7 @@ func (d *Daemon) handleInboundAck(ctx context.Context, ev *gnostr.Event, rumor *
 	}
 	c, err := d.Repo.Get(ctx, rumor.PubKey)
 	if err != nil || c.Tier == contacts.TierBlocked {
-		d.Log.Debug("dropped ack from non-contact / blocked", "from", rumor.PubKey)
+		d.Log.Debug("dropped ack from non-contact / blocked", "from", rumor.PubKey, "peer", d.peerLabel(ctx, rumor.PubKey))
 		return
 	}
 
@@ -641,7 +641,9 @@ func (d *Daemon) handleInboundAck(ctx context.Context, ev *gnostr.Event, rumor *
 		return
 	}
 	if match.To != rumor.PubKey {
-		d.Log.Warn("ack from non-recipient", "ref", env.Ref, "expected", match.To, "actual", rumor.PubKey)
+		d.Log.Warn("ack from non-recipient", "ref", env.Ref,
+			"expected", match.To, "expected_peer", d.peerLabel(ctx, match.To),
+			"actual", rumor.PubKey, "actual_peer", d.peerLabel(ctx, rumor.PubKey))
 		return
 	}
 	if match.AckedAt != 0 {
@@ -676,6 +678,7 @@ func (d *Daemon) handleInboundAck(ctx context.Context, ev *gnostr.Event, rumor *
 	merged := *match
 	merged.AckedAt = delta.AckedAt
 	merged.AckEventID = delta.AckEventID
+	merged.Label = lookupLabel(ctx, d, merged.To, map[string]string{})
 	d.emitDashEvent(dashboard.Event{Kind: "outbox.message", Sent: &merged})
 }
 
@@ -705,7 +708,7 @@ func (d *Daemon) emitAck(ctx context.Context, toPubkey string, recipientRelays [
 	urls, err := d.publishTargets(ctx, recipientRelays)
 	if err != nil {
 		// Best-effort: log and keep going — but with no targets, abort.
-		d.Log.Warn("emit ack: publishTargets", "err", err, "to", toPubkey)
+		d.Log.Warn("emit ack: publishTargets", "err", err, "to", toPubkey, "peer", d.peerLabel(ctx, toPubkey))
 		return
 	}
 	if len(urls) == 0 {
@@ -836,8 +839,13 @@ func (d *Daemon) broadcastContactAdded(data any) {
 	d.emitDashEvent(dashboard.Event{Kind: "contact.added"})
 }
 
-// broadcastInbox pushes an inbox message to all live IPC subscribers.
-func (d *Daemon) broadcastInbox(m inbox.Message) {
+// broadcastInbox pushes an inbox message to all live IPC subscribers
+// and the dashboard hub. The pushed message is enriched with the
+// sender's contact label so live `gate inbox --tail` consumers and the
+// dashboard SSE thread render friendly names without waiting for the
+// next inbox.list refresh.
+func (d *Daemon) broadcastInbox(ctx context.Context, m inbox.Message) {
+	m.Label = lookupLabel(ctx, d, m.From, map[string]string{})
 	d.mu.Lock()
 	subs := make([]*ipc.Conn, len(d.subs))
 	copy(subs, d.subs)
