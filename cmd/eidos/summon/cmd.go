@@ -281,19 +281,25 @@ func addContactDirect(stateDir string) func(context.Context, string, string, str
 }
 
 // volumeTailer is the production ResponseWaiter: it polls the volume
-// for the response file via a one-shot helper container.
+// via a one-shot helper container that gates on essence/born_at and
+// emits journal/0000-response.md once both are committed (per the
+// agent's birth boot prompt: born_at is written LAST, after response).
 type volumeTailer struct {
 	client forgectl.Client
 	image  string
 }
 
-func (v *volumeTailer) Wait(ctx context.Context, slug, relPath string, timeout time.Duration) ([]byte, error) {
-	target := "/eidos/" + strings.TrimPrefix(relPath, "/")
+func (v *volumeTailer) Wait(ctx context.Context, slug, gatePath, bodyPath string, timeout time.Duration) ([]byte, error) {
+	gateTarget := "/eidos/" + strings.TrimPrefix(gatePath, "/")
+	bodyTarget := "/eidos/" + strings.TrimPrefix(bodyPath, "/")
 	deadline := time.Now().Add(timeout)
-	script := fmt.Sprintf("test -s %q && cat %q", target, target)
+	// Single helper-container script: exit 0 + print body iff both
+	// files are non-empty. Order matters: -s on gate first means we
+	// don't even read body until the supervisor's authoritative
+	// completion marker is set.
+	script := fmt.Sprintf("test -s %q && test -s %q && cat %q",
+		gateTarget, bodyTarget, bodyTarget)
 	for {
-		// Run a short-lived container that exits 0 + prints the file
-		// when present. Exits non-zero otherwise.
 		res, err := v.client.RunInit(ctx, forgectl.RunInitOpts{
 			Image: v.image,
 			Mount: forgectl.Mount{VolumeName: forgectl.VolumeName(slug), Target: "/eidos"},
@@ -304,7 +310,7 @@ func (v *volumeTailer) Wait(ctx context.Context, slug, relPath string, timeout t
 			return res.Stdout, nil
 		}
 		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("timed out waiting for %s in volume", relPath)
+			return nil, fmt.Errorf("timed out waiting for gate %s + body %s in volume", gatePath, bodyPath)
 		}
 		select {
 		case <-ctx.Done():
