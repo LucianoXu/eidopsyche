@@ -53,6 +53,17 @@ type MindFormConfig struct {
 	// DreamMinInterval is the floor for "you may dream now". Empty =
 	// DefaultDreamMinInterval (12h). A Go duration ≥ 1h.
 	DreamMinInterval string `toml:"dream_min_interval"`
+
+	// TranscriptsMaxCount caps the number of per-wake transcript files
+	// kept under /eidos/run/transcripts/. Zero = transcript.DefaultMaxCount.
+	// Whichever of TranscriptsMaxCount and TranscriptsMaxBytes triggers
+	// first prunes the oldest wake.
+	TranscriptsMaxCount int `toml:"transcripts_max_count"`
+
+	// TranscriptsMaxBytes caps the total size of per-wake transcript
+	// files. Empty = transcript.DefaultMaxBytes (100MB). Accepts plain
+	// bytes ("10485760") or K/M/G suffixes ("100MB", "5G").
+	TranscriptsMaxBytes string `toml:"transcripts_max_bytes"`
 }
 
 // WakeConfig controls the optional wake-signal output used by the in-container
