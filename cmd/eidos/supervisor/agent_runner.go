@@ -20,6 +20,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/authstate"
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
+	"github.com/LucianoXu/eidopsyche/internal/sessionstate"
 	"github.com/LucianoXu/eidopsyche/internal/transcript"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 	"github.com/spf13/cobra"
@@ -33,14 +34,25 @@ const gateConfigPath = "/eidos/gate/config.toml"
 // dreamStateRuntimePath is the in-container dream-state.json path.
 // agent-runner reads it before invoking claude so the wake context can
 // surface dream-eligibility hints.
-const dreamStateRuntimePath = "/eidos/run/dream-state.json"
+//
+// var (not const) so tests can substitute a temp file.
+var dreamStateRuntimePath = "/eidos/run/dream-state.json"
 
 // agentLockPath is the single-instance lock for the agent process.
 // Lives at /eidos/run/agent.lock per spec
 // docs/superpowers/specs/2026-05-09-mindforge-v0-design.md (the lock
 // is decoupled from the wake directory so a future non-wake-driven
 // agent invocation lands on the same singleton).
-const agentLockPath = "/eidos/run/agent.lock"
+//
+// var (not const) so tests can substitute a temp file.
+var agentLockPath = "/eidos/run/agent.lock"
+
+// sessionStatePath is the in-container session.json path. agent-runner
+// reads it at wake start to decide between --resume and --session-id;
+// `forge dream end` clears it to force a fresh session next wake.
+//
+// var (not const) so tests can substitute a temp file.
+var sessionStatePath = "/eidos/run/session.json"
 
 // transcriptsRuntimeDir is the in-container path to the per-mindform
 // transcripts directory; agent-runner writes the per-wake NDJSON file
@@ -120,20 +132,29 @@ func runAgent(wakeFile, ontologyDir string) error {
 	sig.Context = computeContext(sig, cfg, ds, time.Now())
 
 	identity, _ := os.ReadFile(filepath.Join(ontologyDir, "self/identity.md"))
-	msg := buildWakeMessage(wakePromptInput{
-		Reason:                string(sig.Reason),
-		Hint:                  sig.Hint,
-		InboxUnread:           sig.Context.InboxUnread,
-		SinceLastWakeSeconds:  sig.Context.SinceLastWakeSeconds,
-		MasterLikelyAsleep:    sig.Context.MasterLikelyAsleep,
-		QuietStart:            cfg.MindForm.QuietStart,
-		QuietEnd:              cfg.MindForm.QuietEnd,
-		TZ:                    cfg.MindForm.TZ,
-		SinceLastDreamSeconds: sig.Context.SinceLastDreamSeconds,
-		DreamEligible:         sig.Context.DreamEligible,
-		LastDreamNote:         ds.LastDreamNote,
-		PlanID:                sig.Context.PlanID,
-	})
+
+	sess, sessErr := sessionstate.Read(sessionStatePath)
+	if sessErr != nil {
+		log.Printf("agent-runner: session.json corrupt (%v); minting new", sessErr)
+	}
+	mode, isFirstWake := decideSessionMode(sess, sessErr, ds)
+	sessionUUID := mode.UUID
+	if isFirstWake {
+		if sessErr == nil && sess.SessionID != "" {
+			// dream-end didn't get a chance to clear; do it now.
+			if cErr := sessionstate.Clear(sessionStatePath); cErr != nil {
+				log.Printf("agent-runner: session-state clear before mint: %v", cErr)
+			}
+		}
+		fresh, mErr := sessionstate.Mint(sessionStatePath, time.Now())
+		if mErr != nil {
+			return fmt.Errorf("session-state mint: %w", mErr)
+		}
+		sessionUUID = fresh.SessionID
+		mode.UUID = fresh.SessionID
+	}
+
+	msg := rebuildWakeMessage(sig, cfg, ds, isFirstWake)
 
 	streamJSON := claudeSupportsStreamJSON(claudeBin)
 	if !streamJSON {
@@ -141,14 +162,59 @@ func runAgent(wakeFile, ontologyDir string) error {
 			claudeMinVersion[0], claudeMinVersion[1], claudeMinVersion[2])
 	}
 
-	// Session mode is wired in a later step; pass an empty UUID for now
-	// so buildClaudeArgs emits no session flag and behaviour matches today.
-	args := buildClaudeArgs(string(identity), msg, gateConfigPath, streamJSON, SessionMode{})
+	args := buildClaudeArgs(string(identity), msg, gateConfigPath, streamJSON, mode)
 
+	var runErr error
 	if streamJSON {
-		return runWithTranscript(sig, ontologyDir, args)
+		runErr = runWithTranscript(sig, ontologyDir, args, sessionUUID)
+	} else {
+		runErr = runWithoutTranscript(ontologyDir, args)
 	}
-	return runWithoutTranscript(ontologyDir, args)
+	if runErr != nil {
+		return runErr
+	}
+
+	if err := sessionstate.IncrementWake(sessionStatePath); err != nil {
+		log.Printf("agent-runner: IncrementWake: %v", err)
+	}
+	return nil
+}
+
+// decideSessionMode picks NEW vs RESUME based on already-read state.
+// Pure: no I/O. The returned mode.UUID is empty when isFirstWake — the
+// caller mints a fresh UUID and fills it in.
+func decideSessionMode(sess sessionstate.State, sessReadErr error, ds dreamstate.State) (mode SessionMode, isFirstWake bool) {
+	switch {
+	case sessReadErr != nil, sess.SessionID == "":
+		return SessionMode{Kind: SessionNew}, true
+	case ds.LastDreamFinishedAt > sess.SessionStartedAt:
+		return SessionMode{Kind: SessionNew}, true
+	default:
+		return SessionMode{Kind: SessionResume, UUID: sess.SessionID}, false
+	}
+}
+
+// rebuildWakeMessage assembles the wake-message from already-read state.
+// Used by runAgent and (later) by the resume-fallback path that needs to
+// re-build the message after flipping IsFirstWakeOfNewSession.
+func rebuildWakeMessage(sig wake.Signal, cfg config.Config, ds dreamstate.State, isFirstWake bool) string {
+	return buildWakeMessage(wakePromptInput{
+		Reason:                  string(sig.Reason),
+		Hint:                    sig.Hint,
+		InboxUnread:             sig.Context.InboxUnread,
+		SinceLastWakeSeconds:    sig.Context.SinceLastWakeSeconds,
+		MasterLikelyAsleep:      sig.Context.MasterLikelyAsleep,
+		QuietStart:              cfg.MindForm.QuietStart,
+		QuietEnd:                cfg.MindForm.QuietEnd,
+		TZ:                      cfg.MindForm.TZ,
+		SinceLastDreamSeconds:   sig.Context.SinceLastDreamSeconds,
+		DreamEligible:           sig.Context.DreamEligible,
+		LastDreamNote:           ds.LastDreamNote,
+		PlanID:                  sig.Context.PlanID,
+		IsFirstWakeOfNewSession: isFirstWake,
+		DreamCount:              ds.DreamCount,
+		LastDreamFinishedAt:     ds.LastDreamFinishedAt,
+	})
 }
 
 // runWithoutTranscript runs claude with stdout wired straight through
@@ -168,8 +234,10 @@ func runWithoutTranscript(ontologyDir string, args []string) error {
 
 // runWithTranscript runs claude with --output-format stream-json and tees
 // its stdout into the per-wake NDJSON file under transcripts/. Lifecycle
-// summaries are emitted to log.Printf (docker logs).
-func runWithTranscript(sig wake.Signal, ontologyDir string, args []string) error {
+// summaries are emitted to log.Printf (docker logs). sessionUUID is
+// stamped onto the wake's index Entry so the watch surface can group
+// wakes into sessions; pass "" when no session is active.
+func runWithTranscript(sig wake.Signal, ontologyDir string, args []string, sessionUUID string) error {
 	startedAt := time.Now().Unix()
 
 	store, err := transcript.NewStore(transcriptsRuntimeDir)
@@ -256,6 +324,7 @@ func runWithTranscript(sig wake.Signal, ontologyDir string, args []string) error
 	maxCount, maxBytes := transcriptLimits(cfg)
 	finalEntry := transcript.Entry{
 		ID:             wakeID,
+		SessionID:      sessionUUID,
 		Reason:         string(sig.Reason),
 		StartedAt:      startedAt,
 		EndedAt:        endedAt,

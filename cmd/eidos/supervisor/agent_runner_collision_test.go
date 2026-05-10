@@ -31,7 +31,7 @@ exit 0`)
 	f.Close()
 
 	sig := wake.Signal{V: 1, ID: "colliding", Reason: wake.ReasonHeartBeat, TriggeredAt: 1}
-	if err := runWithTranscript(sig, t.TempDir(), []string{"-p", "x"}); err != nil {
+	if err := runWithTranscript(sig, t.TempDir(), []string{"-p", "x"}, ""); err != nil {
 		t.Fatalf("runWithTranscript: %v", err)
 	}
 

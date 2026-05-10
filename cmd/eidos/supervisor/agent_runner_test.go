@@ -4,6 +4,7 @@ package supervisor
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
+	"github.com/LucianoXu/eidopsyche/internal/sessionstate"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 )
 
@@ -169,6 +171,38 @@ func TestBuildClaudeArgs_SessionNew(t *testing.T) {
 	}
 	if !slicesEqualStr(got, want) {
 		t.Errorf("argv = %v, want %v", got, want)
+	}
+}
+
+func TestDecideSessionMode_NewWhenAbsent(t *testing.T) {
+	mode, first := decideSessionMode(sessionstate.State{}, nil, dreamstate.State{})
+	if !first || mode.Kind != SessionNew {
+		t.Fatalf("absent state → NEW; got %+v first=%v", mode, first)
+	}
+}
+
+func TestDecideSessionMode_NewWhenCorrupt(t *testing.T) {
+	mode, first := decideSessionMode(sessionstate.State{}, errors.New("corrupt"), dreamstate.State{})
+	if !first || mode.Kind != SessionNew {
+		t.Fatalf("corrupt state → NEW; got %+v first=%v", mode, first)
+	}
+}
+
+func TestDecideSessionMode_ResumeWhenSessionFresh(t *testing.T) {
+	sess := sessionstate.State{SessionID: "u-1", SessionStartedAt: 200}
+	ds := dreamstate.State{LastDreamFinishedAt: 100}
+	mode, first := decideSessionMode(sess, nil, ds)
+	if first || mode.Kind != SessionResume || mode.UUID != "u-1" {
+		t.Fatalf("fresh-session+old-dream → RESUME; got %+v first=%v", mode, first)
+	}
+}
+
+func TestDecideSessionMode_NewWhenDreamFinishedAfterSession(t *testing.T) {
+	sess := sessionstate.State{SessionID: "u-1", SessionStartedAt: 100}
+	ds := dreamstate.State{LastDreamFinishedAt: 200}
+	mode, first := decideSessionMode(sess, nil, ds)
+	if !first || mode.Kind != SessionNew {
+		t.Fatalf("stale-session+new-dream → NEW; got %+v first=%v", mode, first)
 	}
 }
 
