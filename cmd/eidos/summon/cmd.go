@@ -117,6 +117,33 @@ func Run(ctx context.Context) error {
 			HomeRelayURL: firstcontact.PublicHomeRelay,
 		},
 	}
+	if tui, ok := rend.(render.TUIRenderer); ok {
+		return tui.RunWithPhases(ctx, func(ctx context.Context, r render.Renderer) error {
+			deps.Renderer = r
+			s, body, err := firstcontact.Run(ctx, deps)
+			if err != nil {
+				if errors.Is(err, firstcontact.ErrSelfHostExit) {
+					return nil
+				}
+				return err
+			}
+			if body != nil {
+				r.Show("")
+				// Prefer markdown rendering when the renderer supports it
+				// (TUI via glamour). CLI falls back to plain Typewriter.
+				if md, ok := r.(render.MarkdownRenderer); ok {
+					md.RenderMarkdown(ctx, string(body))
+				} else {
+					r.Typewriter(ctx, string(body))
+				}
+				r.Show("")
+				r.Show(fmt.Sprintf(stringFor(s.Lang, "phase3_done"), s.Slug))
+			}
+			return nil
+		})
+	}
+
+	// CLI fallback path — phase logic runs directly on the main goroutine.
 	s, body, err := firstcontact.Run(ctx, deps)
 	if err != nil {
 		if errors.Is(err, firstcontact.ErrSelfHostExit) {

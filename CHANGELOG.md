@@ -4,6 +4,12 @@
 
 ### Added
 
+- **First Contact wizard TUI** — Bubble Tea + Charm-based interactive
+  wizard with arrow-key navigation, animated status spinners, glamour
+  markdown rendering for the agent's response, and a transcript-style
+  layout (no alt-screen, past phases stay visible). Falls back to the
+  plain CLI on non-TTY / CI / dumb terminals / windows narrower than
+  60 columns. `EIDOS_NO_TUI=1` disables it explicitly.
 - **First Contact wizard** (`eidos` first-run, `eidos summon` always) — guided
   ritual that summons a mind-form with a generated identity, dedicated
   birth-wake, and private `essence/secret.md`. Bare `eidos` on a fresh
