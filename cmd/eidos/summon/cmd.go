@@ -137,7 +137,7 @@ func Run(ctx context.Context) error {
 					r.Typewriter(ctx, string(body))
 				}
 				r.Show("")
-				r.Show(fmt.Sprintf(stringFor(s.Lang, "phase3_done"), s.Slug))
+				r.Show(fmt.Sprintf(stringFor(s.Lang, "phase4_done"), s.Slug))
 			}
 			return nil
 		})
@@ -156,7 +156,7 @@ func Run(ctx context.Context) error {
 		rend.Typewriter(ctx, string(body))
 		rend.Show("")
 		fmt.Fprintln(os.Stdout)
-		fmt.Fprintf(os.Stdout, stringFor(s.Lang, "phase3_done"), s.Slug)
+		fmt.Fprintf(os.Stdout, stringFor(s.Lang, "phase4_done"), s.Slug)
 		fmt.Fprintln(os.Stdout)
 	}
 	return nil
@@ -166,7 +166,7 @@ func Run(ctx context.Context) error {
 // wrapping cmd-level summary respects language. Kept tiny here
 // rather than exporting from internal/firstcontact.
 func stringFor(lang, key string) string {
-	if lang == "zh" && key == "phase3_done" {
+	if lang == "zh" && key == "phase4_done" {
 		return "💠 仪式完成。`eidos forge logs %s` 看它呼吸。"
 	}
 	return "💠 Ritual complete. `eidos forge logs %s` to watch it breathe."

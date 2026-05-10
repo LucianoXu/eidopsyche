@@ -31,8 +31,8 @@ type ResponseWaiter func(ctx context.Context, slug, relPath string, timeout time
 // production may swap in an IPC-method call once that path is added.
 type ContactAdder func(ctx context.Context, npub, label, relay string) error
 
-// Phase3Deps are the inputs Phase3 cannot derive from Summoning.
-type Phase3Deps struct {
+// Phase4Deps are the inputs Phase 4 cannot derive from Summoning.
+type Phase4Deps struct {
 	DockerClient   forgectl.Client
 	Image          string
 	WriteVolume    VolumeWriter
@@ -92,9 +92,9 @@ func PollResponseFile(ctx context.Context, path string, timeout, interval time.D
 	}
 }
 
-// Phase3 runs seal → calling-words → response. Returns the rendered
+// Phase4 runs seal → calling-words → response. Returns the rendered
 // response body the caller can hand to Typewriter.
-func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, ready <-chan ReadyState, d Phase3Deps) ([]byte, error) {
+func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, ready <-chan ReadyState, d Phase4Deps) ([]byte, error) {
 	final, err := awaitReady(ctx, r, s.Lang, ready)
 	if err != nil {
 		return nil, err
@@ -108,9 +108,9 @@ func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	// Seal.
 	book := RenderSummoningBook(s)
 	r.Frame(book)
-	idx, err := r.PromptChoice(stringFor(s.Lang, "phase3_seal_q"), []render.ChoiceOption{
-		{Label: stringFor(s.Lang, "phase3_seal")},
-		{Label: stringFor(s.Lang, "phase3_quit")},
+	idx, err := r.PromptChoice(stringFor(s.Lang, "phase4_seal_q"), []render.ChoiceOption{
+		{Label: stringFor(s.Lang, "phase4_seal")},
+		{Label: stringFor(s.Lang, "phase4_quit")},
 	})
 	if err != nil {
 		return nil, err
@@ -155,7 +155,7 @@ func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	}
 
 	// Calling-words.
-	st := r.Status(stringFor(s.Lang, "phase3_words_status"))
+	st := r.Status(stringFor(s.Lang, "phase4_words_status"))
 	words, err := c.CallText(ctx, buildCallingWordsPrompt(book, s.Lang))
 	st.Stop()
 	if err != nil {
@@ -194,7 +194,7 @@ func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 		return nil, fmt.Errorf("start container: %w", err)
 	}
 
-	st2 := r.Status(stringFor(s.Lang, "phase3_response_wait"))
+	st2 := r.Status(stringFor(s.Lang, "phase4_response_wait"))
 	// Live elapsed-time tick so the operator sees the wait is alive.
 	// Boot-wake is multi-step (read book + words; rewrite identity + master;
 	// generate secret; write response; stamp born_at) and can take ~70-150s
@@ -210,7 +210,7 @@ func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 				return
 			case <-t.C:
 				st2.Update(fmt.Sprintf("%s (%ds)",
-					stringFor(s.Lang, "phase3_response_wait"),
+					stringFor(s.Lang, "phase4_response_wait"),
 					int(time.Since(started).Seconds())))
 			}
 		}
@@ -259,7 +259,7 @@ func awaitReady(ctx context.Context, r render.Renderer, lang string, ch <-chan R
 				return s, nil
 			}
 			if !hint {
-				r.Show(stringFor(lang, "phase3_wait"))
+				r.Show(stringFor(lang, "phase4_wait"))
 				hint = true
 			}
 		}

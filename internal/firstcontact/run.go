@@ -57,10 +57,17 @@ type Deps struct {
 	OperatorKeyPath string
 }
 
-// Run drives the wizard end-to-end. Returns the rendered Summoning
-// (the in-memory state — never persisted) plus the response body the
-// agent wrote at journal/0000-response.md. The cmd-level caller passes
-// the body through r.Typewriter and prints a one-line completion.
+// Run drives the wizard end-to-end through the four-phase tree:
+//
+//	Phase 0 (open)    — first run: logo + language + project intro
+//	Phase 1 (identity) — first run: 新建 / 导入 / 跳过
+//	Phase 2 (action)   — every run: exit / summon-with-local / summon-with-card
+//	Phase 3 (book)     — when summoning: character + research + display + name
+//	Phase 4 (seal)     — when summoning: book preview + calling-words + birth
+//
+// Returns the rendered Summoning (in-memory state, never persisted)
+// plus the response body the agent wrote at journal/0000-response.md.
+// On Phase2Exit, body is nil and err is nil — the wizard ends cleanly.
 func Run(ctx context.Context, d Deps) (*Summoning, []byte, error) {
 	s := &Summoning{}
 	initialized, err := isIdentityInitialized(d.StateDir)
@@ -73,36 +80,39 @@ func Run(ctx context.Context, d Deps) (*Summoning, []byte, error) {
 		if err := Phase0(ctx, s, d.Renderer); err != nil {
 			return nil, nil, err
 		}
-		ready := StartBackground(ctx, d.ReadyDeps)
-		if err := Phase1(ctx, s, d.Renderer, Phase1Deps{StateDir: d.StateDir}); err != nil {
+		if err := Phase1(ctx, s, d.Renderer, Phase1Deps{
+			StateDir:        d.StateDir,
+			OperatorKeyPath: d.OperatorKeyPath,
+		}); err != nil {
 			if errors.Is(err, ErrSelfHostExit) {
 				return s, nil, ErrSelfHostExit
 			}
 			return s, nil, err
 		}
-		existing, _ := d.ExistingSlugs()
-		if err := Phase2(ctx, s, d.Renderer, d.Claude, Phase2Deps{ExistingSlugs: existing}); err != nil {
+	} else {
+		if err := loadLocalMasterDefault(d.StateDir, s); err != nil {
 			return s, nil, err
 		}
-		body, err := Phase3(ctx, s, d.Renderer, d.Claude, ready, Phase3Deps{
-			DockerClient: d.DockerClient, Image: d.Image,
-			WriteVolume: d.WriteVolume, ContainerStart: d.StartContainer,
-			ResponseWait: d.ResponseWait, AddContact: d.AddContact,
-		})
-		return s, body, err
+		d.Renderer.Show(fmt.Sprintf(stringFor(s.Lang, "welcome_back"), s.MasterLabel))
 	}
 
-	// Subsequent run: load local master default, skip phase 0/1.
-	if err := loadLocalMasterDefault(d.StateDir, s); err != nil {
+	action, err := Phase2(ctx, s, d.Renderer, Phase2Deps{
+		EntryMode:      d.EntryMode,
+		MasterCardPath: d.MasterCardPath,
+	})
+	if err != nil {
 		return s, nil, err
 	}
-	d.Renderer.Show(fmt.Sprintf(stringFor(s.Lang, "welcome_back"), s.MasterLabel))
+	if action == Phase2Exit {
+		return s, nil, nil
+	}
+
 	ready := StartBackground(ctx, d.ReadyDeps)
 	existing, _ := d.ExistingSlugs()
-	if err := Phase2(ctx, s, d.Renderer, d.Claude, Phase2Deps{ExistingSlugs: existing}); err != nil {
+	if err := Phase3(ctx, s, d.Renderer, d.Claude, Phase3BookDeps{ExistingSlugs: existing}); err != nil {
 		return s, nil, err
 	}
-	body, err := Phase3(ctx, s, d.Renderer, d.Claude, ready, Phase3Deps{
+	body, err := Phase4(ctx, s, d.Renderer, d.Claude, ready, Phase4Deps{
 		DockerClient: d.DockerClient, Image: d.Image,
 		WriteVolume: d.WriteVolume, ContainerStart: d.StartContainer,
 		ResponseWait: d.ResponseWait, AddContact: d.AddContact,
