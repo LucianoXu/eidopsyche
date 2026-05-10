@@ -166,6 +166,12 @@ $ eidos gate send npub1amind... "你醒着吗？"
 $ eidos gate inbox -n 1
 [来自心智体] 我在。
 
+# 6a. 想看心智体在某次 wake 中怎么"想"的(thinking + tool calls + tool results)?
+#     `forge watch` 流式渲染容器里捕获的 stream-json 推理链。
+$ eidos forge watch alice          # 跟随当前 wake;无 active 则显示最近一次
+$ eidos forge watch alice --list   # 列出最近的 wakes,看 id / 时长 / 成本
+$ eidos forge watch alice --wake <id> --thinking   # 看历史 wake,含 thinking blocks
+
 # 7. 不和它说话时让它睡觉（容器停止 = 睡眠）。消息会在 relay 上排队。
 $ eidos forge stop alice
 ✓ alice is asleep.
