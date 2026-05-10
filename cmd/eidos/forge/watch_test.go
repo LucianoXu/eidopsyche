@@ -13,7 +13,7 @@ func TestRenderStream_RenderedEvents(t *testing.T) {
 			`{"type":"result","is_error":false,"duration_ms":1000,"num_turns":1}` + "\n",
 	)
 	var buf bytes.Buffer
-	if err := renderStream(&buf, src, false, renderOpts{}); err != nil {
+	if err := renderStream(&buf, src, false, renderOpts{}, wakeRenderCtx{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -29,7 +29,7 @@ func TestRenderStream_RawPassthrough(t *testing.T) {
 		`{"type":"result","is_error":false}` + "\n"
 	src := strings.NewReader(body)
 	var buf bytes.Buffer
-	if err := renderStream(&buf, src, true, renderOpts{}); err != nil {
+	if err := renderStream(&buf, src, true, renderOpts{}, wakeRenderCtx{}); err != nil {
 		t.Fatal(err)
 	}
 	if buf.String() != body {
@@ -44,7 +44,7 @@ func TestRenderStream_TolerateMalformedLine(t *testing.T) {
 			`{"type":"result"}` + "\n",
 	)
 	var buf bytes.Buffer
-	if err := renderStream(&buf, src, false, renderOpts{}); err != nil {
+	if err := renderStream(&buf, src, false, renderOpts{}, wakeRenderCtx{}); err != nil {
 		t.Fatalf("malformed line should not abort: %v", err)
 	}
 	if !strings.Contains(buf.String(), "wake started") {
@@ -61,7 +61,7 @@ func TestRenderStream_LargeLine(t *testing.T) {
 		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"` + big + `"}]}}` + "\n",
 	)
 	var buf bytes.Buffer
-	if err := renderStream(&buf, src, true, renderOpts{}); err != nil {
+	if err := renderStream(&buf, src, true, renderOpts{}, wakeRenderCtx{}); err != nil {
 		t.Fatalf("renderStream large line: %v", err)
 	}
 	if !strings.Contains(buf.String(), big) {

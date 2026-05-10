@@ -16,15 +16,24 @@ type renderOpts struct {
 	ShowThinking bool
 }
 
+// wakeRenderCtx carries per-wake metadata that the renderer stamps on
+// the wake's header line. Empty zero-value falls back to the legacy
+// header.
+type wakeRenderCtx struct {
+	WakeID    string // 8-char prefix (or empty for legacy wakes)
+	SessionID string // 8-char prefix (or empty for legacy wakes)
+	Ordinal   int    // 1-based count within the session (0 = unknown)
+}
+
 // renderEvent returns the human-readable lines for one event, or nil
 // for events that have no visible rendering in this mode (unknown
 // subtypes, partial stream_event deltas in v0). The returned slice
 // includes any leading blank-line spacers required for visual breathing
 // room.
-func renderEvent(ev transcript.Event, opts renderOpts) []string {
+func renderEvent(ev transcript.Event, opts renderOpts, ctx wakeRenderCtx) []string {
 	switch ev.Type {
 	case transcript.TypeSystem:
-		return renderSystem(ev)
+		return renderSystemWithCtx(ev, ctx)
 	case transcript.TypeAssistant:
 		return renderAssistant(ev, opts)
 	case transcript.TypeUser:
@@ -35,13 +44,16 @@ func renderEvent(ev transcript.Event, opts renderOpts) []string {
 	return nil
 }
 
-func renderSystem(ev transcript.Event) []string {
+func renderSystemWithCtx(ev transcript.Event, ctx wakeRenderCtx) []string {
 	if ev.Subtype != "init" {
 		return nil
 	}
-	parts := []string{
-		fmt.Sprintf("━━━ wake started · model=%s ━━━", strDefault(ev.Model, "?")),
+	header := fmt.Sprintf("━━━ wake started · model=%s ━━━", strDefault(ev.Model, "?"))
+	if ctx.WakeID != "" && ctx.SessionID != "" && ctx.Ordinal > 0 {
+		header = fmt.Sprintf("━━━ wake %s (%d of session %s) · model=%s ━━━",
+			ctx.WakeID, ctx.Ordinal, ctx.SessionID, strDefault(ev.Model, "?"))
 	}
+	parts := []string{header}
 	subline := "    tools: "
 	if len(ev.Tools) == 0 {
 		subline += "(none)"
@@ -56,6 +68,66 @@ func renderSystem(ev transcript.Event) []string {
 		subline += " · MCP: " + strings.Join(names, ",")
 	}
 	return append(parts, subline)
+}
+
+// shouldRenderBoundary reports whether a session-boundary separator
+// should be drawn between two consecutive wakes' SessionIDs.
+func shouldRenderBoundary(prev, next string) bool {
+	if prev == "" || next == "" {
+		return false
+	}
+	return prev != next
+}
+
+// renderSessionBoundary returns the lines for a session-boundary
+// separator. Bare format — only the new session's short UUID, no dream
+// note (avoid surfacing memory snippets through what is otherwise a
+// debug log).
+func renderSessionBoundary(nextSessionID string) []string {
+	return []string{
+		"",
+		"═══════════════════════════════════════════════════",
+		"   New session " + nextSessionID,
+		"═══════════════════════════════════════════════════",
+		"",
+	}
+}
+
+// computeOrdinal returns the 1-based position of wakeID within the
+// entries of sessionID, ordered by StartedAt. Returns 0 if not found
+// or sessionID is empty. Active wakes (not yet finalized into the
+// index) get ordinal = (count for session) + 1.
+func computeOrdinal(idx transcript.Index, sessionID, wakeID string) int {
+	if sessionID == "" {
+		return 0
+	}
+	var (
+		startedAt int64
+		found     bool
+		count     int
+	)
+	for _, e := range idx.Wakes {
+		if e.ID == wakeID {
+			startedAt = e.StartedAt
+			found = true
+			break
+		}
+	}
+	if !found {
+		// Active wake not yet in index → ordinal is total + 1.
+		for _, e := range idx.Wakes {
+			if e.SessionID == sessionID {
+				count++
+			}
+		}
+		return count + 1
+	}
+	for _, e := range idx.Wakes {
+		if e.SessionID == sessionID && e.StartedAt <= startedAt {
+			count++
+		}
+	}
+	return count
 }
 
 func renderAssistant(ev transcript.Event, opts renderOpts) []string {
