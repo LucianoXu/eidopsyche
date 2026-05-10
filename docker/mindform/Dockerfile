@@ -1,12 +1,27 @@
 # syntax=docker/dockerfile:1.7
 
+# ---- Pinned upstream versions ----
+# Bumped manually when we want to upgrade. Pinning lets BuildKit cache
+# `npm install -g` across rebuilds (vs always pulling latest). Version
+# of claude-code used at the time of writing — if you change this,
+# verify it still has compatible CLI surface (claude -p ... etc).
+ARG CLAUDE_CODE_VERSION=2.1.138
+
 # ---- Stage 1: build eidos binary ----
 FROM golang:1.25-alpine AS build
 WORKDIR /src
 RUN apk add --no-cache git ca-certificates
-COPY go.work go.work.sum ./
+# Layered cache: dep manifest → mod download → full source → build.
+# Editing source doesn't invalidate `go mod download`. Cache mounts
+# share the module cache + build cache across rebuilds.
+COPY go.mod go.sum go.work go.work.sum ./
+RUN --mount=type=cache,target=/root/go/pkg/mod,sharing=locked \
+    --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+    go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/eidos ./cmd/eidos
+RUN --mount=type=cache,target=/root/go/pkg/mod,sharing=locked \
+    --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/eidos ./cmd/eidos
 
 # ---- Stage 2: produce eidopsyche bare-repo bundle ----
 # Note: the bare repo is cloned to /opt/eidopsyche-bundle (no .git suffix) here
@@ -36,7 +51,9 @@ RUN rm -rf /src/eidopsyche-src/.git \
 
 # ---- Stage 3: claude-code from upstream ----
 FROM node:20-alpine AS claude
-RUN npm install -g @anthropic-ai/claude-code@latest
+ARG CLAUDE_CODE_VERSION
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 # ---- Stage 4: final image ----
 FROM alpine:3.19
@@ -58,17 +75,15 @@ RUN addgroup -g 1000 eidos \
  && chmod 0440 /etc/sudoers.d/eidos \
  && passwd -l root
 
-COPY --from=build /out/eidos /usr/local/bin/eidos
-COPY --from=repobundle /opt/eidopsyche-bundle /opt/eidopsyche-bundle.git
+# COPYs ordered least-volatile → most-volatile so an `eidos` binary
+# rebuild (the common case) only invalidates the bottom two layers.
 COPY --from=claude /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=claude /usr/local/bin/claude /usr/local/bin/claude
 COPY docker/mindform/entrypoint.sh /usr/local/bin/entrypoint.sh
-
 # Birth boot prompt — distinct from heartbeat / mindgate prompts. The
 # supervisor reads this file when consuming a one-shot birth.json wake
 # (delivered by the host's First Contact wizard at first start).
 COPY docker/mindform/prompts/birth.txt /usr/local/lib/eidos/prompts/birth.txt
-
 # Crontab lives in the per-user spool. busybox crond -c reads each
 # file as that named user's crontab and runs the job as that user
 # (via setuid). The crontab file itself MUST be owned by root, mode
@@ -81,6 +96,11 @@ RUN chmod +x /usr/local/bin/entrypoint.sh \
  && chown root:root /var/spool/cron/crontabs/eidos \
  && chmod 0600 /var/spool/cron/crontabs/eidos \
  && rm -f /etc/crontabs/root
+
+# Volatile COPYs last: every code change rebuilds these two layers but
+# leaves the upper apk/adduser/claude/config layers cached.
+COPY --from=repobundle /opt/eidopsyche-bundle /opt/eidopsyche-bundle.git
+COPY --from=build /out/eidos /usr/local/bin/eidos
 
 ENV EIDOS_IN_CONTAINER=1
 ENV EIDOS_GATE_HOME=/eidos/gate
