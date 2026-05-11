@@ -3,7 +3,9 @@ package daemon
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
+	"time"
 )
 
 // TestAddOwnRelay_CanonicalizesURL locks the invariant that
@@ -32,6 +34,99 @@ func TestAddOwnRelay_CanonicalizesURL(t *testing.T) {
 	}
 	if rows[0].URL != "wss://relay.example" {
 		t.Errorf("URL=%q, want canonical wss://relay.example", rows[0].URL)
+	}
+}
+
+// TestCanonicalizeOwnRelays_RewritesLegacyRows asserts the one-shot
+// startup migration: pre-existing rows whose URL doesn't match
+// normRelayURL get rewritten in place, so the post-fix exact-match
+// RemoveOwnRelay can still find them by their canonical key. Without
+// this, legacy databases would carry trailing-slash rows the new code
+// path can never lookup.
+func TestCanonicalizeOwnRelays_RewritesLegacyRows(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+
+	// Hand-insert legacy rows that pre-date normalization.
+	for _, row := range []struct {
+		url, role string
+	}{
+		{"wss://home.example/", "home"},            // root-slash legacy
+		{"wss://Fallback.Example/", "fallback"},    // uppercase host legacy
+		{"wss://relay.example/nostr/", "fallback"}, // path-tail slash (should be preserved)
+	} {
+		if _, err := d.DB.ExecContext(ctx,
+			`INSERT INTO own_relays(relay_url, role, added_at) VALUES(?, ?, ?)`,
+			row.url, row.role, time.Now().Unix()); err != nil {
+			t.Fatalf("seed %q: %v", row.url, err)
+		}
+	}
+
+	if err := canonicalizeOwnRelays(ctx, d.DB.DB); err != nil {
+		t.Fatalf("canonicalizeOwnRelays: %v", err)
+	}
+
+	rows, err := d.ListOwnRelays(ctx)
+	if err != nil {
+		t.Fatalf("ListOwnRelays: %v", err)
+	}
+	got := make([]string, 0, len(rows))
+	for _, r := range rows {
+		got = append(got, r.URL+"#"+r.Role)
+	}
+	sort.Strings(got)
+	want := []string{
+		"wss://fallback.example#fallback",
+		"wss://home.example#home",
+		"wss://relay.example/nostr/#fallback",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("rows=%v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestCanonicalizeOwnRelays_CollisionPrefersHome covers the merge path:
+// if both a canonical and a legacy row exist (e.g. an operator added
+// `wss://x` recently AND has a pre-fix `wss://x/` row), the canonical
+// row survives. If the legacy row was home, the surviving canonical
+// row is promoted to home so we never silently drop a home relay
+// during the migration.
+func TestCanonicalizeOwnRelays_CollisionPrefersHome(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+
+	if _, err := d.DB.ExecContext(ctx,
+		`INSERT INTO own_relays(relay_url, role, added_at) VALUES(?, ?, ?)`,
+		"wss://x.example", "fallback", time.Now().Unix()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.DB.ExecContext(ctx,
+		`INSERT INTO own_relays(relay_url, role, added_at) VALUES(?, ?, ?)`,
+		"wss://x.example/", "home", time.Now().Unix()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := canonicalizeOwnRelays(ctx, d.DB.DB); err != nil {
+		t.Fatalf("canonicalizeOwnRelays: %v", err)
+	}
+
+	rows, err := d.ListOwnRelays(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("after migration: %d rows, want 1; got %+v", len(rows), rows)
+	}
+	if rows[0].URL != "wss://x.example" {
+		t.Errorf("URL=%q, want wss://x.example", rows[0].URL)
+	}
+	if rows[0].Role != "home" {
+		t.Errorf("Role=%q, want home (promoted from the merged-out legacy row)", rows[0].Role)
 	}
 }
 

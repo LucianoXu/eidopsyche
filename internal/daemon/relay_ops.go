@@ -146,6 +146,81 @@ func (d *Daemon) RemoveOwnRelay(ctx context.Context, rawURL string) error {
 	return nil
 }
 
+// canonicalizeOwnRelays rewrites every row in own_relays to the form
+// produced by normRelayURL. Run-once at daemon startup so legacy rows
+// written before normalization landed (e.g. `wss://x/`) become
+// removable via the same exact-match lookup RemoveOwnRelay uses, the
+// dashboard renders a stable canonical URL, and the per-URL relay
+// registry no longer opens duplicate WebSocket connections to what is
+// the same Nostr endpoint.
+//
+// When the canonical form of a legacy row collides with an existing
+// canonical row (both `wss://x` and `wss://x/` somehow ended up in the
+// table), the canonical row wins: the legacy row is deleted rather
+// than UPDATE-conflicting on the UNIQUE constraint. A role mismatch
+// between the two rows resolves to home > fallback (we never want to
+// drop a home row silently).
+func canonicalizeOwnRelays(ctx context.Context, db DBExecQuery) error {
+	rows, err := db.QueryContext(ctx, `SELECT relay_url, role FROM own_relays`)
+	if err != nil {
+		return fmt.Errorf("list own_relays for canonicalization: %w", err)
+	}
+	type stored struct{ url, role string }
+	var all []stored
+	for rows.Next() {
+		var s stored
+		if err := rows.Scan(&s.url, &s.role); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan own_relays row: %w", err)
+		}
+		all = append(all, s)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close rows: %w", err)
+	}
+	for _, s := range all {
+		canon := normRelayURL(s.url)
+		if canon == s.url {
+			continue
+		}
+		// Try UPDATE first; on UNIQUE-constraint violation, the canonical
+		// row already exists, so delete the legacy row and (if its role
+		// outranks the existing canonical role) promote the canonical to
+		// home.
+		_, err := db.ExecContext(ctx,
+			`UPDATE own_relays SET relay_url=? WHERE relay_url=?`, canon, s.url)
+		if err == nil {
+			continue
+		}
+		if !strings.Contains(err.Error(), "UNIQUE") {
+			return fmt.Errorf("canonicalize own_relay %q -> %q: %w", s.url, canon, err)
+		}
+		if _, derr := db.ExecContext(ctx,
+			`DELETE FROM own_relays WHERE relay_url=?`, s.url); derr != nil {
+			return fmt.Errorf("drop legacy own_relay %q after canonical collision: %w", s.url, derr)
+		}
+		if s.role == "home" {
+			// Make sure we don't accidentally demote home in the conflict
+			// merge. If the surviving canonical row is already home, this
+			// is a no-op.
+			if _, uerr := db.ExecContext(ctx,
+				`UPDATE own_relays SET role='home' WHERE relay_url=?`, canon); uerr != nil {
+				return fmt.Errorf("promote canonical %q to home after merge: %w", canon, uerr)
+			}
+		}
+	}
+	return nil
+}
+
+// DBExecQuery is the minimal SQL surface canonicalizeOwnRelays needs;
+// satisfied by *store.DB and *sql.Tx alike. Kept here so the migration
+// can be exercised against a *sql.Tx in tests without re-deriving the
+// helper signatures.
+type DBExecQuery interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 // normRelayURL returns the canonical form of a relay URL: lowercased
 // scheme/host, root-path trailing slash trimmed. Callers should use it
 // before any database write or in-memory dedup-keyed-by-URL — without

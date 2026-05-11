@@ -109,6 +109,14 @@ func Start(stateDir string) (*Daemon, error) {
 	if err := db.Migrate(context.Background()); err != nil {
 		return nil, err
 	}
+	// One-shot data migration: canonicalize any own_relays rows written
+	// before normRelayURL landed (e.g. `wss://x/`). Without this, legacy
+	// rows survive in raw form forever and the exact-match
+	// RemoveOwnRelay can't find them by the canonical key callers now
+	// receive from AddOwnRelay / dashboard list.
+	if err := canonicalizeOwnRelays(context.Background(), db.DB); err != nil {
+		return nil, fmt.Errorf("canonicalize own_relays: %w", err)
+	}
 	d := &Daemon{
 		StateDir:      stateDir,
 		Cfg:           cfg,
