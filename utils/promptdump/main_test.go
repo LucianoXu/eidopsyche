@@ -358,3 +358,99 @@ func TestBuildEnvelopeMap(t *testing.T) {
 		t.Errorf("request.model = %v", req["model"])
 	}
 }
+
+// TestRenderMarkdown_HappyPath: render a fixture envelope that
+// exercises every section. Assert real newlines are preserved
+// (not the two-char escape), section headings exist, and fenced
+// blocks balance.
+func TestRenderMarkdown_HappyPath(t *testing.T) {
+	env := map[string]any{
+		"captured_at":    "2026-05-11T17:23:45Z",
+		"claude_version": "2.1.138 (Claude Code)",
+		"claude_path":    "/usr/bin/claude",
+		"claude_args":    []any{"--model", "sonnet", "-p", "ping"},
+		"host":           map[string]any{"platform": "linux", "cwd": "/data/eidopsyche"},
+		"request": map[string]any{
+			"model":      "claude-sonnet-4-6",
+			"max_tokens": float64(32000),
+			"stream":     true,
+			"system": []any{
+				map[string]any{
+					"type":          "text",
+					"text":          "line1\nline2\nline3",
+					"cache_control": map[string]any{"type": "ephemeral"},
+				},
+				map[string]any{
+					"type": "text",
+					"text": "second segment",
+				},
+			},
+			"tools": []any{
+				map[string]any{
+					"name":        "Read",
+					"description": "Reads a file from the local filesystem.\nFull description continues...",
+				},
+				map[string]any{
+					"name":        "Bash",
+					"description": "Runs a shell command.",
+				},
+			},
+			"messages": []any{
+				map[string]any{
+					"role": "user",
+					"content": []any{
+						map[string]any{"type": "text", "text": "hello\nworld"},
+					},
+				},
+			},
+		},
+	}
+	out, err := renderMarkdown(env)
+	if err != nil {
+		t.Fatalf("renderMarkdown: %v", err)
+	}
+
+	for _, want := range []string{
+		"# promptdump capture",
+		"2026-05-11T17:23:45Z",
+		"2.1.138 (Claude Code)",
+		"--model sonnet -p ping",
+		"linux",
+		"/data/eidopsyche",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in metadata section", want)
+		}
+	}
+
+	if !strings.Contains(out, "claude-sonnet-4-6") {
+		t.Error("model id missing from output")
+	}
+	if !strings.Contains(out, "## System prompt (2 segments)") {
+		t.Error("system-prompt heading missing")
+	}
+	if !strings.Contains(out, "line1\nline2\nline3") {
+		t.Error("system-segment real newlines not preserved (got JSON-escaped form?)")
+	}
+	if !strings.Contains(out, `cache_control: {"type":"ephemeral"}`) {
+		t.Error("cache_control annotation missing from segment heading")
+	}
+	if !strings.Contains(out, "## Tools (2)") {
+		t.Error("tools heading missing")
+	}
+	if !strings.Contains(out, "**`Read`**") || !strings.Contains(out, "Reads a file") {
+		t.Error("Read tool not listed in bullet form")
+	}
+	if !strings.Contains(out, "<details><summary>Full tool schemas</summary>") {
+		t.Error("collapsible tool-schemas block missing")
+	}
+	if !strings.Contains(out, "## First user message") {
+		t.Error("user-message heading missing")
+	}
+	if !strings.Contains(out, "hello\nworld") {
+		t.Error("user-message real newlines not preserved")
+	}
+	if fences := strings.Count(out, "```"); fences%2 != 0 {
+		t.Errorf("unbalanced fenced blocks: %d ``` markers", fences)
+	}
+}

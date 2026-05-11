@@ -185,6 +185,160 @@ func buildEnvelope(meta envelopeMeta, body []byte) ([]byte, error) {
 	return json.MarshalIndent(m, "", "  ")
 }
 
+// renderMarkdown formats a parsed envelope as a human-readable
+// Markdown document. Companion to buildEnvelope (which produces the
+// canonical JSON). Sections — metadata, request config, system
+// prompt, tools, first user message — degrade gracefully when
+// fields are absent; missing fields yield empty sections rather
+// than errors.
+func renderMarkdown(env map[string]any) (string, error) {
+	var b strings.Builder
+
+	b.WriteString("# promptdump capture\n\n")
+	if v, ok := env["captured_at"].(string); ok {
+		fmt.Fprintf(&b, "**Captured at:** %s\n", v)
+	}
+	if v, ok := env["claude_version"].(string); ok {
+		fmt.Fprintf(&b, "**Claude version:** %s\n", v)
+	}
+	if v, ok := env["claude_args"].([]any); ok {
+		fmt.Fprintf(&b, "**Claude args:** `%s`\n", joinArgs(v))
+	}
+	if h, ok := env["host"].(map[string]any); ok {
+		platform, _ := h["platform"].(string)
+		cwd, _ := h["cwd"].(string)
+		fmt.Fprintf(&b, "**Host:** %s · cwd=`%s`\n", platform, cwd)
+	}
+	b.WriteString("\n")
+
+	req, _ := env["request"].(map[string]any)
+	if req == nil {
+		if raw, ok := env["raw_body"].(string); ok {
+			b.WriteString("## Raw body (failed to parse as JSON)\n\n```\n")
+			b.WriteString(raw)
+			b.WriteString("\n```\n")
+		}
+		return b.String(), nil
+	}
+
+	b.WriteString("## Request\n\n")
+	if v, ok := req["model"].(string); ok {
+		fmt.Fprintf(&b, "- **Model:** `%s`\n", v)
+	}
+	if v, ok := req["max_tokens"].(float64); ok {
+		fmt.Fprintf(&b, "- **Max tokens:** %d\n", int(v))
+	}
+	if v, ok := req["stream"].(bool); ok {
+		fmt.Fprintf(&b, "- **Stream:** %v\n", v)
+	}
+	b.WriteString("\n")
+
+	sys, _ := req["system"].([]any)
+	fmt.Fprintf(&b, "## System prompt (%d segments)\n\n", len(sys))
+	for i, seg := range sys {
+		segMap, _ := seg.(map[string]any)
+		header := fmt.Sprintf("### Segment %d", i+1)
+		if cc, ok := segMap["cache_control"]; ok {
+			ccBytes, _ := json.Marshal(cc)
+			header += fmt.Sprintf(" — `cache_control: %s`", string(ccBytes))
+		}
+		b.WriteString(header + "\n\n")
+		text, _ := segMap["text"].(string)
+		b.WriteString("```\n")
+		b.WriteString(text)
+		if !strings.HasSuffix(text, "\n") {
+			b.WriteString("\n")
+		}
+		b.WriteString("```\n\n")
+	}
+
+	tools, _ := req["tools"].([]any)
+	fmt.Fprintf(&b, "## Tools (%d)\n\n", len(tools))
+	for _, t := range tools {
+		tm, _ := t.(map[string]any)
+		name, _ := tm["name"].(string)
+		desc, _ := tm["description"].(string)
+		fmt.Fprintf(&b, "- **`%s`** — %s\n", name, firstNonEmptyLine(desc))
+	}
+	if len(tools) > 0 {
+		b.WriteString("\n<details><summary>Full tool schemas</summary>\n\n")
+		b.WriteString("```json\n")
+		toolsJSON, _ := json.MarshalIndent(tools, "", "  ")
+		b.Write(toolsJSON)
+		b.WriteString("\n```\n\n</details>\n\n")
+	}
+
+	messages, _ := req["messages"].([]any)
+	if len(messages) > 0 {
+		b.WriteString("## First user message\n\n")
+		msg, _ := messages[0].(map[string]any)
+		switch content := msg["content"].(type) {
+		case string:
+			b.WriteString("```\n")
+			b.WriteString(content)
+			if !strings.HasSuffix(content, "\n") {
+				b.WriteString("\n")
+			}
+			b.WriteString("```\n")
+		case []any:
+			for _, part := range content {
+				pm, _ := part.(map[string]any)
+				typ, _ := pm["type"].(string)
+				switch typ {
+				case "text":
+					txt, _ := pm["text"].(string)
+					b.WriteString("```\n")
+					b.WriteString(txt)
+					if !strings.HasSuffix(txt, "\n") {
+						b.WriteString("\n")
+					}
+					b.WriteString("```\n")
+				default:
+					mediaType, _ := pm["media_type"].(string)
+					fmt.Fprintf(&b, "_[%s%s]_\n", typ, formatMediaType(mediaType))
+				}
+			}
+		}
+	}
+
+	return b.String(), nil
+}
+
+// joinArgs renders a []any of strings as a space-joined argv-like
+// line for the metadata block. Non-string entries are %v-formatted.
+func joinArgs(args []any) string {
+	parts := make([]string, 0, len(args))
+	for _, a := range args {
+		if s, ok := a.(string); ok {
+			parts = append(parts, s)
+		} else {
+			parts = append(parts, fmt.Sprintf("%v", a))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// firstNonEmptyLine returns the first non-empty trimmed line of s.
+// Used to summarize tool descriptions in the bullet list.
+func firstNonEmptyLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		t := strings.TrimSpace(line)
+		if t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+// formatMediaType adds a " (type)" suffix if non-empty; otherwise
+// returns empty. Used in user-message rendering for non-text parts.
+func formatMediaType(s string) string {
+	if s == "" {
+		return ""
+	}
+	return " " + s
+}
+
 // runOpts collects the parameters of one capture run.
 type runOpts struct {
 	Prompt      string        // the -p argument to claude (default "ping")
