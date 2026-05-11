@@ -51,6 +51,11 @@ var daemonCmd = &cobra.Command{
 	},
 }
 
+// heartbeatInstaller is the production installer the apply hook uses.
+// Tests substitute a tempdir-backed Installer so they don't shell out
+// to sudo or mutate the host's /var/spool/cron.
+var heartbeatInstaller = cron.DefaultInstaller
+
 // heartbeatApplyHook re-renders the busybox crontab from the new
 // heartbeat.interval value and writes it to /var/spool/cron/crontabs/eidos
 // atomically via sudo. busybox crond detects the spool mtime change and
@@ -59,13 +64,24 @@ var daemonCmd = &cobra.Command{
 //
 // Empty `new` is valid (operator clears the override, falls back to the
 // 2h default). cron.Render handles "" → DefaultHeartbeatInterval.
+//
+// Type assertion on newVal is checked: a non-string value signals a
+// registry-level bug (config.set passed something the Key.Get didn't
+// stringify) and should fail loudly rather than silently render the
+// default.
 func heartbeatApplyHook(ctx context.Context, _ any, _ any, newVal any) error {
-	interval, _ := newVal.(string)
+	interval, ok := newVal.(string)
+	if !ok {
+		return fmt.Errorf("heartbeat apply: expected string interval, got %T", newVal)
+	}
 	body, err := cron.Render(interval)
 	if err != nil {
 		return fmt.Errorf("heartbeat apply: render: %w", err)
 	}
-	return cron.DefaultInstaller().Install(ctx, body)
+	if err := heartbeatInstaller().Install(ctx, body); err != nil {
+		return fmt.Errorf("heartbeat apply: install: %w", err)
+	}
+	return nil
 }
 
 func init() { rootCmd.AddCommand(daemonCmd) }
