@@ -165,25 +165,24 @@ type relaysContrib struct{ d *Daemon }
 
 func (c relaysContrib) Path() string { return "relays" }
 func (c relaysContrib) Snapshot(ctx context.Context) (any, error) {
-	rows, err := c.d.DB.QueryContext(ctx, `SELECT relay_url, role FROM own_relays`)
+	// Use ListOwnRelays so the snapshot carries AddedAt (the legacy
+	// relay.list method returned this field; preserve it so callers
+	// migrating from relay.list don't lose data).
+	rows, err := c.d.ListOwnRelays(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	healthByURL := map[string]RelayHealth{}
 	for _, h := range c.d.relayHealth.snapshot() {
 		healthByURL[h.URL] = h
 	}
 	relays := map[string]any{}
-	for rows.Next() {
-		var url, role string
-		if err := rows.Scan(&url, &role); err != nil {
-			return nil, err
-		}
-		h := healthByURL[url]
-		relays[url] = map[string]any{
-			"url":           url,
-			"role":          role,
+	for _, r := range rows {
+		h := healthByURL[r.URL]
+		relays[r.URL] = map[string]any{
+			"url":           r.URL,
+			"role":          r.Role,
+			"added_at":      r.AddedAt,
 			"state":         h.State,
 			"last_error":    h.LastError,
 			"last_event_at": h.LastEventAt,

@@ -12,40 +12,56 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
 )
 
+// Method registry. Reads should go through state.get; mutations have
+// their own per-domain verbs but all route through Daemon.Mutate
+// (see internal/daemon/mutate.go). The handful of action / utility
+// methods that don't fit either pattern (send, invite.redeem,
+// subscribe.refresh, lifecycle.run, daemon.exec-replace, card.scan,
+// card.parse) stay registered as-is. inbox.tail is a subscription
+// primitive, not a read.
 func init() {
-	register("whoami", whoami)
+	// reads (single funnel)
+	register("state.get", stateGet)
+
+	// mutations (each routes through Daemon.Mutate internally)
 	register("set-label", setOwnLabel)
-	register("card.export", cardExport)
-	register("card.parse", cardParse)
 	register("contact.add", contactAdd)
-	register("contact.list", contactList)
+	register("contact.add-from-card", contactAddFromCard)
 	register("contact.remove", contactRemove)
 	register("contact.set-label", contactSetLabel)
-	register("relay.list", relayList)
+	register("contact.set-tier", contactSetTier)
 	register("relay.add", relayAdd)
 	register("relay.remove", relayRemove)
-	register("relays.health", relaysHealth)
-	register("send", sendMessage)
-	register("inbox.list", inboxList)
-	register("inbox.tail", inboxTail)
-	register("outbox.list", outboxList)
-	register("version", versionMethod)
-	register("subscribe.refresh", subscribeRefresh)
 	register("invite.create", inviteCreate)
-	register("invite.list", inviteList)
 	register("invite.revoke", inviteRevoke)
-	register("invite.redeem", inviteRedeem)
-	register("config.get", configGet)
 	register("config.set", configSet)
-	register("state.get", stateGet)
-	register("contact.get", contactGet)
-	register("contact.set-tier", contactSetTier)
-	register("card.scan", cardScan)
-	register("service.status", serviceStatus)
+
+	// actions with network/process side effects (not pure state writes)
+	register("send", sendMessage)
+	register("subscribe.refresh", subscribeRefresh)
+	register("invite.redeem", inviteRedeem)
 	register("lifecycle.run", lifecycleRunMethod)
-	register("lifecycle.status", lifecycleStatusMethod)
-	register("contact.add-from-card", contactAddFromCard)
 	register("daemon.exec-replace", daemonExecReplace)
+
+	// parameter-taking reads (state.get's path-only model can't express
+	// since/from/to/limit/status filters; kept until state.get gains
+	// optional contributor params)
+	register("inbox.list", inboxList)
+	register("outbox.list", outboxList)
+	register("invite.list", inviteList)
+
+	// subscription primitives (not reads)
+	register("inbox.tail", inboxTail)
+
+	// utility RPCs that aren't state operations
+	register("card.parse", cardParse)
+	register("card.scan", cardScan)
+
+	// service polling — typed response shape (dashboard.ServiceStatus,
+	// JobStatusSnapshot) doesn't map cleanly through state.get's
+	// map[string]any projection yet.
+	register("service.status", serviceStatus)
+	register("lifecycle.status", lifecycleStatusMethod)
 }
 
 // internalErr wraps a Go error into an IPC internal error response.

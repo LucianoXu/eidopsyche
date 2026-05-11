@@ -139,41 +139,41 @@ func printStatus(ctx context.Context, w io.Writer, m service.Manager) error {
 	return nil
 }
 
-// relayHealthRow is the IPC wire shape of one relays.health entry. Mirrors
-// daemon.RelayHealth but kept local so the gate CLI doesn't import daemon.
-type relayHealthRow struct {
-	URL         string `json:"url"`
-	Role        string `json:"role"`
-	State       string `json:"state"`
-	LastError   string `json:"last_error,omitempty"`
-	LastEventAt int64  `json:"last_event_at,omitempty"`
-}
-
 // printRelaysSection appends a "Relays:" block to w with one row per
-// known URL. Silently no-ops when the daemon isn't reachable.
+// known URL. Silently no-ops when the daemon isn't reachable. Reads
+// from `state.get relays` which returns a map keyed by URL with state,
+// role, last_error, and last_event_at fields merged.
 func printRelaysSection(w io.Writer) {
 	c, err := newClient()
 	if err != nil {
 		return
 	}
 	defer c.Close()
-	var rows []relayHealthRow
-	if err := mustOK(c.Call("relays.health", nil, &rows)); err != nil {
+	relays := map[string]map[string]any{}
+	if err := mustOK(c.Call("state.get", map[string]string{"path": "relays"}, &relays)); err != nil {
 		return
 	}
-	if len(rows) == 0 {
+	if len(relays) == 0 {
 		return
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Relays:")
-	for _, r := range rows {
-		extra := ""
-		if r.LastError != "" {
-			extra = "  (" + r.LastError + ")"
-		} else if r.LastEventAt > 0 {
-			extra = fmt.Sprintf("  (last event %s ago)", humanSinceUnix(r.LastEventAt))
+	for url, r := range relays {
+		role, _ := r["role"].(string)
+		state, _ := r["state"].(string)
+		lastErr, _ := r["last_error"].(string)
+		// JSON numbers come back as float64; cast through.
+		var lastEventAt int64
+		if v, ok := r["last_event_at"].(float64); ok {
+			lastEventAt = int64(v)
 		}
-		fmt.Fprintf(w, "  %-9s %-32s %s%s\n", r.Role, r.URL, r.State, extra)
+		extra := ""
+		if lastErr != "" {
+			extra = "  (" + lastErr + ")"
+		} else if lastEventAt > 0 {
+			extra = fmt.Sprintf("  (last event %s ago)", humanSinceUnix(lastEventAt))
+		}
+		fmt.Fprintf(w, "  %-9s %-32s %s%s\n", role, url, state, extra)
 	}
 }
 

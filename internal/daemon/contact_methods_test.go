@@ -29,42 +29,37 @@ func addTestContact(t *testing.T, d *Daemon, label string) string {
 	return k.PublicHex
 }
 
-func TestContactGet_ByHex(t *testing.T) {
+// TestStateGet_ContactByHex pins state.get contacts.<pk> as the
+// replacement for the legacy contact.get IPC method. The state.get
+// path is hex-only — label resolution is a CLI-level concern handled
+// by iterating state.get contacts (the dashboard, the only typed
+// consumer, already passes hex pubkeys).
+func TestStateGet_ContactByHex(t *testing.T) {
 	d := newTestDaemon(t)
+	d.registerCoreStateContributors()
 	pk := addTestContact(t, d, "alice")
-	var c contacts.Contact
-	if err := d.Call(context.Background(), "contact.get",
-		map[string]string{"target": pk}, &c); err != nil {
+	resp := map[string]any{}
+	if err := d.Call(context.Background(), "state.get",
+		map[string]string{"path": "contacts." + pk}, &resp); err != nil {
 		t.Fatalf("Call: %v", err)
 	}
-	if c.Pubkey != pk {
-		t.Errorf("Pubkey=%q, want %q", c.Pubkey, pk)
+	if got, _ := resp["pubkey"].(string); got != pk {
+		t.Errorf("pubkey=%q, want %q", got, pk)
 	}
-	if c.Label != "alice" {
-		t.Errorf("Label=%q, want alice", c.Label)
+	if got, _ := resp["label"].(string); got != "alice" {
+		t.Errorf("label=%q, want alice", got)
 	}
 }
 
-func TestContactGet_ByLabel(t *testing.T) {
+func TestStateGet_ContactNotFound(t *testing.T) {
 	d := newTestDaemon(t)
-	pk := addTestContact(t, d, "bob")
-	var c contacts.Contact
-	if err := d.Call(context.Background(), "contact.get",
-		map[string]string{"target": "bob"}, &c); err != nil {
-		t.Fatalf("Call: %v", err)
-	}
-	if c.Pubkey != pk {
-		t.Errorf("Pubkey=%q, want %q", c.Pubkey, pk)
-	}
-}
-
-func TestContactGet_NotFound(t *testing.T) {
-	d := newTestDaemon(t)
-	err := d.Call(context.Background(), "contact.get",
-		map[string]string{"target": "0000000000000000000000000000000000000000000000000000000000000000"}, nil)
+	d.registerCoreStateContributors()
+	var resp map[string]any
+	err := d.Call(context.Background(), "state.get",
+		map[string]string{"path": "contacts.0000000000000000000000000000000000000000000000000000000000000000"}, &resp)
 	var ipcErr *ipc.Error
-	if !errors.As(err, &ipcErr) || ipcErr.Code != ipc.ErrContactNotFound {
-		t.Fatalf("err=%v, want CONTACT_NOT_FOUND", err)
+	if !errors.As(err, &ipcErr) || ipcErr.Code != ipc.ErrPathNotFound {
+		t.Fatalf("err=%v, want PATH_NOT_FOUND", err)
 	}
 }
 

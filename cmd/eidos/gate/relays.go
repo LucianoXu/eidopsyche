@@ -2,10 +2,9 @@ package gate
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/spf13/cobra"
-
-	"github.com/LucianoXu/eidopsyche/internal/daemon"
 )
 
 var relayAddRole string
@@ -19,12 +18,20 @@ var relaysCmd = &cobra.Command{
 			return err
 		}
 		defer c.Close()
-		var resp []daemon.OwnRelayRow
-		if err := mustOK(c.Call("relay.list", nil, &resp)); err != nil {
+		// state.get relays returns map[url -> {role, state, ...}].
+		// Sort by url for stable CLI output.
+		resp := map[string]map[string]any{}
+		if err := mustOK(c.Call("state.get", map[string]string{"path": "relays"}, &resp)); err != nil {
 			return err
 		}
-		for _, r := range resp {
-			fmt.Printf("%-9s  %s\n", r.Role, r.URL)
+		urls := make([]string, 0, len(resp))
+		for url := range resp {
+			urls = append(urls, url)
+		}
+		sort.Strings(urls)
+		for _, url := range urls {
+			role, _ := resp[url]["role"].(string)
+			fmt.Printf("%-9s  %s\n", role, url)
 		}
 		return nil
 	},

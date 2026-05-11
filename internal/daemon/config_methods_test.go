@@ -32,9 +32,10 @@ func newConfigOnlyDaemon(t *testing.T) *Daemon {
 
 func TestConfigGet_ReturnsDefaultsSnapshot(t *testing.T) {
 	d := newConfigOnlyDaemon(t)
+	d.registerCoreStateContributors()
 	var cfg config.Config
-	if err := d.Call(context.Background(), "config.get", nil, &cfg); err != nil {
-		t.Fatalf("Call config.get: %v", err)
+	if err := d.Call(context.Background(), "state.get", map[string]string{"path": "config"}, &cfg); err != nil {
+		t.Fatalf("Call state.get config: %v", err)
 	}
 	if cfg.LogLevel != "info" {
 		t.Errorf("LogLevel=%q, want %q", cfg.LogLevel, "info")
@@ -72,13 +73,14 @@ func TestConfigSet_RejectsInvalidValue(t *testing.T) {
 
 func TestConfigSet_PersistsAndIsReadableViaGet(t *testing.T) {
 	d := newConfigOnlyDaemon(t)
+	d.registerCoreStateContributors()
 	if err := d.Call(context.Background(), "config.set",
 		ConfigSetParams{Path: "log_level", Value: "debug"}, nil); err != nil {
 		t.Fatalf("Call config.set: %v", err)
 	}
 	var cfg config.Config
-	if err := d.Call(context.Background(), "config.get", nil, &cfg); err != nil {
-		t.Fatalf("Call config.get: %v", err)
+	if err := d.Call(context.Background(), "state.get", map[string]string{"path": "config"}, &cfg); err != nil {
+		t.Fatalf("Call state.get config: %v", err)
 	}
 	if cfg.LogLevel != "debug" {
 		t.Errorf("LogLevel=%q, want %q", cfg.LogLevel, "debug")

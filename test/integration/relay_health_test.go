@@ -6,13 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LucianoXu/eidopsyche/internal/daemon"
 	"github.com/LucianoXu/eidopsyche/internal/relayd"
 )
 
 // TestRelayHealth_ReportsConnected verifies that after a daemon successfully
-// subscribes to a relay, relays.health reports the URL as 'connected'.
-// This exercises the SetStateHook → relayHealthStore.setState → IPC
+// subscribes to a relay, state.get relays reports the URL as 'connected'.
+// This exercises the SetStateHook → relayHealthStore.setState → state.get
 // snapshot path end to end.
 func TestRelayHealth_ReportsConnected(t *testing.T) {
 	if testing.Short() {
@@ -28,24 +27,21 @@ func TestRelayHealth_ReportsConnected(t *testing.T) {
 	time.Sleep(1500 * time.Millisecond)
 
 	c := dialIPC(t, b)
-	var rows []daemon.RelayHealth
-	if e, err := c.Call("relays.health", nil, &rows); err != nil || e != nil {
-		t.Fatalf("relays.health: %v %+v", err, e)
+	resp := map[string]map[string]any{}
+	if e, err := c.Call("state.get", map[string]string{"path": "relays"}, &resp); err != nil || e != nil {
+		t.Fatalf("state.get relays: %v %+v", err, e)
 	}
-	var bobsViewOfA *daemon.RelayHealth
-	for i := range rows {
-		if rows[i].URL == a.relayURL {
-			bobsViewOfA = &rows[i]
-			break
-		}
+	entry, ok := resp[a.relayURL]
+	if !ok {
+		t.Fatalf("bob did not surface a's URL %s in state.get relays: resp=%+v", a.relayURL, resp)
 	}
-	if bobsViewOfA == nil {
-		t.Fatalf("bob did not surface a's URL %s in relays.health: rows=%+v", a.relayURL, rows)
+	state, _ := entry["state"].(string)
+	lastErr, _ := entry["last_error"].(string)
+	role, _ := entry["role"].(string)
+	if state != "connected" {
+		t.Fatalf("expected state=connected, got state=%q lastErr=%q", state, lastErr)
 	}
-	if bobsViewOfA.State != "connected" {
-		t.Fatalf("expected state=connected, got state=%q lastErr=%q", bobsViewOfA.State, bobsViewOfA.LastError)
-	}
-	if bobsViewOfA.Role == "" {
+	if role == "" {
 		t.Errorf("Role should be set (home), got empty")
 	}
 }

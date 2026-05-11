@@ -11,22 +11,6 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
 )
 
-// cardExport serialises our identity into a MindGate card URI.
-func cardExport(ctx context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
-	label, _ := d.DB.GetMeta(ctx, "label")
-	var homeRelay string
-	if err := d.DB.QueryRowContext(ctx,
-		`SELECT relay_url FROM own_relays WHERE role='home' LIMIT 1`).Scan(&homeRelay); err != nil {
-		return nil, &ipc.Error{Code: ipc.ErrInternal, Message: "no home relay configured"}
-	}
-	c := card.Card{Npub: d.Key.Npub, Relay: homeRelay, Label: label}
-	uri, err := c.URI()
-	if err != nil {
-		return nil, internalErr(err)
-	}
-	return map[string]string{"uri": uri}, nil
-}
-
 // cardParse decodes a MindGate card URI and returns its fields.
 func cardParse(_ context.Context, _ *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p struct{ URI string }
