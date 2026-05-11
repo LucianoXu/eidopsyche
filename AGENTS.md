@@ -41,6 +41,7 @@ eidopsyche/
 ├── template/                 # Canonical clean ontology tree, embedded into the binary
 ├── prefab/                   # Pre-authored mind-form catalogues (one dir per prefab id)
 ├── embed.go                  # Top-level //go:embed bundling template/ + prefab/
+├── utils/                    # Dev-only Go utilities (independent modules, not in go.work, not shipped)
 ├── docker/
 │   └── mindform/             # Mind-form runtime image build context
 │       ├── Dockerfile        # Multi-stage; distroless-static final image
@@ -107,6 +108,27 @@ Authoring conventions:
   `prefab/`); prefab `CLAUDE.md` files are independent copies that
   authors are free to specialise. There is no automated check that
   these stay in sync — drift is accepted until it bites.
+
+## `utils/` (dev-only utilities)
+
+Standalone Go utilities used during development — currently one:
+`utils/promptdump/`, which captures Claude Code's Anthropic Messages API
+request body so the verbatim default system prompt can be studied. See
+`utils/promptdump/README.md`.
+
+Policy:
+
+- Each utility is its own Go module. None are listed in the root `go.work`.
+- The eidos build/test surface (`go build ./cmd/eidos`, `go test ./...`)
+  does not touch `utils/`. Utilities are invoked explicitly via
+  `GOWORK=off go run .` from inside the utility's own module (or
+  `GOWORK=off go -C utils/<name> run .` from the repo root). The
+  `GOWORK=off` is required precisely because the module sits outside
+  the workspace — Go would otherwise try to apply the parent workspace
+  and fail.
+- Not built by CI by default; not released. Authors add their own CI
+  job if they want one.
+- No stability contract — utilities may be deleted at any time.
 
 ## Build, Test, and Development Commands
 
