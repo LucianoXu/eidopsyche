@@ -112,6 +112,28 @@ func TestLogin_SetupTokenStdinFlag_EmptyRejected(t *testing.T) {
 	}
 }
 
+// Pipes from `printf %s ... | eidos ...` have no trailing newline.
+// Reading one line via bufio.ReadString('\n') returns io.EOF in that
+// case, but the accumulated bytes still carry the token. The handler
+// must not treat io.EOF as failure.
+func TestLogin_SetupTokenStdinFlag_NoTrailingNewline(t *testing.T) {
+	w, restore := installFakeWriter(t)
+	defer restore()
+
+	cmd := newLoginCmd()
+	cmd.SetArgs([]string{"alice", "--setup-token-stdin", "--image", "img"})
+	cmd.SetIn(strings.NewReader("sk-ant-oat01-ABC"))
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(w.writes) != 1 {
+		t.Fatalf("want 1 write, got %d", len(w.writes))
+	}
+	if !strings.Contains(w.writes[0].body, `"accessToken": "sk-ant-oat01-ABC"`) {
+		t.Errorf("token from EOF-terminated stdin missing; got: %s", w.writes[0].body)
+	}
+}
+
 func TestLogin_InteractiveSetupTokenPath(t *testing.T) {
 	w, restore := installFakeWriter(t)
 	defer restore()

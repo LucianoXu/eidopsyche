@@ -3,8 +3,9 @@
 // mindform's docker volume.
 //
 // The login flow installs a per-mindform OAuth credentials blob into
-// /eidos/claude/.claude/.credentials.json. Operators provide the blob
-// in one of four ways:
+// /eidos/claude/.claude/.credentials.json. Operators select a source
+// via one of four flags, or use the interactive prompt when none is
+// given:
 //
 //  1. --setup-token-stdin — read a raw sk-ant-oat01-... token from
 //     stdin (one line) and wrap it into a credentials.json blob.
@@ -16,7 +17,9 @@
 //     from stdin (good for piping).
 //  4. --generate          — drive `claude setup-token` here in an
 //     isolated HOME so the operator's host claude is not touched.
-//  5. No flag → interactive prompt offering all four paths.
+//
+// With no flag the command prompts interactively, exposing the same
+// four paths through a menu.
 //
 // The old --from-host path (which copied the host's ~/.claude.json
 // verbatim into the volume) is removed: shared OAuth tokens between
@@ -71,11 +74,16 @@ func newLoginCmd() *cobra.Command {
 			)
 			switch {
 			case setupTokenStdin:
-				raw, readErr := io.ReadAll(cmd.InOrStdin())
-				if readErr != nil {
+				// Read one line so the command doesn't appear to hang when
+				// invoked from an interactive shell — newline ends input,
+				// any trailing bytes are discarded. Piped callers without a
+				// trailing newline hit io.EOF, which is fine: ReadString
+				// returns the data it accumulated before EOF.
+				raw, readErr := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
+				if readErr != nil && readErr != io.EOF {
 					return fmt.Errorf("read stdin: %w", readErr)
 				}
-				blob, err = claudeauth.WrapSetupToken(string(raw))
+				blob, err = claudeauth.WrapSetupToken(raw)
 				if err != nil {
 					return err
 				}
