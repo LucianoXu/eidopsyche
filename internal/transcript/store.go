@@ -45,6 +45,7 @@ type Entry struct {
 	EndedAt        int64    `json:"ended_at"`
 	OK             bool     `json:"ok"`
 	ExitCode       int      `json:"exit_code"`
+	FailKind       string   `json:"fail_kind,omitempty"` // claudeexec.ClaudeErrorKind.String() when !OK
 	CostUSD        *float64 `json:"cost_usd"`
 	ToolUseCount   int      `json:"tool_use_count"`
 	ThinkingBlocks int      `json:"thinking_blocks"`
