@@ -302,44 +302,17 @@ func matchSessionNotFound(stderr string) bool {
 func runWithTranscript(sig wake.Signal, ontologyDir string, args []string, sessionUUID string) error {
 	startedAt := time.Now().Unix()
 
-	store, err := transcript.NewStore(transcriptsRuntimeDir)
-	if err != nil {
-		log.Printf("agent-runner: transcripts unavailable (%v); falling back to plain stdout", err)
-		return runWithoutTranscript(ontologyDir, plainClaudeArgs(args))
-	}
-	if err := store.Recover(); err != nil {
-		log.Printf("agent-runner: transcripts recover: %v", err)
-	}
-
 	wakeID := sig.ID
 	if wakeID == "" {
 		wakeID = fmt.Sprintf("%d-%s", startedAt, sig.Reason)
 	}
 
-	out, err := store.Open(wakeID)
-	if err != nil && errors.Is(err, fs.ErrExist) {
-		// Same-second same-reason collision (rare under the wake-dir
-		// flock + coalescing rules but theoretically possible). Try once
-		// more with a process-unique suffix before giving up on capture.
-		altID := fmt.Sprintf("%s-dup-%d-%d", wakeID, os.Getpid(), time.Now().UnixNano())
-		log.Printf("agent-runner: transcripts open(%s) collided; retrying as %s", wakeID, altID)
-		wakeID = altID
-		out, err = store.Open(wakeID)
-	}
+	h, err := openTranscriptHandle(transcriptsRuntimeDir, wakeID)
 	if err != nil {
-		log.Printf("agent-runner: transcripts open(%s): %v; falling back", wakeID, err)
+		log.Printf("agent-runner: %v; falling back to plain stdout", err)
 		return runWithoutTranscript(ontologyDir, plainClaudeArgs(args))
 	}
-	// Ensure the file is closed even on panic; double-close is harmless
-	// (it's a *os.File).
-	closed := false
-	closeOnce := func() {
-		if !closed {
-			_ = out.Close()
-			closed = true
-		}
-	}
-	defer closeOnce()
+	defer h.close()
 
 	c := exec.Command(claudeBin, args...) //nolint:gosec
 	c.Dir = ontologyDir
@@ -352,26 +325,23 @@ func runWithTranscript(sig wake.Signal, ontologyDir string, args []string, sessi
 		return fmt.Errorf("stdout pipe: %w", err)
 	}
 
-	log.Printf("agent-runner: wake-id=%s reason=%s starting", wakeID, sig.Reason)
-
+	log.Printf("agent-runner: wake-id=%s reason=%s starting", h.wakeID, sig.Reason)
 	if err := c.Start(); err != nil {
 		return fmt.Errorf("start claude: %w", err)
 	}
 
 	counter := &transcript.Counter{}
 	drainErr := make(chan error, 1)
-	go func() {
-		drainErr <- drainStreamJSON(stdoutPipe, out, counter, wakeID)
-	}()
+	go func() { drainErr <- drainStreamJSON(stdoutPipe, h, counter, h.wakeID) }()
 
 	// Per os/exec.Cmd.StdoutPipe: must drain BEFORE Wait, otherwise
 	// Wait closes the pipe and the drain races into "file already
 	// closed" instead of clean EOF.
 	derr := <-drainErr
 	runErr := c.Wait()
-	closeOnce() // flush the transcript file before we hand it to Finalize.
+	h.close() // flush before Finalize.
 	if derr != nil {
-		log.Printf("agent-runner: wake-id=%s drain: %v", wakeID, derr)
+		log.Printf("agent-runner: wake-id=%s drain: %v", h.wakeID, derr)
 	}
 
 	exitCode := 0
@@ -386,7 +356,7 @@ func runWithTranscript(sig wake.Signal, ontologyDir string, args []string, sessi
 	cfg, _ := config.Load(gateConfigPath)
 	maxCount, maxBytes := transcriptLimits(cfg)
 	finalEntry := transcript.Entry{
-		ID:             wakeID,
+		ID:             h.wakeID,
 		SessionID:      sessionUUID,
 		Reason:         string(sig.Reason),
 		StartedAt:      startedAt,
@@ -400,8 +370,8 @@ func runWithTranscript(sig wake.Signal, ontologyDir string, args []string, sessi
 		finalEntry.OK = runErr == nil && counter.Result.OK
 		finalEntry.CostUSD = counter.Result.TotalCostUSD
 	}
-	if ferr := store.Finalize(finalEntry, maxCount, maxBytes); ferr != nil {
-		log.Printf("agent-runner: wake-id=%s finalize: %v", wakeID, ferr)
+	if ferr := h.finalize(finalEntry, maxCount, maxBytes); ferr != nil {
+		log.Printf("agent-runner: wake-id=%s finalize: %v", h.wakeID, ferr)
 	}
 
 	statusStr := "ok"
@@ -413,7 +383,7 @@ func runWithTranscript(sig wake.Signal, ontologyDir string, args []string, sessi
 		costStr = fmt.Sprintf("$%.4f", *finalEntry.CostUSD)
 	}
 	log.Printf("agent-runner: wake-id=%s completed cost=%s dur_s=%d tools=%d %s",
-		wakeID, costStr, endedAt-startedAt, counter.ToolUseCount, statusStr)
+		h.wakeID, costStr, endedAt-startedAt, counter.ToolUseCount, statusStr)
 
 	if runErr != nil && matchSessionNotFound(stderrBuf.String()) {
 		return errors.Join(errSessionNotFound, runErr)
