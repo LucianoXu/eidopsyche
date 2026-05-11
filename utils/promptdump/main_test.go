@@ -58,3 +58,32 @@ func TestCaptureServer_HappyPath(t *testing.T) {
 
 	_ = context.TODO()
 }
+
+// TestCaptureServer_OnlyMessagesCaptures: POSTs to non-/v1/messages
+// paths must not populate srv.captured and must not signal srv.done.
+func TestCaptureServer_OnlyMessagesCaptures(t *testing.T) {
+	srv := newCaptureServer()
+	httpSrv := srv.start(t)
+	defer httpSrv.Close()
+
+	for _, path := range []string{"/v1/models", "/v1/mcp_servers", "/v1/whatever"} {
+		resp, err := http.Post(httpSrv.URL+path, "application/json",
+			strings.NewReader(`{"probe":true}`))
+		if err != nil {
+			t.Fatalf("POST %s: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Errorf("POST %s status = %d, want 200", path, resp.StatusCode)
+		}
+	}
+
+	if srv.captured != nil {
+		t.Errorf("captured populated by non-messages traffic: %s", srv.captured)
+	}
+	select {
+	case <-srv.done:
+		t.Fatal("done channel signaled by non-messages traffic")
+	default:
+	}
+}
