@@ -190,6 +190,11 @@ func Start(stateDir string) (*Daemon, error) {
 	} else {
 		d.Log.Warn("hydrate self-wrap ids", "err", err)
 	}
+	// Register the core state contributors (identity, config, contacts,
+	// relays, inbox, outbox, invites, service). Host and container
+	// share these — container PID-1 adds lifecycle.* subtrees on top
+	// via internal/lifecycle.Attach in Phase D.
+	d.registerCoreStateContributors()
 	// Wire Pool's per-URL state hook so transitions surface in d.relayHealth
 	// AND in the dashboard SSE hub. The hook runs from inside the Pool's
 	// per-URL Subscribe pumps; emitting the dashboard event here keeps the
