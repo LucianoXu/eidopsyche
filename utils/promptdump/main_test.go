@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -13,12 +15,20 @@ import (
 	"time"
 )
 
+// startTestServer is a test-helper that starts the capture server via
+// httptest and returns the *httptest.Server so the test can read its
+// URL. Lives in the test file so the production binary doesn't import
+// net/http/httptest. Production wiring uses captureServer.listen().
+func startTestServer(_ testing.TB, s *captureServer) *httptest.Server {
+	return httptest.NewServer(s.handler())
+}
+
 // TestCaptureServer_HappyPath: a POST to /v1/messages?beta=true with a
 // known JSON body returns 200 + valid SSE, and the body is captured
 // verbatim into the server's captured field.
 func TestCaptureServer_HappyPath(t *testing.T) {
 	srv := newCaptureServer()
-	httpSrv := srv.start(t)
+	httpSrv := startTestServer(t, srv)
 	defer httpSrv.Close()
 
 	want := map[string]any{
@@ -57,15 +67,13 @@ func TestCaptureServer_HappyPath(t *testing.T) {
 	if string(srv.captured) != string(wantBody) {
 		t.Errorf("captured body mismatch.\nwant: %s\ngot:  %s", wantBody, srv.captured)
 	}
-
-	_ = context.TODO()
 }
 
 // TestCaptureServer_OnlyMessagesCaptures: POSTs to non-/v1/messages
 // paths must not populate srv.captured and must not signal srv.done.
 func TestCaptureServer_OnlyMessagesCaptures(t *testing.T) {
 	srv := newCaptureServer()
-	httpSrv := srv.start(t)
+	httpSrv := startTestServer(t, srv)
 	defer httpSrv.Close()
 
 	for _, path := range []string{"/v1/models", "/v1/mcp_servers", "/v1/whatever"} {
@@ -94,7 +102,7 @@ func TestCaptureServer_OnlyMessagesCaptures(t *testing.T) {
 // maxBodyBytes cap must return 413 and leave srv.captured nil.
 func TestCaptureServer_BodyTooLarge(t *testing.T) {
 	srv := newCaptureServer()
-	httpSrv := srv.start(t)
+	httpSrv := startTestServer(t, srv)
 	defer httpSrv.Close()
 
 	big := bytes.Repeat([]byte("x"), maxBodyBytes+1)
@@ -193,11 +201,35 @@ func TestCaptureServer_ListenLocalhost(t *testing.T) {
 	}
 }
 
+// TestFilterEnv: pre-existing entries with the named keys are dropped;
+// entries without `=` are preserved; unrelated keys are preserved.
+func TestFilterEnv(t *testing.T) {
+	in := []string{
+		"PATH=/usr/bin",
+		"ANTHROPIC_BASE_URL=https://api.anthropic.com",
+		"FOO=bar",
+		"ANTHROPIC_API_KEY=sk-real",
+		"WEIRD_ENTRY_NO_EQUALS",
+		"ANTHROPIC_BASE_URL=second-occurrence", // duplicate, must also go
+	}
+	got := filterEnv(in, "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY")
+	want := []string{"PATH=/usr/bin", "FOO=bar", "WEIRD_ENTRY_NO_EQUALS"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("filterEnv(...) = %v, want %v", got, want)
+	}
+}
+
 // TestRunCapture_Smoke: end-to-end against the real claude binary.
-// Skipped in -short mode and when claude is not on PATH.
+// Opt-in via PROMPTDUMP_SMOKE=1 because a system can have claude on PATH
+// but be unauthenticated / misconfigured, in which case the child times
+// out without ever POSTing /v1/messages. Also skipped in -short mode
+// and when claude is not on PATH.
 func TestRunCapture_Smoke(t *testing.T) {
 	if testing.Short() {
 		t.Skip("smoke test requires real claude binary")
+	}
+	if os.Getenv("PROMPTDUMP_SMOKE") != "1" {
+		t.Skip("set PROMPTDUMP_SMOKE=1 to enable")
 	}
 	if _, err := exec.LookPath("claude"); err != nil {
 		t.Skip("claude not on PATH")

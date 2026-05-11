@@ -12,14 +12,12 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
 	"syscall"
-	"testing"
 	"time"
 )
 
@@ -116,13 +114,6 @@ const minimalSSE = "" +
 	`data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}` + "\n\n" +
 	"event: message_stop\n" +
 	`data: {"type":"message_stop"}` + "\n\n"
-
-// start is a test-helper: it starts the server via httptest and returns
-// the *httptest.Server so the test can read its URL. Production wiring
-// (real http.Server on a random port) lives in listen().
-func (s *captureServer) start(_ testing.TB) *httptest.Server {
-	return httptest.NewServer(s.handler())
-}
 
 // listen binds the capture server to 127.0.0.1 on a kernel-assigned
 // port and starts serving in a goroutine. Returns the base URL (e.g.
@@ -226,7 +217,13 @@ func runCapture(ctx context.Context, opts runOpts) ([]byte, error) {
 	}
 
 	cmd := exec.CommandContext(ctx, claudePath, args...)
-	cmd.Env = append(os.Environ(),
+	// Strip any pre-existing ANTHROPIC_* values from the inherited env
+	// before appending our overrides. POSIX execve allows duplicate
+	// env keys and most libc implementations resolve to the first
+	// occurrence, so naive `append(os.Environ(), "ANTHROPIC_*=...")`
+	// can let a developer's existing ANTHROPIC_BASE_URL win and bypass
+	// our proxy entirely.
+	cmd.Env = append(filterEnv(os.Environ(), "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"),
 		"ANTHROPIC_BASE_URL="+baseURL,
 		"ANTHROPIC_API_KEY=sk-dummy-promptdump",
 	)
@@ -282,6 +279,29 @@ func runCapture(ctx context.Context, opts runOpts) ([]byte, error) {
 		Host:          hostInfo{Platform: runtime.GOOS, CWD: cwd},
 	}
 	return buildEnvelope(meta, srv.captured)
+}
+
+// filterEnv returns env with any entries whose key matches one of names
+// removed. Used to dedup env before appending overrides for the claude
+// subprocess.
+func filterEnv(env []string, names ...string) []string {
+	skip := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		skip[n] = struct{}{}
+	}
+	out := env[:0:0]
+	for _, kv := range env {
+		eq := strings.IndexByte(kv, '=')
+		if eq < 0 {
+			out = append(out, kv)
+			continue
+		}
+		if _, drop := skip[kv[:eq]]; drop {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 // probeClaudeVersion runs `claude --version` with a short timeout and
