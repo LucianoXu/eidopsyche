@@ -78,9 +78,13 @@ func renderListTable(cmd *cobra.Command, idx transcript.Index) error {
 		}
 		status := "ok"
 		if !w.OK {
-			status = "crashed"
-			if w.ExitCode != -1 && w.ExitCode != 0 {
+			switch {
+			case w.FailKind != "":
+				status = "failed(" + w.FailKind + ")"
+			case w.ExitCode != -1 && w.ExitCode != 0:
 				status = fmt.Sprintf("failed(%d)", w.ExitCode)
+			default:
+				status = "crashed"
 			}
 		}
 		fmt.Fprintf(out, "%-10s %-10s %-11s %-20s %-6s %-9s %s\n",
