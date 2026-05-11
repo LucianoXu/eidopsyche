@@ -174,6 +174,13 @@ func Run(ctx context.Context, d Deps) (*Summoning, []byte, error) {
 		}
 	}
 
+	// Phase 3.5: heart cadence — ask both prefab and scratch paths
+	// before sealing, so the cadence is baked into config.toml at
+	// init-volume time rather than requiring a post-create restart.
+	if err := Phase3Cadence(ctx, s, d.Renderer); err != nil {
+		return s, nil, err
+	}
+
 	body, err := Phase4(ctx, s, d.Renderer, d.Claude, ready, Phase4Deps{
 		DockerClient: d.DockerClient, Image: d.Image,
 		WriteVolume: d.WriteVolume, ContainerStart: d.StartContainer,

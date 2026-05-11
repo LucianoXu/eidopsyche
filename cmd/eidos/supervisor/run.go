@@ -49,9 +49,9 @@ func newRunCmd() *cobra.Command {
 // the wake loop.
 func startChildren(ctx context.Context, sp ChildSpawner) error {
 	// Render and install the crontab from per-mindform config. A bad
-	// config falls back to the default 4h cadence with a logged warning
-	// rather than leaving the mind-form silent — heartbeat is rhythm,
-	// not authority.
+	// config falls back to config.DefaultHeartbeatInterval (currently 2h)
+	// with a logged warning rather than leaving the mind-form silent —
+	// heartbeat is rhythm, not authority.
 	cfg, err := config.Load(filepath.Join(gateDir, "config.toml"))
 	if err != nil {
 		log.Printf("supervisor: config load: %v (continuing with defaults)", err)
@@ -62,7 +62,7 @@ func startChildren(ctx context.Context, sp ChildSpawner) error {
 	}
 	body, rerr := renderCrontab(cfg)
 	if rerr != nil {
-		log.Printf("supervisor: crontab render: %v (using default 4h)", rerr)
+		log.Printf("supervisor: crontab render: %v (using default 2h)", rerr)
 	}
 	// installCrontab requires root because /var/spool/cron/crontabs is
 	// root-owned. The supervisor runs as eidos, so we shell out to sudo.

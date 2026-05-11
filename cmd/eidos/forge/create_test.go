@@ -289,6 +289,61 @@ func TestCreateModelFlagValidation(t *testing.T) {
 	}
 }
 
+// TestCreateHeartbeatIntervalEnvPlumbing pins that --heartbeat-interval
+// reaches init-volume's env as EIDOS_FORGE_HEARTBEAT_INTERVAL (mirror
+// of TestCreateModelEnvPlumbing).
+func TestCreateHeartbeatIntervalEnvPlumbing(t *testing.T) {
+	f := &fakeClient{}
+	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
+		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice",
+		NoLogin: true, Image: "img:dev", HeartbeatInterval: "2m",
+	})
+	if err != nil {
+		t.Fatalf("orchestrate: %v", err)
+	}
+	if len(f.inits) != 1 {
+		t.Fatalf("init runs = %d, want 1", len(f.inits))
+	}
+	want := "EIDOS_FORGE_HEARTBEAT_INTERVAL=2m"
+	found := false
+	for _, e := range f.inits[0].Env {
+		if e == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("init env missing %q; got %v", want, f.inits[0].Env)
+	}
+}
+
+// TestCreateHeartbeatIntervalFlagValidation pins that bad
+// --heartbeat-interval values are rejected at the cobra layer before
+// any docker work. We pass --model "" explicitly because the cobra
+// root command is a package singleton: previous tests in this file
+// may have mutated the closure-bound o.Model and the validateModel
+// step runs before validateHeartbeatInterval. (Same idiom would help
+// any future cross-test interaction here.)
+func TestCreateHeartbeatIntervalFlagValidation(t *testing.T) {
+	cmd := Command()
+	cmd.SetArgs([]string{
+		"create", "alice",
+		"--owner", "npub1ownertest",
+		"--relay", "wss://r",
+		"--model", "",
+		"--heartbeat-interval", "90m",
+	})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("90m --heartbeat-interval should be rejected")
+	}
+	if !strings.Contains(err.Error(), "supported") {
+		t.Errorf("error should name the supported set: %v", err)
+	}
+}
+
 func TestValidateModel_Helper(t *testing.T) {
 	if err := validateModel(""); err != nil {
 		t.Errorf("empty should pass: %v", err)

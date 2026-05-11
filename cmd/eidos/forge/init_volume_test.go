@@ -8,6 +8,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/LucianoXu/eidopsyche/internal/config"
 )
 
 // TestInitVolumeDirsIncludesRunDir is the regression guard for the
@@ -262,6 +264,54 @@ func TestApplyModelEnv(t *testing.T) {
 	// Invalid model id: error.
 	if err := applyModelEnv(cfgPath, "garbage"); err == nil {
 		t.Error("invalid model id should error")
+	}
+}
+
+// TestApplyHeartbeatEnv writes EIDOS_FORGE_HEARTBEAT_INTERVAL into the
+// freshly-written config.toml when set, errors on unsupported input,
+// and is a no-op when unset (so the supervisor falls back to
+// config.DefaultHeartbeatInterval at PID-1 startup).
+func TestApplyHeartbeatEnv(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	mustWriteFile(t, cfgPath, "log_level = \"info\"\n")
+
+	// Empty: no-op.
+	before, _ := os.ReadFile(cfgPath)
+	if err := applyHeartbeatEnv(cfgPath, ""); err != nil {
+		t.Fatalf("applyHeartbeatEnv(empty): %v", err)
+	}
+	after, _ := os.ReadFile(cfgPath)
+	if !bytes.Equal(before, after) {
+		t.Errorf("empty interval should leave config unchanged; before=%q after=%q", before, after)
+	}
+
+	// Valid value: persisted under [heartbeat] interval.
+	if err := applyHeartbeatEnv(cfgPath, "2m"); err != nil {
+		t.Fatalf("applyHeartbeatEnv(2m): %v", err)
+	}
+	body, _ := os.ReadFile(cfgPath)
+	if !strings.Contains(string(body), `interval = "2m"`) {
+		t.Errorf("config.toml missing heartbeat interval; got:\n%s", body)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Heartbeat.Interval != "2m" {
+		t.Errorf("cfg.Heartbeat.Interval = %q, want 2m", cfg.Heartbeat.Interval)
+	}
+
+	// Invalid (not in supported set): error + no mutation.
+	if err := applyHeartbeatEnv(cfgPath, "90m"); err == nil {
+		t.Error("applyHeartbeatEnv(90m) should reject")
+	}
+	cfg, err = config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load after invalid: %v", err)
+	}
+	if cfg.Heartbeat.Interval != "2m" {
+		t.Errorf("after invalid Apply: cfg.Heartbeat.Interval mutated to %q", cfg.Heartbeat.Interval)
 	}
 }
 

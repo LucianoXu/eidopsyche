@@ -15,12 +15,20 @@ import (
 // summoning state. The wizard-only fields KeyHex and JournalEntry are
 // not exposed as CLI flags — they make no sense for scripted use.
 type CreateOpts struct {
-	Owner        string
-	Relay        string
-	Label        string
-	NoLogin      bool
-	Image        string
-	Model        string
+	Owner   string
+	Relay   string
+	Label   string
+	NoLogin bool
+	Image   string
+	Model   string
+
+	// HeartbeatInterval is the per-mind-form HeartBeat cadence written
+	// into /eidos/gate/config.toml at init-volume time. Empty leaves
+	// the [heartbeat] block unset, so the supervisor falls back to
+	// config.DefaultHeartbeatInterval. Must be in the supported set
+	// (validated via config.ValidateHeartbeatInterval).
+	HeartbeatInterval string
+
 	KeyHex       string // wizard-only: pre-generated MindForm private hex
 	JournalEntry string // wizard-only: rendered summoning-book markdown
 
@@ -67,6 +75,9 @@ func newCreateCmd() *cobra.Command {
 			if err := validateModel(o.Model); err != nil {
 				return err
 			}
+			if err := validateHeartbeatInterval(o.HeartbeatInterval); err != nil {
+				return err
+			}
 			if o.Label == "" {
 				o.Label = name
 			}
@@ -79,11 +90,17 @@ func newCreateCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&o.NoLogin, "no-login", false, "skip the interactive claude /login step")
 	cmd.Flags().StringVar(&o.Image, "image", "", "override container image (default: pinned in this binary)")
 	cmd.Flags().StringVar(&o.Model, "model", "", "claude model id to pin (e.g. claude-sonnet-4-7); empty = claude default")
+	cmd.Flags().StringVar(&o.HeartbeatInterval, "heartbeat-interval", "",
+		"HeartBeat cadence (e.g. 2m, 30m, 2h); empty = 2h default. Supported: 1m,2m,3m,4m,5m,6m,10m,12m,15m,20m,30m,1h,2h,3h,4h,6h,8h,12h,24h")
 	return cmd
 }
 
 func validateModel(s string) error {
 	return config.ValidateModelID(s)
+}
+
+func validateHeartbeatInterval(s string) error {
+	return config.ValidateHeartbeatInterval(s)
 }
 
 func validateOwner(s string) error {

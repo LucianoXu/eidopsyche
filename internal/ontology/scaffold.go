@@ -32,11 +32,14 @@ type Params struct {
 	HomeRelay    string
 
 	// JournalEntry, if non-empty, is appended to the tar stream produced
-	// by TarStream as a literal file at journal/0000-summoning.md. It is
-	// NOT run through text/template — the wizard's pre-rendered markdown
-	// can contain `{{` literals that would otherwise break the template
-	// engine. Used by the First Contact wizard's scratch path; prefab
-	// path leaves this empty.
+	// by TarStream and TarStreamPrefab as a literal file at
+	// journal/0000-summoning.md. It is NOT run through text/template —
+	// the wizard's pre-rendered markdown can contain `{{` literals that
+	// would otherwise break the template engine. Used by the First
+	// Contact wizard for both the scratch path and the prefab path
+	// (the supervisor's birth handler reads this file to drive the
+	// mind-form's first wake; prefab path was previously missing this
+	// write, which left the birth handler retrying forever).
 	JournalEntry string
 }
 

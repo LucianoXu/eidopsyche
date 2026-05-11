@@ -12,12 +12,12 @@ import (
 )
 
 func TestRenderCrontabFromConfig_Default(t *testing.T) {
-	cfg := config.Config{} // interval empty → default 4h
+	cfg := config.Config{} // interval empty → default 2h
 	got, err := renderCrontab(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "0 */4 * * * /usr/local/bin/eidos forge wake --reason heartbeat\n"
+	want := "0 */2 * * * EIDOS_IN_CONTAINER=1 /usr/local/bin/eidos forge wake --reason heartbeat\n"
 	if got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
@@ -51,7 +51,7 @@ func TestRenderCrontabFromConfig_BadIntervalFallsBack(t *testing.T) {
 	if err == nil {
 		t.Error("renderCrontab should return error on unsupported interval")
 	}
-	want := "0 */4 * * * /usr/local/bin/eidos forge wake --reason heartbeat\n"
+	want := "0 */2 * * * EIDOS_IN_CONTAINER=1 /usr/local/bin/eidos forge wake --reason heartbeat\n"
 	if got != want {
 		t.Errorf("fallback got:\n%s\nwant:\n%s", got, want)
 	}
@@ -63,9 +63,26 @@ func TestRenderCrontabFromConfig_GarbageFallsBack(t *testing.T) {
 	if err == nil {
 		t.Error("expected parse error")
 	}
-	want := "0 */4 * * * /usr/local/bin/eidos forge wake --reason heartbeat\n"
+	want := "0 */2 * * * EIDOS_IN_CONTAINER=1 /usr/local/bin/eidos forge wake --reason heartbeat\n"
 	if got != want {
 		t.Errorf("fallback got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestRenderCrontab_HasInContainerEnv pins the EIDOS_IN_CONTAINER=1
+// inline prefix. Required because the supervisor spawns crond via
+// `sudo -n` which strips Dockerfile ENV; without this prefix the
+// heartbeat command would resolve to the host-side wake variant and
+// exit 1 silently (busybox crond swallows non-zero exits). See
+// crontab.go's crontabHeartbeatLine comment for the full story.
+func TestRenderCrontab_HasInContainerEnv(t *testing.T) {
+	cfg := config.Config{Heartbeat: config.HeartbeatConfig{Interval: "2m"}}
+	got, err := renderCrontab(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "EIDOS_IN_CONTAINER=1") {
+		t.Errorf("crontab missing EIDOS_IN_CONTAINER=1 inline env; got:\n%s", got)
 	}
 }
 

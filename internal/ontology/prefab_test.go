@@ -104,6 +104,62 @@ func TestTarStreamPrefab_FixtureRoundTrip(t *testing.T) {
 	}
 }
 
+// TestTarStreamPrefab_JournalEntryProducesLiteralFile pins the
+// contract documented in top-level CLAUDE.md: the wizard's rendered
+// summoning book is delivered via params.JournalEntry as a literal
+// file at journal/0000-summoning.md, regardless of which scaffold
+// path produced the volume. Prior to this fix the prefab path
+// silently dropped JournalEntry, leaving the supervisor's birth
+// handler retrying forever for the missing summoning book.
+func TestTarStreamPrefab_JournalEntryProducesLiteralFile(t *testing.T) {
+	const body = "## seal book {{ literal }}\nfrom prefab fixture\n"
+	var buf bytes.Buffer
+	params := Params{
+		Label:        "x",
+		OwnerNpub:    "n",
+		CreatedDate:  "d",
+		OwnerLabel:   "ol",
+		MindFormNpub: "mf",
+		HomeRelay:    "hr",
+		JournalEntry: body,
+	}
+	if err := TarStreamPrefab(&buf, "_test_fixture", params); err != nil {
+		t.Fatalf("TarStreamPrefab: %v", err)
+	}
+	got := tarEntryBody(t, buf.Bytes(), "journal/0000-summoning.md")
+	if got != body {
+		t.Errorf("journal/0000-summoning.md = %q, want %q", got, body)
+	}
+}
+
+// TestTarStreamPrefab_EmptyJournalEntryOmitsFile keeps the test
+// fixture's prefab tree clean: when JournalEntry is empty (today's
+// non-wizard paths), TarStreamPrefab should not write the file.
+func TestTarStreamPrefab_EmptyJournalEntryOmitsFile(t *testing.T) {
+	var buf bytes.Buffer
+	if err := TarStreamPrefab(&buf, "_test_fixture", Params{
+		Label: "x", OwnerNpub: "n", CreatedDate: "d",
+		OwnerLabel: "ol", MindFormNpub: "mf", HomeRelay: "hr",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	tr := tar.NewReader(&buf)
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen[h.Name] = true
+	}
+	if seen["journal/0000-summoning.md"] {
+		t.Errorf("empty JournalEntry should not produce journal/0000-summoning.md")
+	}
+}
+
 func TestTarStreamPrefab_UsesForwardSlashes(t *testing.T) {
 	var buf bytes.Buffer
 	if err := TarStreamPrefab(&buf, "_test_fixture", Params{
