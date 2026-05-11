@@ -20,8 +20,8 @@ type scriptedRenderer struct {
 func (r *scriptedRenderer) Capabilities() render.Capabilities {
 	return render.Capabilities{}
 }
-func (r *scriptedRenderer) Frame(string)                    {}
-func (r *scriptedRenderer) Show(s string)                   { r.shown = append(r.shown, s) }
+func (r *scriptedRenderer) Frame(string)                       {}
+func (r *scriptedRenderer) Show(s string)                      { r.shown = append(r.shown, s) }
 func (r *scriptedRenderer) Typewriter(context.Context, string) {}
 func (r *scriptedRenderer) Prompt(_ string, _ render.PromptOpts) (string, error) {
 	s := r.inputs[0]
@@ -33,7 +33,7 @@ func (r *scriptedRenderer) PromptChoice(_ string, _ []render.ChoiceOption) (int,
 	r.choices = r.choices[1:]
 	return c, nil
 }
-func (r *scriptedRenderer) Status(string) render.StatusHandle { return nopStatus{} }
+func (r *scriptedRenderer) Status(string) render.StatusHandle   { return nopStatus{} }
 func (r *scriptedRenderer) Logo(context.Context, time.Duration) {}
 
 type nopStatus struct{}
