@@ -1,0 +1,213 @@
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/LucianoXu/eidopsyche/internal/contacts"
+	"github.com/LucianoXu/eidopsyche/internal/envelope"
+	"github.com/LucianoXu/eidopsyche/internal/inbox"
+	"github.com/LucianoXu/eidopsyche/internal/ipc"
+	"github.com/LucianoXu/eidopsyche/internal/nostr"
+)
+
+// SendParams is the JSON-stable parameter shape for the "send" IPC method.
+// Callers (CLI ipc.Client.Call, dashboard adapter via *Daemon.Call, future
+// MCP server) build this struct rather than ad-hoc maps so the schema is
+// explicit at every surface.
+type SendParams struct {
+	To       string             `json:"to"`
+	Envelope *envelope.Envelope `json:"envelope"`
+}
+
+// SendResult is the JSON-stable result shape for the "send" IPC method.
+type SendResult struct {
+	EventID    string   `json:"event_id"`
+	AcceptedBy []string `json:"accepted_by"`
+}
+
+// sendMessage NIP-17 gift-wraps an envelope-v1 payload and publishes it to
+// the recipient's relays plus our own. It also publishes a self-copy for
+// archive purposes.
+func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p SendParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	if p.Envelope == nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: "envelope is required"}
+	}
+	content, err := envelope.Encode(*p.Envelope)
+	if err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+
+	pk, ipcErr := resolveTarget(ctx, d, p.To)
+	if ipcErr != nil {
+		return nil, ipcErr
+	}
+	c, err := d.Repo.Get(ctx, pk)
+	if err != nil {
+		// Self-loopback: sending to own pubkey is allowed even when not in
+		// contacts. The dispatcher's authority rule (sender==self) handles
+		// commands; chat-to-self lands in the operator's own inbox via the
+		// self-copy publish.
+		if pk != d.Key.PublicHex {
+			return nil, &ipc.Error{Code: ipc.ErrContactNotFound, Message: p.To}
+		}
+		c = &contacts.Contact{Pubkey: pk}
+	}
+
+	wrapBob, rumorID, err := nostr.Wrap(d.Key.PrivateHex, pk, content)
+	if err != nil {
+		return nil, internalErr(err)
+	}
+	wrapSelf, _, err := nostr.Wrap(d.Key.PrivateHex, d.Key.PublicHex, content)
+	if err != nil {
+		return nil, internalErr(err)
+	}
+	d.recordSelfWrap(wrapSelf.ID)
+
+	now := time.Now().Unix()
+	pre := inbox.Sent{
+		EventID:     wrapBob.ID,
+		SelfEventID: wrapSelf.ID,
+		InnerID:     rumorID,
+		To:          pk,
+		Kind:        14,
+		Content:     content,
+		RumorAt:     now,
+		SentAt:      now,
+		AcceptedBy:  nil,
+	}
+	if err := d.Box.AppendOutbox(pre); err != nil {
+		return nil, internalErr(err)
+	}
+	// Note: we deliberately do NOT emit `outbox.message` here. The
+	// dashboard's POST /thread/{pubkey}/send response delivers the
+	// initial bubble inline (htmx swaps it `beforeend`). Emitting via
+	// SSE would produce a duplicate bubble in the same thread view.
+	// Tier-2 status updates (✓ → ✓✓) are delivered via OOB swap from
+	// handleInboundAck; see internal/dashboard/sse.go.
+
+	urls, err := d.publishTargets(ctx, c.Relays)
+	if err != nil {
+		return nil, internalErr(err)
+	}
+
+	publishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	resBob := d.Pool.Publish(publishCtx, urls, wrapBob)
+	resSelf := d.Pool.Publish(publishCtx, urls, wrapSelf)
+	_ = resSelf // self-copy publish is best-effort
+
+	accepted := []string{}
+	for _, r := range resBob {
+		if r.OK {
+			accepted = append(accepted, r.Relay)
+		}
+	}
+	if len(accepted) == 0 {
+		return nil, &ipc.Error{Code: ipc.ErrNoRelaysReachable,
+			Message: fmt.Sprintf("publish failed on all %d relays", len(urls))}
+	}
+	final := pre
+	final.AcceptedBy = accepted
+	final.Final = true
+	d.finalizeOutboxOrLog(ctx, final, wrapBob.ID, pk)
+	// No SSE emit here either — the POST /send response already rendered
+	// the ✓ bubble (deps.Send only returns nil when at least one relay
+	// accepted, so the dashboard handler can safely set Status="sent").
+
+	return SendResult{
+		EventID:    wrapBob.ID,
+		AcceptedBy: accepted,
+	}, nil
+}
+
+// finalizeOutboxOrLog writes the publish-finalization outbox row and logs
+// any error rather than failing the RPC. Publish has already succeeded by
+// the time we reach this point, so failing the RPC would mislead callers
+// into thinking the network publish itself had failed. A local-write error
+// here usually means disk full / permission / filesystem trouble and is
+// what causes the "stuck in pending" UI symptom — the log breadcrumb
+// gives operators something to chase. Prior code silently discarded this
+// error (`_ = d.Box.AppendOutbox(final)`); see codex review 2026-05-10.
+func (d *Daemon) finalizeOutboxOrLog(ctx context.Context, sent inbox.Sent, eventID, to string) {
+	if err := d.Box.AppendOutbox(sent); err != nil {
+		d.Log.ErrorContext(ctx, "send: finalize outbox write failed after publish",
+			"err", err.Error(), "event_id", eventID, "to", to)
+	}
+}
+
+// inboxList returns inbox messages filtered by since/from/limit.
+func inboxList(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p struct {
+		Since *int64 `json:"since"`
+		From  string `json:"from"`
+		Limit int    `json:"limit"`
+	}
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+		}
+	}
+	var sincePtr *time.Time
+	if p.Since != nil {
+		t := time.Unix(*p.Since, 0)
+		sincePtr = &t
+	}
+	if p.From != "" {
+		hex, ipcErr := resolveTarget(ctx, d, p.From)
+		if ipcErr != nil {
+			return nil, ipcErr
+		}
+		p.From = hex
+	}
+	out, err := d.Box.ListInbox(sincePtr, p.From, p.Limit)
+	if err != nil {
+		return nil, internalErr(err)
+	}
+	annotateInboxLabels(ctx, d, out)
+	return out, nil
+}
+
+// inboxTail subscribes the connection to live inbox push events.
+func inboxTail(_ context.Context, d *Daemon, conn *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
+	d.addSubscriber(conn)
+	return map[string]bool{"subscribed": true}, nil
+}
+
+// outboxList returns sent messages filtered by since/to/limit.
+func outboxList(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p struct {
+		Since *int64 `json:"since"`
+		To    string `json:"to"`
+		Limit int    `json:"limit"`
+	}
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+		}
+	}
+	var sincePtr *time.Time
+	if p.Since != nil {
+		t := time.Unix(*p.Since, 0)
+		sincePtr = &t
+	}
+	if p.To != "" {
+		hex, ipcErr := resolveTarget(ctx, d, p.To)
+		if ipcErr != nil {
+			return nil, ipcErr
+		}
+		p.To = hex
+	}
+	out, err := d.Box.ListOutbox(sincePtr, p.To, p.Limit)
+	if err != nil {
+		return nil, internalErr(err)
+	}
+	annotateOutboxLabels(ctx, d, out)
+	return out, nil
+}
