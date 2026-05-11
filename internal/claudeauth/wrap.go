@@ -6,11 +6,22 @@
 // Claude Code's `claude setup-token` interactive flow exchanges a
 // browser-issued setup-token for a full OAuth credentials blob that
 // includes a separate sk-ant-ort01-... refreshToken. Empirically (test
-// 2026-05-11), when the accessToken's expiresAt is far enough in the
-// future, claude never invokes the refresh path — so a placeholder
-// refreshToken paired with a year-2099 expiresAt is sufficient to
-// authenticate. This sidesteps the interactive exchange entirely and
-// lets operators paste the bare 108-char token.
+// 2026-05-11, claude 2.1.138 inside the mindform image), when the
+// accessToken's expiresAt is far enough in the future, claude never
+// invokes the refresh path — so a placeholder refreshToken paired with
+// a year-2099 expiresAt is sufficient to authenticate.
+//
+// One extra field on top of the Validate-required set is needed for
+// claude's runtime credential check: the guard accepts the blob when
+// either `scopes` or `subscriptionType` is non-empty. We provide
+// `scopes: ["user:inference"]` — matching what claude writes for its
+// `CLAUDE_CODE_OAUTH_TOKEN` env-var path — and deliberately omit
+// `subscriptionType`. Without `scopes` the in-container claude 2.1.138
+// rejects the blob with "Not logged in" even though Validate is
+// satisfied (host claude 2.1.139 was more lenient and let this slip
+// through pre-merge testing on v0.13.0). Setting `subscriptionType`
+// to "max" without knowing the operator's actual tier would lie to
+// claude's rate-limit display, so we leave it absent.
 //
 // Trade-off: if Anthropic revokes the setup-token server-side, the
 // container's claude returns 401, the supervisor's exit classifier
@@ -38,6 +49,10 @@ const (
 	// Picked far enough out that claude treats the credentials as
 	// non-expiring and never tries to refresh.
 	setupTokenFarFutureExpiresAt = int64(4070908800000)
+	// setupTokenScope is the minimum OAuth scope claude accepts for a
+	// setup-token-installed credentials blob. Matches the value claude
+	// writes when reading the token from CLAUDE_CODE_OAUTH_TOKEN env.
+	setupTokenScope = "user:inference"
 )
 
 // WrapSetupToken converts a raw setup-token string into a Validate-clean
@@ -51,9 +66,10 @@ func WrapSetupToken(token string) ([]byte, error) {
 		return nil, errors.New("empty setup-token")
 	}
 	type oauth struct {
-		AccessToken  string `json:"accessToken"`
-		RefreshToken string `json:"refreshToken"`
-		ExpiresAt    int64  `json:"expiresAt"`
+		AccessToken  string   `json:"accessToken"`
+		RefreshToken string   `json:"refreshToken"`
+		ExpiresAt    int64    `json:"expiresAt"`
+		Scopes       []string `json:"scopes"`
 	}
 	type creds struct {
 		ClaudeAiOauth oauth `json:"claudeAiOauth"`
@@ -62,5 +78,6 @@ func WrapSetupToken(token string) ([]byte, error) {
 		AccessToken:  token,
 		RefreshToken: setupTokenPlaceholderRefresh,
 		ExpiresAt:    setupTokenFarFutureExpiresAt,
+		Scopes:       []string{setupTokenScope},
 	}}, "", "  ")
 }
