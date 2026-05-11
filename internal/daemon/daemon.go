@@ -150,6 +150,13 @@ func Start(stateDir string) (*Daemon, error) {
 		DB:            db,
 		applyRegistry: state.NewApplyRegistry(),
 		stateTree:     state.NewTree(),
+		// Default Context to HostCtx — the common case for `eidos gate
+		// daemon`. The container PID-1 entry point (cmd/eidos/supervisor)
+		// will override to ContainerCtx via SetContext after construction.
+		// Defaulting here keeps existing single-binary deployments (where
+		// nothing calls SetContext) working: Mutate gates only reject when
+		// a key declares ContainerCtx-only AND the daemon is HostCtx.
+		Context: config.HostCtx,
 		Repo:          contacts.New(db),
 		Invites:       invitedb.New(db),
 		Box:           inbox.New(stateDir),
