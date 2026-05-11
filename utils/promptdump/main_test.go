@@ -238,7 +238,7 @@ func TestRunCapture_Smoke(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	out, err := runCapture(ctx, runOpts{
+	jsonBytes, _, err := runCapture(ctx, runOpts{
 		Prompt:      "ping",
 		ExtraArgs:   nil,
 		NoPOSTAfter: 8 * time.Second,
@@ -249,8 +249,8 @@ func TestRunCapture_Smoke(t *testing.T) {
 	}
 
 	var envelope map[string]any
-	if err := json.Unmarshal(out, &envelope); err != nil {
-		t.Fatalf("envelope not valid JSON: %v\n%s", err, out)
+	if err := json.Unmarshal(jsonBytes, &envelope); err != nil {
+		t.Fatalf("envelope not valid JSON: %v\n%s", err, jsonBytes)
 	}
 	req, ok := envelope["request"].(map[string]any)
 	if !ok {
@@ -325,5 +325,303 @@ func TestParseFlags(t *testing.T) {
 				t.Errorf("out = %q, want %q", out, tt.wantOut)
 			}
 		})
+	}
+}
+
+// TestBuildEnvelopeMap: buildEnvelopeMap returns the same shape that
+// buildEnvelope serializes, but as a map[string]any rather than bytes.
+// The renderer (added in a later task) will consume the map directly.
+func TestBuildEnvelopeMap(t *testing.T) {
+	captured := []byte(`{"model":"claude-sonnet-4-7","system":"foo"}`)
+	meta := envelopeMeta{
+		ClaudeVersion: "2.1.138",
+		ClaudePath:    "/usr/bin/claude",
+		ClaudeArgs:    []string{"--model", "sonnet"},
+		Host:          hostInfo{Platform: "linux", CWD: "/data/eidopsyche"},
+		CapturedAt:    time.Date(2026, 5, 11, 17, 23, 45, 0, time.UTC),
+	}
+	got, err := buildEnvelopeMap(meta, captured)
+	if err != nil {
+		t.Fatalf("buildEnvelopeMap: %v", err)
+	}
+	if got["captured_at"] != "2026-05-11T17:23:45Z" {
+		t.Errorf("captured_at = %v", got["captured_at"])
+	}
+	if got["claude_version"] != "2.1.138" {
+		t.Errorf("claude_version = %v", got["claude_version"])
+	}
+	req, ok := got["request"].(map[string]any)
+	if !ok {
+		t.Fatalf("request not an object: %T", got["request"])
+	}
+	if req["model"] != "claude-sonnet-4-7" {
+		t.Errorf("request.model = %v", req["model"])
+	}
+}
+
+// TestRenderMarkdown_HappyPath: render a fixture envelope that
+// exercises every section. Assert real newlines are preserved
+// (not the two-char escape), section headings exist, and fenced
+// blocks balance.
+func TestRenderMarkdown_HappyPath(t *testing.T) {
+	env := map[string]any{
+		"captured_at":    "2026-05-11T17:23:45Z",
+		"claude_version": "2.1.138 (Claude Code)",
+		"claude_path":    "/usr/bin/claude",
+		"claude_args":    []any{"--model", "sonnet", "-p", "ping"},
+		"host":           map[string]any{"platform": "linux", "cwd": "/data/eidopsyche"},
+		"request": map[string]any{
+			"model":      "claude-sonnet-4-6",
+			"max_tokens": float64(32000),
+			"stream":     true,
+			"system": []any{
+				map[string]any{
+					"type":          "text",
+					"text":          "line1\nline2\nline3",
+					"cache_control": map[string]any{"type": "ephemeral"},
+				},
+				map[string]any{
+					"type": "text",
+					"text": "second segment",
+				},
+			},
+			"tools": []any{
+				map[string]any{
+					"name":        "Read",
+					"description": "Reads a file from the local filesystem.\nFull description continues...",
+				},
+				map[string]any{
+					"name":        "Bash",
+					"description": "Runs a shell command.",
+				},
+			},
+			"messages": []any{
+				map[string]any{
+					"role": "user",
+					"content": []any{
+						map[string]any{"type": "text", "text": "hello\nworld"},
+					},
+				},
+			},
+		},
+	}
+	out, err := renderMarkdown(env)
+	if err != nil {
+		t.Fatalf("renderMarkdown: %v", err)
+	}
+
+	for _, want := range []string{
+		"# promptdump capture",
+		"2026-05-11T17:23:45Z",
+		"2.1.138 (Claude Code)",
+		"--model sonnet -p ping",
+		"linux",
+		"/data/eidopsyche",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in metadata section", want)
+		}
+	}
+
+	if !strings.Contains(out, "claude-sonnet-4-6") {
+		t.Error("model id missing from output")
+	}
+	if !strings.Contains(out, "## System prompt (2 segments)") {
+		t.Error("system-prompt heading missing")
+	}
+	if !strings.Contains(out, "line1\nline2\nline3") {
+		t.Error("system-segment real newlines not preserved (got JSON-escaped form?)")
+	}
+	if !strings.Contains(out, `cache_control: {"type":"ephemeral"}`) {
+		t.Error("cache_control annotation missing from segment heading")
+	}
+	if !strings.Contains(out, "## Tools (2)") {
+		t.Error("tools heading missing")
+	}
+	if !strings.Contains(out, "**`Read`**") || !strings.Contains(out, "Reads a file") {
+		t.Error("Read tool not listed in bullet form")
+	}
+	if !strings.Contains(out, "<details><summary>Full tool schemas</summary>") {
+		t.Error("collapsible tool-schemas block missing")
+	}
+	if !strings.Contains(out, "## First user message") {
+		t.Error("user-message heading missing")
+	}
+	if !strings.Contains(out, "hello\nworld") {
+		t.Error("user-message real newlines not preserved")
+	}
+	if fences := strings.Count(out, "```"); fences%2 != 0 {
+		t.Errorf("unbalanced fenced blocks: %d ``` markers", fences)
+	}
+}
+
+// TestRenderMarkdown_MissingFields: empty/absent fields must not panic
+// and must produce sensible (possibly empty) sections.
+func TestRenderMarkdown_MissingFields(t *testing.T) {
+	env := map[string]any{
+		"captured_at":    "2026-05-11T17:23:45Z",
+		"claude_version": "2.1.138",
+		"request": map[string]any{
+			"model": "claude-opus-4-7",
+		},
+	}
+	out, err := renderMarkdown(env)
+	if err != nil {
+		t.Fatalf("renderMarkdown: %v", err)
+	}
+	for _, want := range []string{
+		"# promptdump capture",
+		"## System prompt (0 segments)",
+		"## Tools (0)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in degenerate-input output", want)
+		}
+	}
+	if strings.Contains(out, "## First user message") {
+		t.Error("user-message section rendered despite no messages")
+	}
+}
+
+// TestRenderMarkdown_RawBodyFallback: if the envelope contains a raw_body
+// (parse failure), the renderer emits a "Raw body" section instead of
+// the structured request sections.
+func TestRenderMarkdown_RawBodyFallback(t *testing.T) {
+	env := map[string]any{
+		"captured_at":    "2026-05-11T17:23:45Z",
+		"claude_version": "2.1.138",
+		"raw_body":       "not json at all",
+		"parse_error":    "invalid character 'n'",
+	}
+	out, err := renderMarkdown(env)
+	if err != nil {
+		t.Fatalf("renderMarkdown: %v", err)
+	}
+	if !strings.Contains(out, "## Raw body (failed to parse as JSON)") {
+		t.Error("raw-body section missing")
+	}
+	if !strings.Contains(out, "not json at all") {
+		t.Error("raw body content missing")
+	}
+	if strings.Contains(out, "## Request") {
+		t.Error("structured request section rendered despite parse failure")
+	}
+}
+
+// TestRenderMarkdown_MarkdownInDescription: a tool description
+// containing Markdown-special characters must not break the
+// document structure. Real Claude Code tools have ** and ` in their
+// docs.
+func TestRenderMarkdown_MarkdownInDescription(t *testing.T) {
+	env := map[string]any{
+		"request": map[string]any{
+			"tools": []any{
+				map[string]any{
+					"name":        "Edit",
+					"description": "Performs **exact** string replacements in `files`.\n\nUsage: ...",
+				},
+			},
+		},
+	}
+	out, err := renderMarkdown(env)
+	if err != nil {
+		t.Fatalf("renderMarkdown: %v", err)
+	}
+	if !strings.Contains(out, "**`Edit`**") {
+		t.Error("tool name bullet missing")
+	}
+	if !strings.Contains(out, "Performs **exact** string replacements in `files`.") {
+		t.Error("tool description content missing")
+	}
+	if strings.Count(out, "```")%2 != 0 {
+		t.Errorf("unbalanced fenced blocks: description's backticks broke structure")
+	}
+}
+
+// TestDispatchOutput: covers the -o extension dispatch table.
+// jsonBytes and env are dummy values; we only assert which paths
+// and content kinds the dispatcher produces.
+func TestDispatchOutput(t *testing.T) {
+	jsonBytes := []byte(`{"captured_at":"x"}`)
+	env := map[string]any{
+		"captured_at": "x",
+		"request":     map[string]any{},
+	}
+
+	tests := []struct {
+		name      string
+		outPath   string
+		wantPaths []string
+		wantKinds []string // "json" or "md"
+	}{
+		{"stdout", "", []string{""}, []string{"json"}},
+		{"json only", "snap.json", []string{"snap.json"}, []string{"json"}},
+		{"md only", "snap.md", []string{"snap.md"}, []string{"md"}},
+		{"basename → both", "snap", []string{"snap.json", "snap.md"}, []string{"json", "md"}},
+		{"other ext → both", "snap.txt", []string{"snap.txt.json", "snap.txt.md"}, []string{"json", "md"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jobs, err := dispatchOutput(jsonBytes, env, tt.outPath)
+			if err != nil {
+				t.Fatalf("dispatchOutput: %v", err)
+			}
+			if len(jobs) != len(tt.wantPaths) {
+				t.Fatalf("got %d jobs, want %d: %+v", len(jobs), len(tt.wantPaths), jobs)
+			}
+			for i, j := range jobs {
+				if j.path != tt.wantPaths[i] {
+					t.Errorf("job[%d].path = %q, want %q", i, j.path, tt.wantPaths[i])
+				}
+				switch tt.wantKinds[i] {
+				case "json":
+					if !bytes.Equal(j.content, jsonBytes) {
+						t.Errorf("job[%d] content not JSON bytes", i)
+					}
+				case "md":
+					if !bytes.Contains(j.content, []byte("# promptdump capture")) {
+						t.Errorf("job[%d] content not Markdown", i)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestBuildEnvelopeMap_RoundTripsForRenderer: regression for a real
+// bug — buildEnvelopeMap originally stored claude_args as []string and
+// host as a hostInfo struct, but renderMarkdown only handled []any and
+// map[string]any. The metadata lines silently dropped from production
+// output. The map must now be JSON-normalized so all values match
+// what renderMarkdown's type switches expect.
+func TestBuildEnvelopeMap_RoundTripsForRenderer(t *testing.T) {
+	meta := envelopeMeta{
+		CapturedAt:    time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC),
+		ClaudeVersion: "2.1.139",
+		ClaudePath:    "/usr/bin/claude",
+		ClaudeArgs:    []string{"--model", "sonnet", "-p", "ping"},
+		Host:          hostInfo{Platform: "linux", CWD: "/data/eidopsyche"},
+	}
+	env, err := buildEnvelopeMap(meta, []byte(`{"model":"claude-sonnet-4-7"}`))
+	if err != nil {
+		t.Fatalf("buildEnvelopeMap: %v", err)
+	}
+	if _, ok := env["claude_args"].([]any); !ok {
+		t.Errorf("claude_args type = %T, want []any (JSON-normalized)", env["claude_args"])
+	}
+	if _, ok := env["host"].(map[string]any); !ok {
+		t.Errorf("host type = %T, want map[string]any (JSON-normalized)", env["host"])
+	}
+	md, err := renderMarkdown(env)
+	if err != nil {
+		t.Fatalf("renderMarkdown: %v", err)
+	}
+	for _, want := range []string{
+		"**Claude args:** `--model sonnet -p ping`",
+		"**Host:** linux · cwd=`/data/eidopsyche`",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("missing %q in rendered markdown — metadata line silently dropped?\n%s", want, md)
+		}
 	}
 }

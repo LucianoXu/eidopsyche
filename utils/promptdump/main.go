@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -152,12 +153,21 @@ type hostInfo struct {
 	CWD      string `json:"cwd"`
 }
 
-// buildEnvelope serializes meta + body into the final pretty-printed JSON
-// envelope. If body parses as JSON, it lands under "request"; otherwise
-// the raw bytes are stringified under "raw_body" and a parse-error note
-// is added under "parse_error".
-func buildEnvelope(meta envelopeMeta, body []byte) ([]byte, error) {
-	out := map[string]any{
+// buildEnvelopeMap builds the wrapper map captured alongside the
+// request body. Valid JSON body lands under "request"; malformed
+// body falls back to "raw_body" + "parse_error" so output is always
+// usable. Used by buildEnvelope (JSON output) and renderMarkdown
+// (human-readable output).
+//
+// All values are JSON-normalized: claude_args is []any (not []string),
+// host is map[string]any (not the hostInfo struct), etc. This keeps
+// renderMarkdown's type assertions simple and uniform regardless of
+// whether the map was hand-built (in tests) or produced from a real
+// capture — without this round-trip, "Claude args" and "Host" metadata
+// lines would silently be omitted from the Markdown output because
+// renderMarkdown's type switches don't match the original Go types.
+func buildEnvelopeMap(meta envelopeMeta, body []byte) (map[string]any, error) {
+	raw := map[string]any{
 		"captured_at":    meta.CapturedAt.UTC().Format(time.RFC3339),
 		"claude_version": meta.ClaudeVersion,
 		"claude_path":    meta.ClaudePath,
@@ -166,12 +176,228 @@ func buildEnvelope(meta envelopeMeta, body []byte) ([]byte, error) {
 	}
 	var parsed any
 	if err := json.Unmarshal(body, &parsed); err == nil {
-		out["request"] = parsed
+		raw["request"] = parsed
 	} else {
-		out["raw_body"] = string(body)
-		out["parse_error"] = err.Error()
+		raw["raw_body"] = string(body)
+		raw["parse_error"] = err.Error()
 	}
-	return json.MarshalIndent(out, "", "  ")
+	normalized, err := json.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(normalized, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// buildEnvelope serializes meta + body into the final pretty-printed
+// JSON envelope. Thin wrapper around buildEnvelopeMap.
+func buildEnvelope(meta envelopeMeta, body []byte) ([]byte, error) {
+	m, err := buildEnvelopeMap(meta, body)
+	if err != nil {
+		return nil, err
+	}
+	return json.MarshalIndent(m, "", "  ")
+}
+
+// renderMarkdown formats a parsed envelope as a human-readable
+// Markdown document. Companion to buildEnvelope (which produces the
+// canonical JSON). Sections — metadata, request config, system
+// prompt, tools, first user message — degrade gracefully when
+// fields are absent; missing fields yield empty sections rather
+// than errors.
+func renderMarkdown(env map[string]any) (string, error) {
+	var b strings.Builder
+
+	b.WriteString("# promptdump capture\n\n")
+	if v, ok := env["captured_at"].(string); ok {
+		fmt.Fprintf(&b, "**Captured at:** %s\n", v)
+	}
+	if v, ok := env["claude_version"].(string); ok {
+		fmt.Fprintf(&b, "**Claude version:** %s\n", v)
+	}
+	if v, ok := env["claude_args"].([]any); ok {
+		fmt.Fprintf(&b, "**Claude args:** `%s`\n", joinArgs(v))
+	}
+	if h, ok := env["host"].(map[string]any); ok {
+		platform, _ := h["platform"].(string)
+		cwd, _ := h["cwd"].(string)
+		fmt.Fprintf(&b, "**Host:** %s · cwd=`%s`\n", platform, cwd)
+	}
+	b.WriteString("\n")
+
+	req, _ := env["request"].(map[string]any)
+	if req == nil {
+		if raw, ok := env["raw_body"].(string); ok {
+			b.WriteString("## Raw body (failed to parse as JSON)\n\n```\n")
+			b.WriteString(raw)
+			b.WriteString("\n```\n")
+		}
+		return b.String(), nil
+	}
+
+	b.WriteString("## Request\n\n")
+	if v, ok := req["model"].(string); ok {
+		fmt.Fprintf(&b, "- **Model:** `%s`\n", v)
+	}
+	if v, ok := req["max_tokens"].(float64); ok {
+		fmt.Fprintf(&b, "- **Max tokens:** %d\n", int(v))
+	}
+	if v, ok := req["stream"].(bool); ok {
+		fmt.Fprintf(&b, "- **Stream:** %v\n", v)
+	}
+	b.WriteString("\n")
+
+	sys, _ := req["system"].([]any)
+	fmt.Fprintf(&b, "## System prompt (%d segments)\n\n", len(sys))
+	for i, seg := range sys {
+		segMap, _ := seg.(map[string]any)
+		header := fmt.Sprintf("### Segment %d", i+1)
+		if cc, ok := segMap["cache_control"]; ok {
+			ccBytes, _ := json.Marshal(cc)
+			header += fmt.Sprintf(" — `cache_control: %s`", string(ccBytes))
+		}
+		b.WriteString(header + "\n\n")
+		text, _ := segMap["text"].(string)
+		b.WriteString("```\n")
+		b.WriteString(text)
+		if !strings.HasSuffix(text, "\n") {
+			b.WriteString("\n")
+		}
+		b.WriteString("```\n\n")
+	}
+
+	tools, _ := req["tools"].([]any)
+	fmt.Fprintf(&b, "## Tools (%d)\n\n", len(tools))
+	for _, t := range tools {
+		tm, _ := t.(map[string]any)
+		name, _ := tm["name"].(string)
+		desc, _ := tm["description"].(string)
+		fmt.Fprintf(&b, "- **`%s`** — %s\n", name, firstNonEmptyLine(desc))
+	}
+	if len(tools) > 0 {
+		b.WriteString("\n<details><summary>Full tool schemas</summary>\n\n")
+		b.WriteString("```json\n")
+		toolsJSON, _ := json.MarshalIndent(tools, "", "  ")
+		b.Write(toolsJSON)
+		b.WriteString("\n```\n\n</details>\n\n")
+	}
+
+	messages, _ := req["messages"].([]any)
+	if len(messages) > 0 {
+		b.WriteString("## First user message\n\n")
+		msg, _ := messages[0].(map[string]any)
+		switch content := msg["content"].(type) {
+		case string:
+			b.WriteString("```\n")
+			b.WriteString(content)
+			if !strings.HasSuffix(content, "\n") {
+				b.WriteString("\n")
+			}
+			b.WriteString("```\n")
+		case []any:
+			for _, part := range content {
+				pm, _ := part.(map[string]any)
+				typ, _ := pm["type"].(string)
+				switch typ {
+				case "text":
+					txt, _ := pm["text"].(string)
+					b.WriteString("```\n")
+					b.WriteString(txt)
+					if !strings.HasSuffix(txt, "\n") {
+						b.WriteString("\n")
+					}
+					b.WriteString("```\n")
+				default:
+					mediaType, _ := pm["media_type"].(string)
+					fmt.Fprintf(&b, "_[%s%s]_\n", typ, formatMediaType(mediaType))
+				}
+			}
+		}
+	}
+
+	return b.String(), nil
+}
+
+// joinArgs renders a []any of strings as a space-joined argv-like
+// line for the metadata block. Non-string entries are %v-formatted.
+func joinArgs(args []any) string {
+	parts := make([]string, 0, len(args))
+	for _, a := range args {
+		if s, ok := a.(string); ok {
+			parts = append(parts, s)
+		} else {
+			parts = append(parts, fmt.Sprintf("%v", a))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// firstNonEmptyLine returns the first non-empty trimmed line of s.
+// Used to summarize tool descriptions in the bullet list.
+func firstNonEmptyLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		t := strings.TrimSpace(line)
+		if t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+// formatMediaType returns the media-type prefixed with a single space,
+// or empty if s is empty. Used in user-message rendering for non-text
+// parts; the caller wraps the result in italics, producing renderings
+// like `_[image image/png]_`.
+func formatMediaType(s string) string {
+	if s == "" {
+		return ""
+	}
+	return " " + s
+}
+
+// writeJob is one filesystem write produced by dispatchOutput.
+// An empty path means "write to stdout"; main() interprets it.
+type writeJob struct {
+	path    string
+	content []byte
+}
+
+// dispatchOutput decides what files to write based on outPath's
+// extension. Pure (no filesystem side effects); main() iterates the
+// returned jobs.
+//
+// Rules:
+//
+//	outPath == ""        → [{stdout, jsonBytes}]
+//	ext == ".json"       → [{outPath, jsonBytes}]
+//	ext == ".md"         → [{outPath, markdown(env)}]
+//	anything else        → [{outPath+".json", jsonBytes}, {outPath+".md", markdown(env)}]
+func dispatchOutput(jsonBytes []byte, env map[string]any, outPath string) ([]writeJob, error) {
+	if outPath == "" {
+		return []writeJob{{path: "", content: jsonBytes}}, nil
+	}
+	switch filepath.Ext(outPath) {
+	case ".json":
+		return []writeJob{{path: outPath, content: jsonBytes}}, nil
+	case ".md":
+		md, err := renderMarkdown(env)
+		if err != nil {
+			return nil, err
+		}
+		return []writeJob{{path: outPath, content: []byte(md)}}, nil
+	default:
+		md, err := renderMarkdown(env)
+		if err != nil {
+			return nil, err
+		}
+		return []writeJob{
+			{path: outPath + ".json", content: jsonBytes},
+			{path: outPath + ".md", content: []byte(md)},
+		}, nil
+	}
 }
 
 // runOpts collects the parameters of one capture run.
@@ -185,8 +411,9 @@ type runOpts struct {
 
 // runCapture orchestrates one full capture cycle: bring up the proxy,
 // spawn claude with env overrides, wait for capture, terminate child,
-// return the serialized envelope JSON.
-func runCapture(ctx context.Context, opts runOpts) ([]byte, error) {
+// return the serialized envelope JSON together with the parsed envelope
+// map so callers (e.g. the markdown renderer) don't re-parse.
+func runCapture(ctx context.Context, opts runOpts) ([]byte, map[string]any, error) {
 	if opts.Prompt == "" {
 		opts.Prompt = "ping"
 	}
@@ -196,7 +423,7 @@ func runCapture(ctx context.Context, opts runOpts) ([]byte, error) {
 
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
-		return nil, fmt.Errorf("claude binary not on PATH: %w", err)
+		return nil, nil, fmt.Errorf("claude binary not on PATH: %w", err)
 	}
 	claudeVer := probeClaudeVersion(claudePath)
 
@@ -204,7 +431,7 @@ func runCapture(ctx context.Context, opts runOpts) ([]byte, error) {
 	srv.verbose = opts.Verbose
 	baseURL, shutdownProxy, err := srv.listen()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer shutdownProxy(context.Background())
 
@@ -231,7 +458,7 @@ func runCapture(ctx context.Context, opts runOpts) ([]byte, error) {
 	cmd.Stderr = stderrBuf
 	cmd.Stdout = io.Discard
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("spawn claude: %w", err)
+		return nil, nil, fmt.Errorf("spawn claude: %w", err)
 	}
 
 	noPOSTTimer := time.NewTimer(opts.NoPOSTAfter)
@@ -258,12 +485,12 @@ func runCapture(ctx context.Context, opts runOpts) ([]byte, error) {
 	case <-noPOSTTimer.C:
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 		_ = cmd.Wait()
-		return nil, fmt.Errorf("claude did not POST /v1/messages within %s; stderr:\n%s",
+		return nil, nil, fmt.Errorf("claude did not POST /v1/messages within %s; stderr:\n%s",
 			opts.NoPOSTAfter, stderrBuf.String())
 	case <-ctx.Done():
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 		_ = cmd.Wait()
-		return nil, ctx.Err()
+		return nil, nil, ctx.Err()
 	}
 
 	if opts.Verbose && stderrBuf.Len() > 0 {
@@ -278,7 +505,17 @@ func runCapture(ctx context.Context, opts runOpts) ([]byte, error) {
 		ClaudeArgs:    args,
 		Host:          hostInfo{Platform: runtime.GOOS, CWD: cwd},
 	}
-	return buildEnvelope(meta, srv.captured)
+	envMap, err := buildEnvelopeMap(meta, srv.captured)
+	if err != nil {
+		return nil, nil, err
+	}
+	jsonBytes, err := json.MarshalIndent(envMap, "", "  ")
+	if err != nil {
+		return nil, nil, err
+	}
+	// envMap is already JSON-normalized by buildEnvelopeMap, so it can
+	// be passed straight to renderMarkdown without re-parsing.
+	return jsonBytes, envMap, nil
 }
 
 // filterEnv returns env with any entries whose key matches one of names
@@ -367,20 +604,32 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	envelope, err := runCapture(ctx, opts)
+	jsonBytes, envMap, err := runCapture(ctx, opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "promptdump: %v\n", err)
 		os.Exit(1)
 	}
 
-	if outPath == "" {
-		os.Stdout.Write(envelope)
-		os.Stdout.Write([]byte("\n"))
-		return
-	}
-	if err := os.WriteFile(outPath, envelope, 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "promptdump: write %s: %v\n", outPath, err)
+	jobs, err := dispatchOutput(jsonBytes, envMap, outPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "promptdump: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "promptdump: wrote %s\n", outPath)
+
+	var wrote []string
+	for _, j := range jobs {
+		if j.path == "" {
+			os.Stdout.Write(j.content)
+			os.Stdout.Write([]byte("\n"))
+			continue
+		}
+		if err := os.WriteFile(j.path, j.content, 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "promptdump: write %s: %v\n", j.path, err)
+			os.Exit(1)
+		}
+		wrote = append(wrote, j.path)
+	}
+	if len(wrote) > 0 {
+		fmt.Fprintf(os.Stderr, "promptdump: wrote %s\n", strings.Join(wrote, ", "))
+	}
 }

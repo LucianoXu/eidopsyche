@@ -157,6 +157,8 @@ The envelope and the embedded `request` object are both pretty-printed with 2-sp
 
 `claude_version` is captured by running `claude --version` once before the spawn; on failure it is the literal string `"unknown"`.
 
+**Markdown side-output.** Since 2026-05-11, `-o` is extension-driven and can also produce a human-readable Markdown rendering alongside the JSON. See `docs/superpowers/specs/2026-05-11-promptdump-markdown-output-design.md` for details. The JSON form is unchanged.
+
 ## Configuration knobs (no flags exposed yet — YAGNI)
 
 These are deliberately **not** exposed and would be added only on demand:
