@@ -104,20 +104,26 @@ func (f *forgectlWriter) ClearAuthRequired() error {
 // runRemove runs `rm -f /eidos/<relPath>` in a one-shot helper
 // container as uid 0 — the auth_required marker and the credentials
 // file may have been written by uid 1000 (supervisor) or uid 0
-// (init-time root), and only root can remove both. Rejects paths that
-// would escape /eidos so a malicious caller can't reach the host root
-// even though argv comes from validated internal inputs today.
+// (init-time root), and only root can remove both. relPath is
+// validated to live inside /eidos (filepath.Clean drops any "..",
+// rejecting attempts to escape) and the target is passed as a
+// separate argv to docker's --entrypoint rm so shell metacharacters
+// in relPath cannot alter command semantics.
 func (f *forgectlWriter) runRemove(relPath string) error {
-	if strings.HasPrefix(relPath, "/") || strings.Contains(relPath, "..") {
-		return fmt.Errorf("remove: relPath must be relative under /eidos: %q", relPath)
+	clean := filepath.ToSlash(filepath.Clean(relPath))
+	if clean == "." || strings.HasPrefix(clean, "/") || clean == ".." || strings.HasPrefix(clean, "../") {
+		return fmt.Errorf("remove: relPath must be a normalised path under /eidos: %q", relPath)
 	}
-	target := filepath.ToSlash(filepath.Join("/eidos", relPath))
+	target := filepath.ToSlash(filepath.Join("/eidos", clean))
+	// --entrypoint rm with the target as a separate argv element avoids
+	// the shell entirely — `-- <target>` neutralises any leading `-` in
+	// the path so rm cannot interpret it as a flag (option injection).
 	c := exec.CommandContext(f.ctx, "docker", "run", "--rm",
 		"--user", "0:0",
 		"--mount", "source="+forgectl.VolumeName(f.slug)+",target=/eidos",
-		"--entrypoint", "sh",
+		"--entrypoint", "rm",
 		f.image,
-		"-c", "rm -f "+target,
+		"-f", "--", target,
 	) //nolint:gosec // argv built from validated inputs
 	var stderr bytes.Buffer
 	c.Stderr = &stderr

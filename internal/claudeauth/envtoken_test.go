@@ -146,3 +146,38 @@ func TestInjectSetupTokenEnv(t *testing.T) {
 		t.Errorf("base env was mutated: %v", got)
 	}
 }
+
+// On Linux, libc getenv() returns the FIRST CLAUDE_CODE_OAUTH_TOKEN
+// occurrence. A stray operator-set entry in os.Environ() would silently
+// override our per-mindform token if we just appended. Verify the
+// pre-existing entry is stripped before the authoritative one is added.
+func TestInjectSetupTokenEnv_StripsPreexistingDuplicate(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "setup_token"),
+		[]byte("sk-ant-oat01-NEW"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	base := []string{
+		"PATH=/usr/bin",
+		EnvOAuthTokenVar + "=sk-ant-oat01-STALE",
+		"HOME=" + home,
+	}
+	got, err := InjectSetupTokenEnv(base, home)
+	if err != nil {
+		t.Fatalf("InjectSetupTokenEnv: %v", err)
+	}
+	prefix := EnvOAuthTokenVar + "="
+	occurrences := 0
+	for _, kv := range got {
+		if strings.HasPrefix(kv, prefix) {
+			occurrences++
+		}
+	}
+	if occurrences != 1 {
+		t.Errorf("want exactly one %s entry, got %d in %v", prefix, occurrences, got)
+	}
+	last := got[len(got)-1]
+	if last != prefix+"sk-ant-oat01-NEW" {
+		t.Errorf("authoritative entry should be last; tail = %q", last)
+	}
+}

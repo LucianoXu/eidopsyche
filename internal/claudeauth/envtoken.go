@@ -101,8 +101,12 @@ func ReadSetupTokenFromHome(home string) (string, error) {
 }
 
 // InjectSetupTokenEnv reads $home/setup_token; if non-empty, returns
-// base with CLAUDE_CODE_OAUTH_TOKEN=<token> appended. The supervisor
-// calls this just before c.Env = ... at each claude spawn so a
+// a copy of base with any pre-existing CLAUDE_CODE_OAUTH_TOKEN entries
+// stripped and a single authoritative one appended. The strip-then-
+// append is important: libc getenv() returns the FIRST occurrence on
+// Linux, so a stray operator-set entry earlier in os.Environ() would
+// silently override our per-mindform token. The supervisor calls
+// this just before c.Env = ... at each claude spawn so a
 // freshly-installed token takes effect on the next wake without a
 // container restart.
 //
@@ -118,5 +122,12 @@ func InjectSetupTokenEnv(base []string, home string) ([]string, error) {
 	if tok == "" {
 		return base, nil
 	}
-	return append(base, EnvOAuthTokenVar+"="+tok), nil
+	prefix := EnvOAuthTokenVar + "="
+	out := make([]string, 0, len(base)+1)
+	for _, kv := range base {
+		if !strings.HasPrefix(kv, prefix) {
+			out = append(out, kv)
+		}
+	}
+	return append(out, prefix+tok), nil
 }

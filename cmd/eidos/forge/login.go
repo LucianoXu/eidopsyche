@@ -202,9 +202,10 @@ func runInteractiveLogin(cmd *cobra.Command, name string) (loginInput, error) {
 			if err != nil {
 				return loginInput{}, err
 			}
-			blob, err := os.ReadFile(strings.TrimSpace(path))
+			trimmed := strings.TrimSpace(path)
+			blob, err := os.ReadFile(trimmed)
 			if err != nil {
-				return loginInput{}, err
+				return loginInput{}, fmt.Errorf("read %s: %w", trimmed, err)
 			}
 			return loginInput{blob: blob}, nil
 		case "2":
