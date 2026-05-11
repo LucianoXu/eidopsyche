@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/LucianoXu/eidopsyche/internal/fileops"
 )
 
 // Cache is the on-disk update-check state.
@@ -65,9 +67,5 @@ func saveCache(c *Cache) error {
 	if err != nil {
 		return err
 	}
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, p)
+	return fileops.AtomicWrite(p, data, 0o644)
 }

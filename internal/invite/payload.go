@@ -16,7 +16,8 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	gnostr "github.com/nbd-wtf/go-nostr"
-	"github.com/nbd-wtf/go-nostr/nip19"
+
+	"github.com/LucianoXu/eidopsyche/internal/identity"
 )
 
 // TokenScheme is the URI scheme prefix for invite tokens.
@@ -64,7 +65,7 @@ func (p *Payload) Sign(issuerSK string) error {
 	if err != nil {
 		return fmt.Errorf("derive public key: %w", err)
 	}
-	derivedNpub, err := encodeNpub(expectedPK)
+	derivedNpub, err := identity.EncodeNpub(expectedPK)
 	if err != nil {
 		return fmt.Errorf("encode npub: %w", err)
 	}
@@ -116,7 +117,7 @@ func (p Payload) Verify() error {
 		return fmt.Errorf("parse sig: %w", err)
 	}
 
-	pubHex, err := decodeNpub(p.IssuerNpub)
+	pubHex, err := identity.DecodeNpub(p.IssuerNpub)
 	if err != nil {
 		return fmt.Errorf("decode npub: %w", err)
 	}
@@ -134,27 +135,6 @@ func (p Payload) Verify() error {
 		return errors.New("signature verification failed")
 	}
 	return nil
-}
-
-// encodeNpub encodes a hex pubkey to bech32 npub.
-func encodeNpub(hexPub string) (string, error) {
-	return nip19.EncodePublicKey(hexPub)
-}
-
-// decodeNpub decodes a bech32 npub to hex pubkey.
-func decodeNpub(npub string) (string, error) {
-	prefix, data, err := nip19.Decode(npub)
-	if err != nil {
-		return "", err
-	}
-	if prefix != "npub" {
-		return "", fmt.Errorf("expected npub prefix, got %s", prefix)
-	}
-	pub, ok := data.(string)
-	if !ok {
-		return "", fmt.Errorf("unexpected nip19 payload type %T", data)
-	}
-	return pub, nil
 }
 
 // RandomID returns 32 random bytes hex-encoded (64 chars).

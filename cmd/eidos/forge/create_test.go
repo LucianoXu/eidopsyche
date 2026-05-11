@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -367,6 +368,94 @@ func envContains(env []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// Failure-mode rollback tests
+// ---------------------------------------------------------------------------
+
+// fakeClientRunInitErr makes RunInit fail; orchestrate must reverse-undo
+// the volume it created in the prior step.
+type fakeClientRunInitErr struct {
+	fakeClient
+	volumeRemoved bool
+}
+
+func (f *fakeClientRunInitErr) VolumeRemove(_ context.Context, _ string) error {
+	f.volumeRemoved = true
+	return nil
+}
+func (f *fakeClientRunInitErr) RunInit(_ context.Context, _ forgectl.RunInitOpts) (forgectl.RunInitResult, error) {
+	return forgectl.RunInitResult{Stderr: []byte("boom")}, fmt.Errorf("init failed")
+}
+
+func TestOrchestrate_RollsBackVolumeOnInitFailure(t *testing.T) {
+	f := &fakeClientRunInitErr{}
+	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
+		Label: "alice", Owner: "npub1ownertest", Relay: "wss://x", Image: "img:dev",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !f.volumeRemoved {
+		t.Fatal("expected volume to be rolled back after RunInit failure")
+	}
+}
+
+// fakeClientContainerCreateErr makes ContainerCreate fail after the volume
+// has been created and init-volume succeeded. Orchestrate must roll back
+// the volume so the operator can retry cleanly without manual cleanup.
+type fakeClientContainerCreateErr struct {
+	fakeClient
+	volumeRemoved    bool
+	containerRemoved bool
+}
+
+func (f *fakeClientContainerCreateErr) VolumeRemove(_ context.Context, _ string) error {
+	f.volumeRemoved = true
+	return nil
+}
+func (f *fakeClientContainerCreateErr) ContainerRemove(_ context.Context, _ string) error {
+	f.containerRemoved = true
+	return nil
+}
+func (f *fakeClientContainerCreateErr) ContainerCreate(_ context.Context, _ forgectl.CreateOpts) error {
+	return fmt.Errorf("create failed")
+}
+
+func TestOrchestrate_RollsBackVolumeOnContainerCreateFailure(t *testing.T) {
+	f := &fakeClientContainerCreateErr{}
+	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
+		Label: "alice", Owner: "npub1ownertest", Relay: "wss://x", Image: "img:dev",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !f.volumeRemoved {
+		t.Fatal("expected volume to be rolled back after ContainerCreate failure")
+	}
+}
+
+// TestOrchestrate_NoVolumeCreatedOnImagePullFailure pins the invariant
+// that an image-pull failure happens BEFORE any volume work, so there is
+// nothing to roll back. (Failing this would mean volume creation moved
+// ahead of image-existence-check, which a regression would otherwise
+// silently allow.)
+func TestOrchestrate_NoVolumeCreatedOnImagePullFailure(t *testing.T) {
+	f := &fakeClient{}
+	pullErrFn := func(_ context.Context, _ string, _ io.Writer) error {
+		return errors.New("net down")
+	}
+	wrapped := &fakeClientPullErr{fakeClient: *f, pullErr: pullErrFn}
+	err := Orchestrate(context.Background(), wrapped, "alice", CreateOpts{
+		Label: "alice", Owner: "npub1ownertest", Relay: "wss://x", Image: "img:dev",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if wrapped.volCreated {
+		t.Fatal("volume must not be created when image pull fails")
+	}
 }
 
 func tarEntryFromBytes(t *testing.T, body []byte, name string) string {

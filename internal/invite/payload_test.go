@@ -5,6 +5,8 @@ import (
 	"time"
 
 	gnostr "github.com/nbd-wtf/go-nostr"
+
+	"github.com/LucianoXu/eidopsyche/internal/identity"
 )
 
 func makePayload(t *testing.T, sk string) (*Payload, error) {
@@ -13,9 +15,9 @@ func makePayload(t *testing.T, sk string) (*Payload, error) {
 	if err != nil {
 		t.Fatalf("GetPublicKey: %v", err)
 	}
-	npub, err := encodeNpub(pk)
+	npub, err := identity.EncodeNpub(pk)
 	if err != nil {
-		t.Fatalf("encodeNpub: %v", err)
+		t.Fatalf("EncodeNpub: %v", err)
 	}
 	id, err := RandomID()
 	if err != nil {
@@ -56,7 +58,7 @@ func TestVerifyRejectsWrongKey(t *testing.T) {
 	p, _ := makePayload(t, sk)
 	// sign with sk but use sk2's npub — Sign should reject this
 	pk2, _ := gnostr.GetPublicKey(sk2)
-	npub2, _ := encodeNpub(pk2)
+	npub2, _ := identity.EncodeNpub(pk2)
 	p.IssuerNpub = npub2
 	if err := p.Sign(sk); err == nil {
 		t.Fatal("Sign with mismatched key should return error")

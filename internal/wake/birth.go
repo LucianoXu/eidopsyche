@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/LucianoXu/eidopsyche/internal/fileops"
 )
 
 // BirthSchemaVersion is bumped when the BirthSignal on-disk format changes.
@@ -39,11 +41,7 @@ func WriteBirth(dir string, sig BirthSignal) error {
 	if err != nil {
 		return fmt.Errorf("marshal birth signal: %w", err)
 	}
-	tmp := filepath.Join(dir, BirthFileName+".tmp")
-	if err := os.WriteFile(tmp, body, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, filepath.Join(dir, BirthFileName))
+	return fileops.AtomicWrite(filepath.Join(dir, BirthFileName), body, 0o600)
 }
 
 // ReadBirth returns the parsed birth.json, or (nil, nil) if absent.
