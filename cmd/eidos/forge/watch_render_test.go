@@ -240,6 +240,21 @@ func TestRenderSessionBoundary(t *testing.T) {
 	}
 }
 
+func TestRenderListTableForWatch_FailKind(t *testing.T) {
+	idx := transcript.Index{V: 1, Wakes: []transcript.Entry{
+		{ID: "abc12345", Reason: "heartbeat", StartedAt: 1, EndedAt: 2, OK: false, ExitCode: 1, FailKind: "auth"},
+		{ID: "def67890", Reason: "heartbeat", StartedAt: 3, EndedAt: 4, OK: false, ExitCode: 1}, // no FailKind → fallback
+	}}
+	out := renderListTableForWatch(idx, 0)
+	joined := strings.Join(out, "\n")
+	if !strings.Contains(joined, "failed(auth)") {
+		t.Errorf("expected failed(auth), got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "failed(1)") {
+		t.Errorf("expected failed(1) fallback for entry without FailKind, got:\n%s", joined)
+	}
+}
+
 func TestComputeOrdinal(t *testing.T) {
 	idx := transcript.Index{V: 1, Wakes: []transcript.Entry{
 		{ID: "w-1", SessionID: "s-1", StartedAt: 100},

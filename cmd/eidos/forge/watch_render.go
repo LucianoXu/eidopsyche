@@ -328,9 +328,12 @@ func renderListTableForWatch(idx transcript.Index, limit int) []string {
 		}
 		status := "ok"
 		if !w.OK {
-			if w.ExitCode > 0 {
+			switch {
+			case w.FailKind != "":
+				status = "failed(" + w.FailKind + ")"
+			case w.ExitCode > 0:
 				status = fmt.Sprintf("failed(%d)", w.ExitCode)
-			} else {
+			default:
 				status = "crashed"
 			}
 		}

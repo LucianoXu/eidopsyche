@@ -138,9 +138,14 @@ $ eidos forge create alice \
 
 Run `eidos forge login alice` now to log Claude Code into this mind-form.
 
-# 2. 给心智体登录 Claude Code（交互式 OAuth 流程）。
+# 2. 给心智体登录 Claude Code。
+#    把从 claude.ai/setup 拿到的 setup-token 字符串通过 stdin 喂进来
+#    （stdin-only：避免泄漏到 shell history / ps / CI 日志）。
+#    用 `printf %s` 而不是 `printf '<token>'` —— 否则 token 里万一有 `%` 会被吃掉。
+$ printf %s "$SETUP_TOKEN" | eidos forge login alice --setup-token-stdin
+✓ credentials installed into eidos-mindform-alice
+#    或者交互式：选 [1] 粘贴 setup-token / [2] 已有 credentials.json / [3] 现场生成。
 $ eidos forge login alice
-... interactive /login flow ...
 
 # 3. 启动心智体（容器启动 = 心智体醒来）。
 $ eidos forge start alice

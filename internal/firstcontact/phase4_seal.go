@@ -179,7 +179,7 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	// `eidos forge login <slug> --from-host` running between create and
 	// start. Failure is fatal — we tear down the volume so the next
 	// summon starts cleanly.
-	if err := forge.InstallLoginFromHost(s.Slug, d.Image); err != nil {
+	if err := forge.InstallLoginInteractive(s.Slug, d.Image, os.Stdin, os.Stdout, os.Stderr); err != nil {
 		purge()
 		return nil, fmt.Errorf("install claude credentials: %w", err)
 	}

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/authstate"
+	"github.com/LucianoXu/eidopsyche/internal/claudeexec"
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
 	"github.com/LucianoXu/eidopsyche/internal/prompts"
@@ -267,11 +268,15 @@ func runWithoutTranscript(ontologyDir string, args []string) error {
 	stderrBuf := &strings.Builder{}
 	c.Stderr = io.MultiWriter(os.Stderr, stderrBuf)
 	c.Env = append(os.Environ(), "CLAUDE_DIR="+filepath.Join(ontologyDir, ".claude"))
-	if err := c.Run(); err != nil {
-		if matchSessionNotFound(stderrBuf.String()) {
-			return errors.Join(errSessionNotFound, err)
-		}
-		return handleClaudeExit(err, c.ProcessState)
+	runErr := c.Run()
+	if runErr != nil && matchSessionNotFound(stderrBuf.String()) {
+		return errors.Join(errSessionNotFound, runErr)
+	}
+	// Side-effects: write marker + maybe exit on ClaudeAuthRequired.
+	v := handleClaudeExit(runErr, c.ProcessState, []byte(stderrBuf.String()))
+	_ = v // no transcript entry to stamp here (legacy path)
+	if runErr != nil {
+		return fmt.Errorf("claude exited: %w", runErr)
 	}
 	return nil
 }
@@ -352,6 +357,8 @@ func runWithTranscript(sig wake.Signal, ontologyDir string, args []string, sessi
 		}
 	}
 
+	verdict := claudeexec.ClassifyClaudeExit(runErr, c.ProcessState, []byte(stderrBuf.String()))
+
 	endedAt := time.Now().Unix()
 	cfg, _ := config.Load(gateConfigPath)
 	maxCount, maxBytes := transcriptLimits(cfg)
@@ -366,6 +373,9 @@ func runWithTranscript(sig wake.Signal, ontologyDir string, args []string, sessi
 		ToolUseCount:   counter.ToolUseCount,
 		ThinkingBlocks: counter.ThinkingBlocks,
 	}
+	if runErr != nil && verdict.Kind != claudeexec.ClaudeOK {
+		finalEntry.FailKind = verdict.Kind.String()
+	}
 	if counter.Result != nil {
 		finalEntry.OK = runErr == nil && counter.Result.OK
 		finalEntry.CostUSD = counter.Result.TotalCostUSD
@@ -376,7 +386,11 @@ func runWithTranscript(sig wake.Signal, ontologyDir string, args []string, sessi
 
 	statusStr := "ok"
 	if !finalEntry.OK {
-		statusStr = fmt.Sprintf("failed(%d)", exitCode)
+		if finalEntry.FailKind != "" {
+			statusStr = "failed(" + finalEntry.FailKind + ")"
+		} else {
+			statusStr = fmt.Sprintf("failed(%d)", exitCode)
+		}
 	}
 	costStr := "-"
 	if finalEntry.CostUSD != nil && *finalEntry.CostUSD > 0 {
@@ -388,7 +402,15 @@ func runWithTranscript(sig wake.Signal, ontologyDir string, args []string, sessi
 	if runErr != nil && matchSessionNotFound(stderrBuf.String()) {
 		return errors.Join(errSessionNotFound, runErr)
 	}
-	return handleClaudeExit(runErr, c.ProcessState)
+
+	// Side-effects: write marker + maybe exit on ClaudeAuthRequired.
+	if verdict.Kind == claudeexec.ClaudeAuthRequired {
+		handleClaudeExit(runErr, c.ProcessState, []byte(stderrBuf.String()))
+	}
+	if runErr != nil {
+		return fmt.Errorf("claude exited: %w", runErr)
+	}
+	return nil
 }
 
 // transcriptLimits resolves the per-mindform transcripts caps from
@@ -535,19 +557,25 @@ func plainClaudeArgs(args []string) []string {
 	return out
 }
 
-// handleClaudeExit converts claude's exit error into the supervisor's
-// auth-required exit-code path or a generic wrapped error.
-func handleClaudeExit(err error, st *os.ProcessState) error {
-	if err == nil {
-		return nil
-	}
-	if isAuthError(err, st) {
+// handleClaudeExit runs the classifier on (err, processstate, stderr).
+// Returns the verdict so the caller can persist Kind.String() into the
+// transcript entry's FailKind. When Kind == ClaudeAuthRequired, writes
+// the auth_required marker and exits with EXIT_AUTH_REQUIRED so the
+// supervisor's self-gate stops billing the operator for failed wakes.
+func handleClaudeExit(err error, st *os.ProcessState, stderr []byte) claudeexec.ClaudeVerdict {
+	return handleClaudeExitTesting(err, st, stderr, os.Exit)
+}
+
+// handleClaudeExitTesting is the test seam — exitFn is os.Exit in production.
+func handleClaudeExitTesting(err error, st *os.ProcessState, stderr []byte, exitFn func(int)) claudeexec.ClaudeVerdict {
+	v := claudeexec.ClassifyClaudeExit(err, st, stderr)
+	if v.Kind == claudeexec.ClaudeAuthRequired {
 		if werr := authstate.Write(time.Now()); werr != nil {
 			fmt.Fprintf(os.Stderr, "agent-runner: write %s: %v\n", authstate.Path, werr)
 		}
-		os.Exit(EXIT_AUTH_REQUIRED)
+		exitFn(EXIT_AUTH_REQUIRED)
 	}
-	return fmt.Errorf("claude exited: %w", err)
+	return v
 }
 
 // computeContext folds quiet-hours, dream-state, and plan-id into the
@@ -689,19 +717,4 @@ func buildClaudeArgs(identity, msg, configPath string, streamJSON bool, sess Ses
 	}
 	args = append(args, "-p", msg)
 	return args
-}
-
-// isAuthError detects Claude's auth-required exit conditions. Heuristic:
-// match exit codes commonly associated with credential failures. This will
-// evolve as we learn Claude Code's exact exit-code convention.
-func isAuthError(err error, st *os.ProcessState) bool {
-	if st == nil {
-		_ = err
-		return false
-	}
-	if status, ok := st.Sys().(syscall.WaitStatus); ok {
-		code := status.ExitStatus()
-		return code == EXIT_AUTH_REQUIRED || code == 41
-	}
-	return false
 }

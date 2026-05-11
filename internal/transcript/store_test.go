@@ -271,6 +271,35 @@ func intID(i int) string {
 	return string(rune('a' + i))
 }
 
+func TestEntry_FailKind_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	st, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	f, err := st.Open("abc")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	f.Close()
+	in := Entry{
+		ID:        "abc",
+		Reason:    "heartbeat",
+		StartedAt: 1, EndedAt: 2,
+		OK: false, ExitCode: 1, FailKind: "auth",
+	}
+	if err := st.Finalize(in, 10, 1<<20); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	idx, err := st.ReadIndex()
+	if err != nil {
+		t.Fatalf("ReadIndex: %v", err)
+	}
+	if len(idx.Wakes) != 1 || idx.Wakes[0].FailKind != "auth" {
+		t.Fatalf("FailKind not persisted: %+v", idx.Wakes)
+	}
+}
+
 func TestEntry_SessionIDRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	s, err := NewStore(dir)
