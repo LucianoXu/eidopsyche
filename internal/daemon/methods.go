@@ -141,12 +141,15 @@ func contactAddFromCard(ctx context.Context, d *Daemon, _ *ipc.Conn, params json
 }
 
 // relayListContains is a local set-membership helper used by
-// contact.add-from-card's relay-hint dedup. Kept here rather than
-// imported because the dashboard-adapter copy of this helper is being
-// removed in Phase 5.
+// contact.add-from-card's relay-hint dedup. Compares after normRelayURL
+// so a pre-normalization legacy hint like `wss://x/` is recognized as
+// the same endpoint as a freshly-canonicalized `wss://x`; without this,
+// re-scanning the same card would append a duplicate relay row to a
+// contact whose existing relay was written before normalization landed.
 func relayListContains(s []string, x string) bool {
+	want := normRelayURL(x)
 	for _, v := range s {
-		if v == x {
+		if normRelayURL(v) == want {
 			return true
 		}
 	}
