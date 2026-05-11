@@ -2,11 +2,11 @@ package gate
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
 )
 
@@ -73,13 +73,24 @@ var contactsCmd = &cobra.Command{
 			return err
 		}
 		defer c.Close()
-		var resp []*contacts.Contact
-		if err := mustOK(c.Call("contact.list", nil, &resp)); err != nil {
+		// state.get contacts returns map[pubkey -> {label, tier, ...}].
+		// Sort by pubkey for stable CLI output (map iteration order is
+		// unspecified).
+		resp := map[string]map[string]any{}
+		if err := mustOK(c.Call("state.get", map[string]string{"path": "contacts"}, &resp)); err != nil {
 			return err
 		}
-		for _, ct := range resp {
-			npub, _ := identity.EncodeNpub(ct.Pubkey)
-			fmt.Printf("%s  %-20s  %s\n", npub, ct.Label, ct.Tier)
+		pks := make([]string, 0, len(resp))
+		for pk := range resp {
+			pks = append(pks, pk)
+		}
+		sort.Strings(pks)
+		for _, pk := range pks {
+			ct := resp[pk]
+			label, _ := ct["label"].(string)
+			tier, _ := ct["tier"].(string)
+			npub, _ := identity.EncodeNpub(pk)
+			fmt.Printf("%s  %-20s  %s\n", npub, label, tier)
 		}
 		return nil
 	},

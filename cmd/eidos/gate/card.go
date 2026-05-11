@@ -35,10 +35,12 @@ to others — bundles label, public-key hex, npub, and home relay.
 			return err
 		}
 		defer c.Close()
+		// state.get identity.card returns {uri} — same shape the
+		// legacy card.export method exposed.
 		var resp struct {
 			URI string `json:"uri"`
 		}
-		if err := mustOK(c.Call("card.export", nil, &resp)); err != nil {
+		if err := mustOK(c.Call("state.get", map[string]string{"path": "identity.card"}, &resp)); err != nil {
 			return err
 		}
 		fmt.Println(resp.URI)

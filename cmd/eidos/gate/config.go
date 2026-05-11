@@ -41,7 +41,7 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 	defer c.Close()
 
 	var cfg config.Config
-	if err := mustOK(c.Call("config.get", nil, &cfg)); err != nil {
+	if err := mustOK(c.Call("state.get", map[string]string{"path": "config"}, &cfg)); err != nil {
 		return err
 	}
 
