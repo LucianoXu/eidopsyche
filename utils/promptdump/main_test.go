@@ -507,3 +507,33 @@ func TestRenderMarkdown_RawBodyFallback(t *testing.T) {
 		t.Error("structured request section rendered despite parse failure")
 	}
 }
+
+// TestRenderMarkdown_MarkdownInDescription: a tool description
+// containing Markdown-special characters must not break the
+// document structure. Real Claude Code tools have ** and ` in their
+// docs.
+func TestRenderMarkdown_MarkdownInDescription(t *testing.T) {
+	env := map[string]any{
+		"request": map[string]any{
+			"tools": []any{
+				map[string]any{
+					"name":        "Edit",
+					"description": "Performs **exact** string replacements in `files`.\n\nUsage: ...",
+				},
+			},
+		},
+	}
+	out, err := renderMarkdown(env)
+	if err != nil {
+		t.Fatalf("renderMarkdown: %v", err)
+	}
+	if !strings.Contains(out, "**`Edit`**") {
+		t.Error("tool name bullet missing")
+	}
+	if !strings.Contains(out, "Performs **exact** string replacements in `files`.") {
+		t.Error("tool description content missing")
+	}
+	if strings.Count(out, "```")%2 != 0 {
+		t.Errorf("unbalanced fenced blocks: description's backticks broke structure")
+	}
+}
