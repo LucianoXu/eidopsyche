@@ -63,6 +63,32 @@ func TestDefaultHeartbeatIntervalIs2h(t *testing.T) {
 	}
 }
 
+func TestHeartbeatIntervalKeyRegistered(t *testing.T) {
+	k, ok := KeyByPath("heartbeat.interval")
+	if !ok {
+		t.Fatal("KeyByPath(heartbeat.interval) not registered")
+	}
+	var cfg Config
+	if got := k.Get(&cfg); got != "" {
+		t.Errorf("zero-value Get = %q, want \"\"", got)
+	}
+	if err := k.Set(&cfg, "30m"); err != nil {
+		t.Fatalf("Set(30m): %v", err)
+	}
+	if cfg.Heartbeat.Interval != "30m" {
+		t.Errorf("cfg.Heartbeat.Interval = %q, want 30m", cfg.Heartbeat.Interval)
+	}
+	if err := k.Set(&cfg, "90m"); err == nil {
+		t.Error("Set(90m) should reject — not in supported set")
+	}
+	if err := k.Set(&cfg, ""); err != nil {
+		t.Errorf(`Set("") should be allowed (use default), got %v`, err)
+	}
+	if cfg.Heartbeat.Interval != "" {
+		t.Errorf("after Set(\"\"), cfg.Heartbeat.Interval = %q, want \"\"", cfg.Heartbeat.Interval)
+	}
+}
+
 func TestValidateHeartbeatInterval(t *testing.T) {
 	if err := ValidateHeartbeatInterval("4h"); err != nil {
 		t.Errorf("ValidateHeartbeatInterval(4h): %v", err)
