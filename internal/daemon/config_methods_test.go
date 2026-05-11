@@ -9,6 +9,7 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
+	"github.com/LucianoXu/eidopsyche/internal/state"
 )
 
 // newConfigOnlyDaemon returns a *Daemon with only the fields config.get
@@ -21,7 +22,12 @@ func newConfigOnlyDaemon(t *testing.T) *Daemon {
 	if err := config.Save(filepath.Join(dir, "config.toml"), config.Defaults()); err != nil {
 		t.Fatal(err)
 	}
-	return &Daemon{StateDir: dir}
+	return &Daemon{
+		StateDir:      dir,
+		Context:       config.HostCtx, // host-side keys (log_level, daemon.socket) only
+		applyRegistry: state.NewApplyRegistry(),
+		stateTree:     state.NewTree(),
+	}
 }
 
 func TestConfigGet_ReturnsDefaultsSnapshot(t *testing.T) {

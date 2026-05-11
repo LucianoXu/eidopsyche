@@ -22,6 +22,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/invitedb"
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
 	"github.com/LucianoXu/eidopsyche/internal/nostr"
+	"github.com/LucianoXu/eidopsyche/internal/state"
 	"github.com/LucianoXu/eidopsyche/internal/store"
 	"github.com/LucianoXu/eidopsyche/internal/version"
 )
@@ -63,6 +64,31 @@ type Daemon struct {
 	// file (changes take effect on restart) so other paths don't
 	// need to take it.
 	configMu sync.Mutex
+
+	// Context identifies which daemon role this is (HostCtx or
+	// ContainerCtx). Mutate consults it against Key.Contexts to reject
+	// container-only writes from the host (and vice-versa) with a
+	// helpful CONTEXT_MISMATCH error pointing to the correct verb.
+	// Default-zero behaves as "neither" so unset daemons reject every
+	// context-bound mutation; production callers (gate daemon command,
+	// supervisor) must set it explicitly.
+	Context config.Context
+
+	// applyRegistry holds per-state-path apply hooks. Container-side
+	// lifecycle.Attach registers hooks for paths it knows how to
+	// reconcile (e.g. config.heartbeat.interval → cron.Install). Host
+	// daemon leaves this empty.
+	applyRegistry *state.ApplyRegistry
+
+	// stateTree assembles state.get [path] responses from registered
+	// contributors. Each domain (config / contacts / inbox / lifecycle
+	// subtrees / ...) registers exactly one contributor.
+	stateTree *state.Tree
+
+	// applyDepsValue is the opaque deps value passed to apply hooks. On
+	// host this is nil; in-container PID-1 sets it to *lifecycle.ApplyDeps
+	// so hooks can reach cron / wake submitter / etc.
+	applyDepsValue any
 
 	// lifecycle: at most one subprocess (eidos gate <subcmd> /
 	// eidos self-update) in flight at a time. lifeCtx is daemon-owned
@@ -122,6 +148,8 @@ func Start(stateDir string) (*Daemon, error) {
 		Cfg:           cfg,
 		Key:           k,
 		DB:            db,
+		applyRegistry: state.NewApplyRegistry(),
+		stateTree:     state.NewTree(),
 		Repo:          contacts.New(db),
 		Invites:       invitedb.New(db),
 		Box:           inbox.New(stateDir),
@@ -187,6 +215,29 @@ func (d *Daemon) emitRelayState(h RelayHealth) {
 func (d *Daemon) Stop(ctx context.Context) {
 	d.Pool.Close()
 	d.DB.Close()
+}
+
+// SetContext records which context (host vs container) this daemon is
+// running in. Must be set before serving IPC — Mutate uses it to gate
+// context-bound mutations.
+func (d *Daemon) SetContext(c config.Context) { d.Context = c }
+
+// SetApplyDeps records the opaque deps value handed to every apply
+// hook. The host gate daemon leaves it nil; the container PID-1 sets
+// it to *lifecycle.ApplyDeps so hooks can reach cron/wake/etc.
+func (d *Daemon) SetApplyDeps(deps any) { d.applyDepsValue = deps }
+
+// RegisterStateContributor mounts c under its Path() in the state tree.
+// Called by lifecycle.Attach (container) and by Daemon.Start (for
+// always-on contributors like config / contacts / identity).
+func (d *Daemon) RegisterStateContributor(c state.StateContributor) {
+	d.stateTree.Register(c)
+}
+
+// RegisterApply installs fn as the apply hook for the given state path.
+// Typically called by lifecycle.Attach during container PID-1 startup.
+func (d *Daemon) RegisterApply(path string, fn state.ApplyFunc) {
+	d.applyRegistry.Register(path, fn)
 }
 
 // Run acquires a state-dir lock, starts the IPC server, launches the Nostr
