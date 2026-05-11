@@ -2,8 +2,6 @@
 package claudeauth
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -35,16 +33,14 @@ func Generate(stdin io.Reader, stdout, stderr io.Writer, claudeBin string) ([]by
 		}
 	}
 
-	var idBytes [8]byte
-	if _, err := rand.Read(idBytes[:]); err != nil {
-		return nil, fmt.Errorf("random suffix: %w", err)
-	}
-	suffix := hex.EncodeToString(idBytes[:])
-	home := filepath.Join("/tmp", "eidos-setup-"+suffix)
-	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o700); err != nil {
+	home, err := os.MkdirTemp("", "eidos-setup-")
+	if err != nil {
 		return nil, fmt.Errorf("temp HOME: %w", err)
 	}
 	defer os.RemoveAll(home)
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o700); err != nil {
+		return nil, fmt.Errorf("temp HOME .claude: %w", err)
+	}
 
 	cmd := exec.Command(claudeBin, "setup-token")
 	cmd.Stdin = stdin

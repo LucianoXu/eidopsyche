@@ -11,7 +11,8 @@ import (
 )
 
 // stubScript writes a shell script at path that:
-//   - asserts $HOME points at a temp directory (not the operator's real $HOME)
+//   - asserts $HOME points at a temp directory with the eidos-setup- prefix
+//     (not the operator's real $HOME)
 //   - writes fixture as $HOME/.claude/.credentials.json
 //   - exits with exitCode
 func stubScript(t *testing.T, path, fixture string, exitCode int) {
@@ -19,7 +20,7 @@ func stubScript(t *testing.T, path, fixture string, exitCode int) {
 	body := fmt.Sprintf(`#!/bin/sh
 set -eu
 if [ -z "${HOME:-}" ]; then echo "stub: HOME unset" >&2; exit 99; fi
-case "$HOME" in /tmp/eidos-setup-*) : ;; *) echo "stub: bad HOME=$HOME" >&2; exit 98 ;; esac
+case "$(basename "$HOME")" in eidos-setup-*) : ;; *) echo "stub: bad HOME=$HOME" >&2; exit 98 ;; esac
 mkdir -p "$HOME/.claude"
 cat > "$HOME/.claude/.credentials.json" <<EOF
 %s
@@ -32,6 +33,9 @@ exit %d
 }
 
 func TestGenerate_HappyPath(t *testing.T) {
+	isolated := t.TempDir()
+	t.Setenv("TMPDIR", isolated)
+
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "claude")
 	fixture := `{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":1}}`
@@ -48,6 +52,9 @@ func TestGenerate_HappyPath(t *testing.T) {
 }
 
 func TestGenerate_NonZeroExit_ReturnsError(t *testing.T) {
+	isolated := t.TempDir()
+	t.Setenv("TMPDIR", isolated)
+
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "claude")
 	stubScript(t, stub, `bogus`, 5)
@@ -59,21 +66,29 @@ func TestGenerate_NonZeroExit_ReturnsError(t *testing.T) {
 }
 
 func TestGenerate_TempDirCleaned(t *testing.T) {
+	isolated := t.TempDir()
+	t.Setenv("TMPDIR", isolated)
+
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "claude")
 	fixture := `{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":1}}`
 	stubScript(t, stub, fixture, 0)
 
-	before, _ := filepath.Glob("/tmp/eidos-setup-*")
 	var out, errb bytes.Buffer
-	_, _ = Generate(nil, &out, &errb, stub)
-	after, _ := filepath.Glob("/tmp/eidos-setup-*")
-	if len(after) > len(before) {
-		t.Errorf("temp dir not cleaned: before=%v after=%v", before, after)
+	_, err := Generate(nil, &out, &errb, stub)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(isolated, "eidos-setup-*"))
+	if len(matches) > 0 {
+		t.Errorf("temp dir not cleaned: %v", matches)
 	}
 }
 
 func TestGenerate_MissingCredsAfterRun_ReturnsError(t *testing.T) {
+	isolated := t.TempDir()
+	t.Setenv("TMPDIR", isolated)
+
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "claude")
 	// exit 0 but DON'T write the file.

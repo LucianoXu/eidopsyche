@@ -105,8 +105,12 @@ func ClassifyClaudeExit(err error, st *os.ProcessState, stderr []byte) ClaudeVer
 	s := string(stderr)
 	switch {
 	case containsAny(s, "401", "Please run /login", "OAuth token is invalid"):
-		return ClaudeVerdict{Kind: ClaudeAuthRequired, HTTPStatus: 401,
+		v := ClaudeVerdict{Kind: ClaudeAuthRequired,
 			Snippet: firstMatchingLine(s, "401", "Please run /login", "OAuth")}
+		if strings.Contains(s, "401") {
+			v.HTTPStatus = 401
+		}
+		return v
 	case containsAny(s, "429", "rate limit"):
 		return ClaudeVerdict{Kind: ClaudeRateLimit, HTTPStatus: 429, Retryable: true,
 			Snippet: firstMatchingLine(s, "429", "rate limit")}

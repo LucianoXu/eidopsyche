@@ -4,7 +4,9 @@ package integration
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,8 +58,9 @@ exit 0
 		t.Fatalf("build eidos: %v\n%s", err, out)
 	}
 
-	// Slug: lower-case, docker-volume-safe name.
-	slug := "auth-test-isolated"
+	// Slug: lower-case, docker-volume-safe name. Randomised per run to avoid
+	// cross-run collisions when a prior run left state behind.
+	slug := "auth-test-" + randomSuffix(t)
 	must := func(args ...string) {
 		cmd := exec.Command(eidos, args...)
 		out, err := cmd.CombinedOutput()
@@ -105,4 +108,13 @@ exit 0
 		t.Errorf("volume creds identical to host creds (regression: host-copy path re-introduced)")
 		t.Logf("hash(volume)=%x hash(host)=%x", sha256.Sum256(out), sha256.Sum256(hostCreds))
 	}
+}
+
+func randomSuffix(t *testing.T) string {
+	t.Helper()
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	return hex.EncodeToString(b[:])
 }

@@ -82,7 +82,7 @@ func (f *forgectlWriter) ClearAuthRequired() error {
 	// have been written by either the in-container uid 1000 supervisor
 	// or an init-time root process — only root can remove both. Tolerates
 	// absence via rm -f.
-	c := exec.Command("docker", "run", "--rm",
+	c := exec.CommandContext(f.ctx, "docker", "run", "--rm",
 		"--user", "0:0",
 		"--mount", "source="+forgectl.VolumeName(f.slug)+",target=/eidos",
 		"--entrypoint", "sh",

@@ -29,8 +29,9 @@ func TestLogin_TokenFileFlag(t *testing.T) {
 	}
 
 	w := &fakeForgeVolumeWriter{}
+	prev := installVolume
 	installVolume = func(name, image string) (claudeauth.VolumeWriter, error) { return w, nil }
-	defer func() { installVolume = nil }()
+	defer func() { installVolume = prev }()
 
 	cmd := newLoginCmd()
 	cmd.SetArgs([]string{"alice", "--token-file", path, "--image", "img"})
@@ -47,8 +48,9 @@ func TestLogin_TokenFileFlag(t *testing.T) {
 
 func TestLogin_PasteFlag(t *testing.T) {
 	w := &fakeForgeVolumeWriter{}
+	prev := installVolume
 	installVolume = func(name, image string) (claudeauth.VolumeWriter, error) { return w, nil }
-	defer func() { installVolume = nil }()
+	defer func() { installVolume = prev }()
 
 	cmd := newLoginCmd()
 	cmd.SetArgs([]string{"alice", "--paste", "--image", "img"})
