@@ -95,6 +95,13 @@ func Parse(s string) (Card, error) {
 	} else {
 		relayPart = tail
 	}
+	// URI() appends a literal `/` separator after the encoded relay
+	// (see `out := … + encodedRelay + "/"`). Strip it BEFORE unescape so
+	// we only remove the separator URI() added, never an encoded `%2F`
+	// path-tail slash. Hand-written URIs without the separator pass
+	// through with no trim. `wss://host/nostr/` therefore survives as
+	// itself; root-trailing-slash dedup is the daemon's responsibility
+	// via normRelayURL.
 	relayPart = strings.TrimSuffix(relayPart, "/")
 	relay, err := url.PathUnescape(relayPart)
 	if err != nil {

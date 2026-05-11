@@ -11,7 +11,7 @@ import (
 
 func TestContactAddFromCard_FreshContact(t *testing.T) {
 	d := newTestDaemon(t)
-	uri, pk := makeTestCard(t, "alice", "wss://relay.example/")
+	uri, pk := makeTestCard(t, "alice", "wss://relay.example")
 
 	var c contacts.Contact
 	if err := d.Call(context.Background(), "contact.add-from-card",
@@ -27,14 +27,14 @@ func TestContactAddFromCard_FreshContact(t *testing.T) {
 	if c.Tier != contacts.TierFriend {
 		t.Errorf("Tier=%q, want friend", c.Tier)
 	}
-	if len(c.Relays) != 1 || c.Relays[0] != "wss://relay.example/" {
-		t.Errorf("Relays=%v, want [wss://relay.example/]", c.Relays)
+	if len(c.Relays) != 1 || c.Relays[0] != "wss://relay.example" {
+		t.Errorf("Relays=%v, want [wss://relay.example]", c.Relays)
 	}
 }
 
 func TestContactAddFromCard_LabelOverride(t *testing.T) {
 	d := newTestDaemon(t)
-	uri, _ := makeTestCard(t, "alice", "wss://relay.example/")
+	uri, _ := makeTestCard(t, "alice", "wss://relay.example")
 
 	var c contacts.Contact
 	if err := d.Call(context.Background(), "contact.add-from-card",
@@ -48,7 +48,7 @@ func TestContactAddFromCard_LabelOverride(t *testing.T) {
 
 func TestContactAddFromCard_UpsertPreservesTierAddsRelay(t *testing.T) {
 	d := newTestDaemon(t)
-	uri, pk := makeTestCard(t, "alice", "wss://relay.example/")
+	uri, pk := makeTestCard(t, "alice", "wss://relay.example")
 
 	// First insert directly at a non-default tier so we can verify
 	// upsert leaves the tier alone.
@@ -74,7 +74,7 @@ func TestContactAddFromCard_UpsertPreservesTierAddsRelay(t *testing.T) {
 	}
 	hasNew, hasOld := false, false
 	for _, r := range refreshed.Relays {
-		if r == "wss://relay.example/" {
+		if r == "wss://relay.example" {
 			hasNew = true
 		}
 		if r == "wss://other.example/" {
@@ -83,6 +83,36 @@ func TestContactAddFromCard_UpsertPreservesTierAddsRelay(t *testing.T) {
 	}
 	if !hasNew || !hasOld {
 		t.Errorf("Relays=%v, want both old and new", refreshed.Relays)
+	}
+}
+
+// TestContactAddFromCard_UpsertDedupesAgainstLegacyRelay: if the
+// contact's existing relay was written before normRelayURL landed
+// (e.g. `wss://relay.example/`), re-scanning the canonical-relay card
+// must NOT append a duplicate row. relayListContains compares after
+// normalization, so the legacy hint is recognized as the same endpoint
+// and the relay list stays at length 1.
+func TestContactAddFromCard_UpsertDedupesAgainstLegacyRelay(t *testing.T) {
+	d := newTestDaemon(t)
+	uri, pk := makeTestCard(t, "alice", "wss://relay.example")
+
+	// Seed with the legacy trailing-slash form.
+	if err := d.Repo.Add(context.Background(), contacts.Contact{
+		Pubkey: pk,
+		Label:  "alice-original",
+		Tier:   contacts.TierFriend,
+		Relays: []string{"wss://relay.example/"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var refreshed contacts.Contact
+	if err := d.Call(context.Background(), "contact.add-from-card",
+		ContactAddFromCardParams{URI: uri}, &refreshed); err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if len(refreshed.Relays) != 1 {
+		t.Errorf("Relays=%v, want length 1 (legacy and canonical should dedupe)", refreshed.Relays)
 	}
 }
 
@@ -98,7 +128,7 @@ func TestContactAddFromCard_GarbageURI_RejectedAsCardInvalid(t *testing.T) {
 
 func TestContactAddFromCard_NoLabelAnywhereRejected(t *testing.T) {
 	d := newTestDaemon(t)
-	uri, _ := makeTestCard(t, "", "wss://relay.example/")
+	uri, _ := makeTestCard(t, "", "wss://relay.example")
 	err := d.Call(context.Background(), "contact.add-from-card",
 		ContactAddFromCardParams{URI: uri}, nil)
 	var ipcErr *ipc.Error

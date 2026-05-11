@@ -48,6 +48,94 @@ func TestParseRejectsMissingNpub(t *testing.T) {
 	}
 }
 
+// TestParseDecodesRelay locks the card-layer contract: Parse undoes the
+// literal `/` separator URI() appends but otherwise preserves the relay
+// URL exactly. Cross-form dedup (`wss://x` vs `wss://x/`) is the
+// daemon's job via normRelayURL; the card layer must round-trip URI()
+// output faithfully so that path-sensitive routes like
+// `wss://host/nostr/` survive unchanged.
+func TestParseDecodesRelay(t *testing.T) {
+	cases := []struct {
+		name string
+		uri  string
+		want string
+	}{
+		// URI() output: encoded relay + literal "/" separator. Parse
+		// strips exactly the separator.
+		{
+			"URI() output for slash-less relay",
+			"mindgate://npub1abc@wss%3A%2F%2Frelay.example/?label=A",
+			"wss://relay.example",
+		},
+		{
+			"URI() output for root-slash relay",
+			"mindgate://npub1abc@wss%3A%2F%2Frelay.example%2F/?label=A",
+			"wss://relay.example/",
+		},
+		{
+			"URI() output for path-tail-slash relay",
+			"mindgate://npub1abc@wss%3A%2F%2Fhost%2Fnostr%2F/?label=A",
+			"wss://host/nostr/",
+		},
+		// Hand-written URIs that skip URI()'s separator must round-trip
+		// the encoded relay verbatim — no separator means nothing to
+		// strip.
+		{
+			"hand-written no separator, no slash",
+			"mindgate://npub1abc@wss%3A%2F%2Frelay.example?label=A",
+			"wss://relay.example",
+		},
+		{
+			"hand-written no separator, encoded root slash",
+			"mindgate://npub1abc@wss%3A%2F%2Frelay.example%2F?label=A",
+			"wss://relay.example/",
+		},
+		{
+			"hand-written no separator, encoded path-tail slash",
+			"mindgate://npub1abc@wss%3A%2F%2Fhost%2Fnostr%2F?label=A",
+			"wss://host/nostr/",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := card.Parse(tc.uri)
+			if err != nil {
+				t.Fatalf("Parse(%q): %v", tc.uri, err)
+			}
+			if c.Relay != tc.want {
+				t.Errorf("Relay=%q, want %q", c.Relay, tc.want)
+			}
+		})
+	}
+}
+
+// TestRoundtripPreservesPathTailSlash locks the contract that
+// URI()/Parse() round-trip a relay URL whose path ends in a meaningful
+// trailing slash (e.g. `wss://host/nostr/`). The original implementation
+// used TrimRight on the unescaped relay and silently ate the path-tail
+// slash, leaving callers connecting to `wss://host/nostr` — a different
+// WebSocket route at path-sensitive relays. Parse must only undo URI()'s
+// own appended separator slash, not arbitrary trailing slashes.
+func TestRoundtripPreservesPathTailSlash(t *testing.T) {
+	original := card.Card{
+		Npub:  "npub1abc",
+		Relay: "wss://relay.example/nostr/",
+		Label: "PathTail",
+	}
+	uri, err := original.URI()
+	if err != nil {
+		t.Fatalf("URI(): %v", err)
+	}
+	parsed, err := card.Parse(uri)
+	if err != nil {
+		t.Fatalf("Parse(%q): %v", uri, err)
+	}
+	if parsed.Relay != original.Relay {
+		t.Errorf("Relay round-trip lost path-tail slash: got %q, want %q (uri=%q)",
+			parsed.Relay, original.Relay, uri)
+	}
+}
+
 // ---- TOML form tests ----
 
 func TestCard_TOML_RoundTrip(t *testing.T) {

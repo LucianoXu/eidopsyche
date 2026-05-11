@@ -109,6 +109,14 @@ func Start(stateDir string) (*Daemon, error) {
 	if err := db.Migrate(context.Background()); err != nil {
 		return nil, err
 	}
+	// One-shot data migration: canonicalize any own_relays rows written
+	// before normRelayURL landed (e.g. `wss://x/`). Without this, legacy
+	// rows survive in raw form forever and the exact-match
+	// RemoveOwnRelay can't find them by the canonical key callers now
+	// receive from AddOwnRelay / dashboard list.
+	if err := canonicalizeOwnRelays(context.Background(), db.DB); err != nil {
+		return nil, fmt.Errorf("canonicalize own_relays: %w", err)
+	}
 	d := &Daemon{
 		StateDir:      stateDir,
 		Cfg:           cfg,
@@ -343,7 +351,11 @@ func (d *Daemon) subscriptionURLs(ctx context.Context) ([]string, error) {
 			rows.Close()
 			return nil, err
 		}
-		roles[u] = r
+		// Normalize defensively: rows written before the
+		// card.Parse / AddOwnRelay canonicalization fix could
+		// still hold trailing-slash URLs, and the dedup below
+		// keys on the exact string.
+		roles[normRelayURL(u)] = r
 	}
 	rows.Close()
 	contactRelays, err := d.Repo.AllRelaysUnion(ctx)
@@ -351,11 +363,13 @@ func (d *Daemon) subscriptionURLs(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	for _, u := range contactRelays {
+		u = normRelayURL(u)
 		if _, taken := roles[u]; !taken {
 			roles[u] = "contact"
 		}
 	}
 	for _, u := range d.Cfg.Subscribe.ExtraRelays {
+		u = normRelayURL(u)
 		if _, taken := roles[u]; !taken {
 			roles[u] = "extra"
 		}
@@ -591,8 +605,20 @@ func (d *Daemon) ownRelayURLs(ctx context.Context) ([]string, error) {
 // returned so callers can choose: sendMessage propagates it (operator
 // must see infrastructure failures), emitAck logs and falls back to the
 // non-DB inputs (tier-2 ack is best-effort).
+//
+// All inputs flow through normRelayURL before dedup so `wss://x` and
+// `wss://x/` collapse to a single target — otherwise the daemon would
+// open redundant WebSocket connections to the same Nostr endpoint
+// whenever a fallback or contact relay carries a different
+// trailing-slash form than own_relays.
 func (d *Daemon) publishTargets(ctx context.Context, recipientRelays []string) ([]string, error) {
 	targets := map[string]struct{}{}
+	addTarget := func(u string) {
+		if u == "" {
+			return
+		}
+		targets[normRelayURL(u)] = struct{}{}
+	}
 	rows, err := d.DB.QueryContext(ctx, `SELECT relay_url FROM own_relays`)
 	if err != nil {
 		return nil, fmt.Errorf("query own_relays: %w", err)
@@ -603,17 +629,17 @@ func (d *Daemon) publishTargets(ctx context.Context, recipientRelays []string) (
 			rows.Close()
 			return nil, fmt.Errorf("scan own_relays: %w", scanErr)
 		}
-		targets[u] = struct{}{}
+		addTarget(u)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate own_relays: %w", err)
 	}
 	for _, u := range recipientRelays {
-		targets[u] = struct{}{}
+		addTarget(u)
 	}
 	for _, u := range d.Cfg.Publish.FallbackRelays {
-		targets[u] = struct{}{}
+		addTarget(u)
 	}
 	urls := make([]string, 0, len(targets))
 	for u := range targets {

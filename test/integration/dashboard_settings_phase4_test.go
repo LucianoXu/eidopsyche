@@ -64,8 +64,12 @@ func TestDashboardSettings_Phase4_RelayFlow(t *testing.T) {
 	}
 	t.Logf("seeded own_relays: %+v", rows)
 
-	// 3. POST to add a new fallback relay.
+	// 3. POST to add a new fallback relay. We deliberately send the
+	//    trailing-slash form to exercise AddOwnRelay's normalization:
+	//    storage and the rendered list should both show the canonical
+	//    (no-slash) form.
 	addURL := "wss://test-fallback.example/"
+	canonicalURL := "wss://test-fallback.example"
 	form := url.Values{"url": {addURL}, "role": {"fallback"}}
 	req := mustNewReq(t, "POST", base+"/settings/relays", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -75,18 +79,18 @@ func TestDashboardSettings_Phase4_RelayFlow(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("POST add: status %d body %s", resp.StatusCode, body)
 	}
-	if !strings.Contains(body, addURL) {
-		t.Errorf("relay row for %q should be in the rendered pane;\n%s", addURL, body)
+	if !strings.Contains(body, canonicalURL) {
+		t.Errorf("relay row for canonical %q should be in the rendered pane;\n%s", canonicalURL, body)
 	}
 
-	// 4. Daemon's own_relays now contains the new URL with role=fallback.
+	// 4. Daemon's own_relays now contains the canonical URL with role=fallback.
 	rows, err = alice.daemon.ListOwnRelays(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	found := false
 	for _, r := range rows {
-		if r.URL == addURL {
+		if r.URL == canonicalURL {
 			found = true
 			if r.Role != "fallback" {
 				t.Errorf("added role=%q, want fallback", r.Role)
@@ -94,11 +98,13 @@ func TestDashboardSettings_Phase4_RelayFlow(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("added URL %q not in own_relays after POST; got %+v", addURL, rows)
+		t.Errorf("added URL %q (canonical %q) not in own_relays after POST; got %+v", addURL, canonicalURL, rows)
 	}
 
 	// 5. Add the same URL again → handler renders an inline error
-	//    flash (200), no panic, no duplicate row.
+	//    flash (200), no panic, no duplicate row. Sending the trailing-
+	//    slash form a second time also exercises the dedup-after-normalize
+	//    path inside AddOwnRelay.
 	resp = mustDo(t, mustReqWithForm(t, "POST", base+"/settings/relays",
 		url.Values{"url": {addURL}, "role": {"fallback"}}, base))
 	body = mustReadAll(t, resp)
@@ -109,8 +115,11 @@ func TestDashboardSettings_Phase4_RelayFlow(t *testing.T) {
 		t.Errorf("duplicate add should surface error inline; body: %s", body)
 	}
 
-	// 6. Remove the fallback (no typed-confirm needed).
-	slug := relaySlugForTest(addURL)
+	// 6. Remove the fallback. The dashboard renders rows with slugs
+	//    computed from the canonical URL (lookupRelayBySlug recomputes
+	//    from stored rows), so the slug a real UI would surface is the
+	//    one for the canonical form.
+	slug := relaySlugForTest(canonicalURL)
 	req = mustNewReq(t, "POST", base+"/settings/relays/"+slug+"/remove", strings.NewReader(""))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Origin", base)
@@ -120,14 +129,14 @@ func TestDashboardSettings_Phase4_RelayFlow(t *testing.T) {
 		t.Fatalf("POST fallback remove: status %d body %s", resp.StatusCode, body)
 	}
 
-	// 7. Daemon's own_relays no longer contains the removed URL.
+	// 7. Daemon's own_relays no longer contains the canonical URL.
 	rows, err = alice.daemon.ListOwnRelays(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, r := range rows {
-		if r.URL == addURL {
-			t.Errorf("URL %q should be gone from own_relays after remove; got %+v", addURL, rows)
+		if r.URL == canonicalURL {
+			t.Errorf("URL %q should be gone from own_relays after remove; got %+v", canonicalURL, rows)
 		}
 	}
 }
