@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
@@ -26,14 +27,14 @@ type dashboardAdapter struct{ d *Daemon }
 func NewDashboardAdapter(d *Daemon) dashboard.DashboardDeps { return dashboardAdapter{d: d} }
 
 // adapter-shim: OwnPubkey() has no error return on dashboard.DashboardDeps;
-// a whoami Call failure (e.g. transient meta read error) still needs to
+// a state.get failure (e.g. transient meta read error) still needs to
 // produce a usable string. The Key.PublicHex field is the in-memory
 // canonical pubkey loaded at daemon start, so reading it is a safe
 // last-resort fallback.
 func (a dashboardAdapter) OwnPubkey() string {
-	var w whoamiResult
-	if err := a.d.Call(context.Background(), "whoami", nil, &w); err == nil && w.Pubkey != "" {
-		return w.Pubkey
+	var ident identityProjection
+	if err := a.d.Call(context.Background(), "state.get", map[string]string{"path": "identity"}, &ident); err == nil && ident.Pubkey != "" {
+		return ident.Pubkey
 	}
 	if a.d.Key != nil {
 		return a.d.Key.PublicHex
@@ -42,16 +43,17 @@ func (a dashboardAdapter) OwnPubkey() string {
 }
 
 func (a dashboardAdapter) OwnLabel(ctx context.Context) (string, error) {
-	var w whoamiResult
-	if err := a.d.Call(ctx, "whoami", nil, &w); err != nil {
+	var ident identityProjection
+	if err := a.d.Call(ctx, "state.get", map[string]string{"path": "identity"}, &ident); err != nil {
 		return "", err
 	}
-	return w.Label, nil
+	return ident.Label, nil
 }
 
-// whoamiResult mirrors the whoami IPC method's projection so the
-// adapter can decode without an inline anonymous struct.
-type whoamiResult struct {
+// identityProjection mirrors the state.get identity shape so the
+// adapter can decode into a typed struct rather than map[string]any.
+// Field set matches state_contributors.go:identityContrib.Snapshot.
+type identityProjection struct {
 	Pubkey     string              `json:"pubkey"`
 	Npub       string              `json:"npub"`
 	Label      string              `json:"label"`
@@ -100,26 +102,77 @@ type outboxListParams struct {
 }
 
 func (a dashboardAdapter) ListContacts(ctx context.Context) ([]*contacts.Contact, error) {
-	var out []*contacts.Contact
-	if err := a.d.Call(ctx, "contact.list", nil, &out); err != nil {
+	// state.get contacts returns map[pubkey -> {...}]; reassemble into
+	// the typed slice the dashboard handlers consume. Sort by pubkey
+	// for stability.
+	resp := map[string]map[string]any{}
+	if err := a.d.Call(ctx, "state.get", map[string]string{"path": "contacts"}, &resp); err != nil {
 		return nil, err
+	}
+	pks := make([]string, 0, len(resp))
+	for pk := range resp {
+		pks = append(pks, pk)
+	}
+	sort.Strings(pks)
+	out := make([]*contacts.Contact, 0, len(pks))
+	for _, pk := range pks {
+		c := contactFromMap(pk, resp[pk])
+		out = append(out, &c)
 	}
 	return out, nil
 }
 
+// contactFromMap rebuilds a contacts.Contact from the state.get contacts
+// map projection. Mirror of state_contributors.go:serializeContact.
+func contactFromMap(pubkey string, m map[string]any) contacts.Contact {
+	c := contacts.Contact{Pubkey: pubkey}
+	if v, ok := m["label"].(string); ok {
+		c.Label = v
+	}
+	if v, ok := m["tier"].(string); ok {
+		c.Tier = contacts.Tier(v)
+	}
+	if v, ok := m["notes"].(string); ok {
+		c.Notes = v
+	}
+	if relays, ok := m["relays"].([]any); ok {
+		for _, r := range relays {
+			if s, ok := r.(string); ok {
+				c.Relays = append(c.Relays, s)
+			}
+		}
+	}
+	if v, ok := m["created_at"].(float64); ok {
+		c.CreatedAt = time.Unix(int64(v), 0)
+	}
+	if v, ok := m["updated_at"].(float64); ok {
+		c.UpdatedAt = time.Unix(int64(v), 0)
+	}
+	return c
+}
+
 func (a dashboardAdapter) ListRelayHealth() []dashboard.RelayState {
-	var snap []RelayHealth
-	if err := a.d.Call(context.Background(), "relays.health", nil, &snap); err != nil {
+	// state.get relays returns map[url -> {role, state, last_error,
+	// last_event_at, ...}]. Project into the dashboard's typed shape.
+	resp := map[string]map[string]any{}
+	if err := a.d.Call(context.Background(), "state.get", map[string]string{"path": "relays"}, &resp); err != nil {
 		return nil
 	}
-	out := make([]dashboard.RelayState, 0, len(snap))
-	for _, h := range snap {
+	out := make([]dashboard.RelayState, 0, len(resp))
+	for url, e := range resp {
+		role, _ := e["role"].(string)
+		state, _ := e["state"].(string)
+		lastErr, _ := e["last_error"].(string)
+		var lastEventAt int64
+		if v, ok := e["last_event_at"].(float64); ok {
+			lastEventAt = int64(v)
+		}
 		out = append(out, dashboard.RelayState{
-			URL:         h.URL,
-			Role:        h.Role,
-			State:       h.State,
-			LastError:   h.LastError,
-			LastEventAt: h.LastEventAt,
+			URL:         url,
+			Role:        role,
+			State:       state,
+			LastError:   lastErr,
+			LastEventAt: lastEventAt,
 		})
 	}
 	return out
@@ -155,18 +208,18 @@ func (a dashboardAdapter) OwnCardURI(ctx context.Context) (string, error) {
 	var out struct {
 		URI string `json:"uri"`
 	}
-	if err := a.d.Call(ctx, "card.export", nil, &out); err != nil {
+	if err := a.d.Call(ctx, "state.get", map[string]string{"path": "identity.card"}, &out); err != nil {
 		return "", err
 	}
 	return out.URI, nil
 }
 
-// ConfigSnapshot routes through the IPC config.get handler so the
-// adapter and CLI surface read the on-disk file by the exact same code
-// path. See SPEC.md "调用路径统一".
+// ConfigSnapshot routes through state.get so the adapter and CLI
+// surface read the on-disk file by the exact same code path. See
+// SPEC.md "调用路径统一".
 func (a dashboardAdapter) ConfigSnapshot() (config.Config, error) {
 	var cfg config.Config
-	if err := a.d.Call(context.Background(), "config.get", nil, &cfg); err != nil {
+	if err := a.d.Call(context.Background(), "state.get", map[string]string{"path": "config"}, &cfg); err != nil {
 		return config.Config{}, err
 	}
 	return cfg, nil
@@ -183,10 +236,13 @@ func (a dashboardAdapter) ConfigSet(ctx context.Context, path, value string) err
 // ── phase 2: contacts ──────────────────────────────────────────────
 
 func (a dashboardAdapter) GetContact(ctx context.Context, pubkey string) (*contacts.Contact, error) {
-	var c contacts.Contact
-	if err := a.d.Call(ctx, "contact.get", map[string]string{"target": pubkey}, &c); err != nil {
+	// state.get contacts.<pubkey> resolves through the Tree walker. The
+	// projection comes back as a map; reassemble into the typed Contact.
+	resp := map[string]any{}
+	if err := a.d.Call(ctx, "state.get", map[string]string{"path": "contacts." + pubkey}, &resp); err != nil {
 		return nil, err
 	}
+	c := contactFromMap(pubkey, resp)
 	return &c, nil
 }
 
@@ -280,16 +336,29 @@ func (a dashboardAdapter) ScanCard(ctx context.Context, cardURI string) (dashboa
 // ── phase 4: own relays ────────────────────────────────────────────
 
 func (a dashboardAdapter) ListOwnRelays(ctx context.Context) ([]dashboard.OwnRelay, error) {
-	var rows []OwnRelayRow
-	if err := a.d.Call(ctx, "relay.list", nil, &rows); err != nil {
+	// state.get relays returns map[url -> {role, added_at, ...}]. Sort
+	// urls so the dashboard renders relays in a stable order.
+	resp := map[string]map[string]any{}
+	if err := a.d.Call(ctx, "state.get", map[string]string{"path": "relays"}, &resp); err != nil {
 		return nil, err
 	}
-	out := make([]dashboard.OwnRelay, 0, len(rows))
-	for _, r := range rows {
+	urls := make([]string, 0, len(resp))
+	for url := range resp {
+		urls = append(urls, url)
+	}
+	sort.Strings(urls)
+	out := make([]dashboard.OwnRelay, 0, len(urls))
+	for _, url := range urls {
+		e := resp[url]
+		role, _ := e["role"].(string)
+		var addedAt int64
+		if v, ok := e["added_at"].(float64); ok {
+			addedAt = int64(v)
+		}
 		out = append(out, dashboard.OwnRelay{
-			URL:     r.URL,
-			Role:    r.Role,
-			AddedAt: r.AddedAt,
+			URL:     url,
+			Role:    role,
+			AddedAt: addedAt,
 		})
 	}
 	return out, nil
