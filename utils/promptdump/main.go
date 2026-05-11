@@ -158,8 +158,16 @@ type hostInfo struct {
 // body falls back to "raw_body" + "parse_error" so output is always
 // usable. Used by buildEnvelope (JSON output) and renderMarkdown
 // (human-readable output).
+//
+// All values are JSON-normalized: claude_args is []any (not []string),
+// host is map[string]any (not the hostInfo struct), etc. This keeps
+// renderMarkdown's type assertions simple and uniform regardless of
+// whether the map was hand-built (in tests) or produced from a real
+// capture — without this round-trip, "Claude args" and "Host" metadata
+// lines would silently be omitted from the Markdown output because
+// renderMarkdown's type switches don't match the original Go types.
 func buildEnvelopeMap(meta envelopeMeta, body []byte) (map[string]any, error) {
-	out := map[string]any{
+	raw := map[string]any{
 		"captured_at":    meta.CapturedAt.UTC().Format(time.RFC3339),
 		"claude_version": meta.ClaudeVersion,
 		"claude_path":    meta.ClaudePath,
@@ -168,10 +176,18 @@ func buildEnvelopeMap(meta envelopeMeta, body []byte) (map[string]any, error) {
 	}
 	var parsed any
 	if err := json.Unmarshal(body, &parsed); err == nil {
-		out["request"] = parsed
+		raw["request"] = parsed
 	} else {
-		out["raw_body"] = string(body)
-		out["parse_error"] = err.Error()
+		raw["raw_body"] = string(body)
+		raw["parse_error"] = err.Error()
+	}
+	normalized, err := json.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(normalized, &out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -331,8 +347,10 @@ func firstNonEmptyLine(s string) string {
 	return ""
 }
 
-// formatMediaType adds a " (type)" suffix if non-empty; otherwise
-// returns empty. Used in user-message rendering for non-text parts.
+// formatMediaType returns the media-type prefixed with a single space,
+// or empty if s is empty. Used in user-message rendering for non-text
+// parts; the caller wraps the result in italics, producing renderings
+// like `_[image image/png]_`.
 func formatMediaType(s string) string {
 	if s == "" {
 		return ""
@@ -495,6 +513,8 @@ func runCapture(ctx context.Context, opts runOpts) ([]byte, map[string]any, erro
 	if err != nil {
 		return nil, nil, err
 	}
+	// envMap is already JSON-normalized by buildEnvelopeMap, so it can
+	// be passed straight to renderMarkdown without re-parsing.
 	return jsonBytes, envMap, nil
 }
 

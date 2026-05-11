@@ -587,3 +587,41 @@ func TestDispatchOutput(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildEnvelopeMap_RoundTripsForRenderer: regression for a real
+// bug — buildEnvelopeMap originally stored claude_args as []string and
+// host as a hostInfo struct, but renderMarkdown only handled []any and
+// map[string]any. The metadata lines silently dropped from production
+// output. The map must now be JSON-normalized so all values match
+// what renderMarkdown's type switches expect.
+func TestBuildEnvelopeMap_RoundTripsForRenderer(t *testing.T) {
+	meta := envelopeMeta{
+		CapturedAt:    time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC),
+		ClaudeVersion: "2.1.139",
+		ClaudePath:    "/usr/bin/claude",
+		ClaudeArgs:    []string{"--model", "sonnet", "-p", "ping"},
+		Host:          hostInfo{Platform: "linux", CWD: "/data/eidopsyche"},
+	}
+	env, err := buildEnvelopeMap(meta, []byte(`{"model":"claude-sonnet-4-7"}`))
+	if err != nil {
+		t.Fatalf("buildEnvelopeMap: %v", err)
+	}
+	if _, ok := env["claude_args"].([]any); !ok {
+		t.Errorf("claude_args type = %T, want []any (JSON-normalized)", env["claude_args"])
+	}
+	if _, ok := env["host"].(map[string]any); !ok {
+		t.Errorf("host type = %T, want map[string]any (JSON-normalized)", env["host"])
+	}
+	md, err := renderMarkdown(env)
+	if err != nil {
+		t.Fatalf("renderMarkdown: %v", err)
+	}
+	for _, want := range []string{
+		"**Claude args:** `--model sonnet -p ping`",
+		"**Host:** linux · cwd=`/data/eidopsyche`",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("missing %q in rendered markdown — metadata line silently dropped?\n%s", want, md)
+		}
+	}
+}
