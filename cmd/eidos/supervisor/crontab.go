@@ -20,11 +20,12 @@ const crontabHeartbeatLine = "%s /usr/local/bin/eidos forge wake --reason heartb
 
 // renderCrontab returns the file body for /var/spool/cron/crontabs/eidos.
 // On a malformed [heartbeat] interval the function returns the default
-// 4h crontab body AND a non-nil error; the caller decides whether to
+// 2h crontab body AND a non-nil error; the caller decides whether to
 // install the fallback. (Heartbeat is rhythm, not authority — losing it
-// would leave the mind-form completely silent.)
+// would leave the mind-form completely silent.) The default mirrors
+// config.DefaultHeartbeatInterval.
 func renderCrontab(cfg config.Config) (string, error) {
-	defaultBody := fmt.Sprintf(crontabHeartbeatLine, "0 */4 * * *")
+	defaultBody := fmt.Sprintf(crontabHeartbeatLine, "0 */2 * * *")
 	interval := cfg.Heartbeat.Interval
 	if interval == "" {
 		return defaultBody, nil

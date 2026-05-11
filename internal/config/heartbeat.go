@@ -7,8 +7,10 @@ import (
 )
 
 // DefaultHeartbeatInterval is the cadence used when [heartbeat] interval
-// is unset. Matches the static crontab line from MindForge v0.
-const DefaultHeartbeatInterval = 4 * time.Hour
+// is unset. 2h is a balance between "notice the day going by" and "do
+// not burn API budget on idle wakes". Operators who want a different
+// cadence set [heartbeat] interval explicitly.
+const DefaultHeartbeatInterval = 2 * time.Hour
 
 // DefaultDreamMinInterval is used when [mindform] dream_min_interval is unset.
 const DefaultDreamMinInterval = 12 * time.Hour

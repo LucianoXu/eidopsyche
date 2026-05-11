@@ -12,12 +12,12 @@ import (
 )
 
 func TestRenderCrontabFromConfig_Default(t *testing.T) {
-	cfg := config.Config{} // interval empty → default 4h
+	cfg := config.Config{} // interval empty → default 2h
 	got, err := renderCrontab(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "0 */4 * * * /usr/local/bin/eidos forge wake --reason heartbeat\n"
+	want := "0 */2 * * * /usr/local/bin/eidos forge wake --reason heartbeat\n"
 	if got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
@@ -51,7 +51,7 @@ func TestRenderCrontabFromConfig_BadIntervalFallsBack(t *testing.T) {
 	if err == nil {
 		t.Error("renderCrontab should return error on unsupported interval")
 	}
-	want := "0 */4 * * * /usr/local/bin/eidos forge wake --reason heartbeat\n"
+	want := "0 */2 * * * /usr/local/bin/eidos forge wake --reason heartbeat\n"
 	if got != want {
 		t.Errorf("fallback got:\n%s\nwant:\n%s", got, want)
 	}
@@ -63,7 +63,7 @@ func TestRenderCrontabFromConfig_GarbageFallsBack(t *testing.T) {
 	if err == nil {
 		t.Error("expected parse error")
 	}
-	want := "0 */4 * * * /usr/local/bin/eidos forge wake --reason heartbeat\n"
+	want := "0 */2 * * * /usr/local/bin/eidos forge wake --reason heartbeat\n"
 	if got != want {
 		t.Errorf("fallback got:\n%s\nwant:\n%s", got, want)
 	}

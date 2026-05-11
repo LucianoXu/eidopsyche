@@ -57,6 +57,12 @@ func TestHeartbeatCronExpressionRejects(t *testing.T) {
 	}
 }
 
+func TestDefaultHeartbeatIntervalIs2h(t *testing.T) {
+	if DefaultHeartbeatInterval != 2*time.Hour {
+		t.Errorf("DefaultHeartbeatInterval = %s, want 2h", DefaultHeartbeatInterval)
+	}
+}
+
 func TestValidateHeartbeatInterval(t *testing.T) {
 	if err := ValidateHeartbeatInterval("4h"); err != nil {
 		t.Errorf("ValidateHeartbeatInterval(4h): %v", err)
