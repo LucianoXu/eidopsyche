@@ -93,17 +93,17 @@ func contextMismatchError(path string, requires config.Context) error {
 		}
 	case requires == config.ContainerCtx:
 		return &ipc.Error{
-			Code: ipc.ErrContextMismatch,
+			Code:    ipc.ErrContextMismatch,
 			Message: fmt.Sprintf("%s is only settable inside a mindform container", path),
 		}
 	case requires == config.HostCtx:
 		return &ipc.Error{
-			Code: ipc.ErrContextMismatch,
+			Code:    ipc.ErrContextMismatch,
 			Message: fmt.Sprintf("%s is only settable on the host daemon", path),
 		}
 	default:
 		return &ipc.Error{
-			Code: ipc.ErrContextMismatch,
+			Code:    ipc.ErrContextMismatch,
 			Message: fmt.Sprintf("%s requires a context not available here", path),
 		}
 	}
