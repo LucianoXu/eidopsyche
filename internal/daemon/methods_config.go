@@ -42,9 +42,9 @@ func configGet(_ context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (an
 // registry and routes the write through daemon.Mutate. The Mutate
 // helper performs the context check (rejects mindform-only keys on
 // host with a CONTEXT_MISMATCH error pointing to forge config),
-// serializes via stateMu, dispatches the apply hook (e.g. crontab
+// serializes via d.configMu, dispatches the apply hook (e.g. crontab
 // hot-reload for heartbeat.interval), and emits state.changed.
-func configSet(_ context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+func configSet(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p ConfigSetParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
@@ -54,9 +54,13 @@ func configSet(_ context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: "unknown config key: " + p.Path}
 	}
 
+	// Capture the post-write Config snapshot inside the closure so the
+	// IPC response reflects exactly this request's mutation — reloading
+	// after Mutate releases the lock could pick up a concurrent write.
+	var finalCfg config.Config
 	var rollbackArmed bool
 	var savedOld string
-	err := d.Mutate(context.Background(), "config."+p.Path, key.Contexts,
+	err := d.Mutate(ctx, "config."+p.Path, key.Contexts,
 		func() (any, any, error) {
 			cfg, err := config.Load(d.configPath())
 			if err != nil {
@@ -83,16 +87,15 @@ func configSet(_ context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage
 			if err := config.Save(d.configPath(), cfg); err != nil {
 				return nil, nil, err
 			}
+			if !isRollback {
+				finalCfg = cfg
+			}
 			return currentVal, key.Get(&cfg), nil
 		})
 	if err != nil {
 		return nil, asIPCError(err)
 	}
-	cfg, err := config.Load(d.configPath())
-	if err != nil {
-		return nil, internalErr(err)
-	}
-	return cfg, nil
+	return finalCfg, nil
 }
 
 // asIPCError unwraps an error into the typed IPC shape. Mutate may

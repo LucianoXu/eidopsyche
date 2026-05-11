@@ -97,9 +97,19 @@ func (t *Tree) Snapshot(ctx context.Context, path string) (any, error) {
 // fullRoot assembles every contributor into a single nested map.
 // Fail-fast: if any contributor errors, the whole snapshot fails
 // (avoids misleading partial views). Per the spec §7.5.
+//
+// Mount order matters when contributors register at nested paths
+// (e.g. both "lifecycle" and "lifecycle.wakes"). If we mounted the
+// shorter path last, its scalar/map value would overwrite the
+// intermediate map mount() created for the longer path. We iterate
+// shortest-path-first (reverse of t.contrs's longest-first order)
+// so shallow contributors land first and deep contributors compose
+// onto the intermediate maps. Snapshot's prefix matching still uses
+// the longest-first order so the most specific contributor wins.
 func (t *Tree) fullRoot(ctx context.Context) (any, error) {
 	out := map[string]any{}
-	for _, c := range t.contrs {
+	for i := len(t.contrs) - 1; i >= 0; i-- {
+		c := t.contrs[i]
 		snap, err := c.Snapshot(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("%s contributor: %w", c.Path(), err)

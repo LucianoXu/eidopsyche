@@ -144,6 +144,31 @@ func TestTree_DottedContributorPath(t *testing.T) {
 	}
 }
 
+func TestTree_NestedContributorsCompose(t *testing.T) {
+	// Verify fullRoot doesn't overwrite a nested contributor when a
+	// parent and child are both registered. mount() at "lifecycle"
+	// (shallow) must compose under mount() at "lifecycle.wakes" (deep),
+	// regardless of registration order or longest-first sort.
+	tr := NewTree()
+	tr.Register(&fakeContrib{path: "lifecycle.wakes", data: []any{"w1", "w2"}})
+	tr.Register(&fakeContrib{path: "lifecycle", data: map[string]any{"version": 1}})
+	snap, err := tr.Snapshot(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := snap.(map[string]any)
+	lc, _ := m["lifecycle"].(map[string]any)
+	if lc == nil {
+		t.Fatalf("missing lifecycle subtree: %+v", m)
+	}
+	if _, ok := lc["wakes"]; !ok {
+		t.Errorf("lifecycle.wakes lost in fullRoot composition: %+v", lc)
+	}
+	if lc["version"] != 1 {
+		t.Errorf("lifecycle.version lost in fullRoot composition: %+v", lc)
+	}
+}
+
 func TestTree_DuplicateRegistrationPanics(t *testing.T) {
 	tr := NewTree()
 	tr.Register(&fakeContrib{path: "x"})

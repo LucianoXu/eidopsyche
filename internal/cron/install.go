@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Installer writes crontab bodies to the busybox crond spool. Both the
@@ -68,19 +69,48 @@ func writeDirect(path, body string) error {
 	return os.Rename(tmpPath, path)
 }
 
+// writeViaSudo performs an atomic write to a root-owned path. The
+// strategy mirrors writeDirect's tmp+rename pattern but each step is
+// escalated via sudo: write body to a sibling tmp file via `sudo tee`,
+// chmod 0600 on the tmp, then `sudo mv` to swap into the final path.
+// On any failure the tmp is removed best-effort so we don't litter
+// the spool directory. busybox crond never observes a partially
+// written crontab — either the old body remains or the new body is
+// installed wholesale.
 func writeViaSudo(ctx context.Context, sudoBin, path, body string) error {
-	cmd := exec.CommandContext(ctx, sudoBin, "-n", "tee", path)
-	cmd.Stdin = strings.NewReader(body)
-	cmd.Stdout = nil
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("sudo tee %s: %w", path, err)
+	dir := filepath.Dir(path)
+	if err := runSudo(ctx, sudoBin, "mkdir", "-p", dir); err != nil {
+		return fmt.Errorf("sudo mkdir %s: %w", dir, err)
 	}
-	chmod := exec.CommandContext(ctx, sudoBin, "-n", "chmod", "0600", path)
-	chmod.Stdout = nil
-	chmod.Stderr = os.Stderr
-	if err := chmod.Run(); err != nil {
-		return fmt.Errorf("sudo chmod 0600 %s: %w", path, err)
+	// Suffix the tmp with the pid + nanos so concurrent installs from
+	// different processes don't clash; same-process serialization is the
+	// caller's job. The leading dot keeps it hidden in directory listings.
+	tmpPath := fmt.Sprintf("%s/.crontab.%d.%d", dir, os.Getpid(), time.Now().UnixNano())
+
+	teeCmd := exec.CommandContext(ctx, sudoBin, "-n", "tee", tmpPath)
+	teeCmd.Stdin = strings.NewReader(body)
+	teeCmd.Stdout = nil
+	teeCmd.Stderr = os.Stderr
+	if err := teeCmd.Run(); err != nil {
+		_ = runSudo(ctx, sudoBin, "rm", "-f", tmpPath)
+		return fmt.Errorf("sudo tee %s: %w", tmpPath, err)
+	}
+	if err := runSudo(ctx, sudoBin, "chmod", "0600", tmpPath); err != nil {
+		_ = runSudo(ctx, sudoBin, "rm", "-f", tmpPath)
+		return fmt.Errorf("sudo chmod 0600 %s: %w", tmpPath, err)
+	}
+	if err := runSudo(ctx, sudoBin, "mv", tmpPath, path); err != nil {
+		_ = runSudo(ctx, sudoBin, "rm", "-f", tmpPath)
+		return fmt.Errorf("sudo mv %s %s: %w", tmpPath, path, err)
 	}
 	return nil
+}
+
+// runSudo runs `sudo -n <argv...>`, discarding stdout and forwarding
+// stderr. Returns the command's run error.
+func runSudo(ctx context.Context, sudoBin string, argv ...string) error {
+	cmd := exec.CommandContext(ctx, sudoBin, append([]string{"-n"}, argv...)...)
+	cmd.Stdout = nil
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
