@@ -66,16 +66,29 @@ func TestRemoveOwnRelay_NormalizesInput(t *testing.T) {
 }
 
 func TestNormRelayURL(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"wss://relay.example/", "wss://relay.example"},
-		{"wss://relay.example", "wss://relay.example"},
-		{"wss://Relay.Example/", "wss://relay.example"},
-		{"  wss://relay.example/  ", "wss://relay.example"},
-		{"", ""},
+	cases := []struct {
+		name, in, want string
+	}{
+		{"strip root trailing slash", "wss://relay.example/", "wss://relay.example"},
+		{"no slash unchanged", "wss://relay.example", "wss://relay.example"},
+		{"lowercase host", "wss://Relay.Example/", "wss://relay.example"},
+		{"trim surrounding space", "  wss://relay.example/  ", "wss://relay.example"},
+		{"empty stays empty", "", ""},
+		// Path-tail slash must be preserved: path-sensitive relays treat
+		// `/nostr/` and `/nostr` as different WebSocket routes. Regression
+		// guard for the codex review of 2026-05-11 (delegating wholesale
+		// to go-nostr's NormalizeURL would have eaten this slash).
+		{"preserve path-tail slash", "wss://relay.example/nostr/", "wss://relay.example/nostr/"},
+		{"preserve path with no trailing slash", "wss://relay.example/nostr", "wss://relay.example/nostr"},
+		// Non-relay schemes pass through unchanged so isRelayURL stays the
+		// single source of truth for validation.
+		{"unknown scheme unchanged", "http://example.com/", "http://example.com/"},
 	}
 	for _, tc := range cases {
-		if got := normRelayURL(tc.in); got != tc.want {
-			t.Errorf("normRelayURL(%q) = %q, want %q", tc.in, got, tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normRelayURL(tc.in); got != tc.want {
+				t.Errorf("normRelayURL(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/dashboard"
-	gnostr "github.com/nbd-wtf/go-nostr"
 )
 
 // OwnRelayRow is the typed shape returned by ListOwnRelays. AddedAt is a
@@ -148,11 +147,17 @@ func (d *Daemon) RemoveOwnRelay(ctx context.Context, rawURL string) error {
 }
 
 // normRelayURL returns the canonical form of a relay URL: lowercased
-// scheme/host, no trailing slash on the empty path. Callers should use
-// it before any database write or in-memory dedup-keyed-by-URL — without
+// scheme/host, root-path trailing slash trimmed. Callers should use it
+// before any database write or in-memory dedup-keyed-by-URL — without
 // it, `wss://x` and `wss://x/` register as distinct relay endpoints and
 // the daemon opens two redundant WebSocket connections (one of which
 // often 503s, depending on the relay's HTTP handler).
+//
+// Only root-path slashes are stripped — `wss://host/nostr/` keeps its
+// trailing slash because path-sensitive relays treat `/nostr/` and
+// `/nostr` as different WebSocket routes. `go-nostr.NormalizeURL` is
+// not delegated to wholesale for this reason; instead we url.Parse,
+// lowercase scheme/host, and trim only the empty-path slash.
 //
 // Returns the input unchanged when it doesn't parse as a relay URL, so
 // validation errors surface from isRelayURL (the existing gate) rather
@@ -162,10 +167,22 @@ func normRelayURL(s string) string {
 	if s == "" {
 		return s
 	}
-	if n := gnostr.NormalizeURL(s); n != "" {
-		return n
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" {
+		return s
 	}
-	return s
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "ws" && scheme != "wss" {
+		return s
+	}
+	u.Scheme = scheme
+	u.Host = strings.ToLower(u.Host)
+	// Only strip the root-path slash. `wss://host/` → `wss://host`;
+	// `wss://host/nostr/` stays `wss://host/nostr/`.
+	if u.Path == "/" {
+		u.Path = ""
+	}
+	return u.String()
 }
 
 // isRelayURL reports whether s is a ws:// or wss:// URL with a host.
