@@ -27,10 +27,20 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/fileops"
 )
 
-// Path is the in-container path to the marker file. Hard-coded — the
-// supervisor and the in-container `eidos` subcommands all run inside
+// defaultPath is the in-container path to the marker file. Hard-coded —
+// the supervisor and the in-container `eidos` subcommands all run inside
 // the volume's filesystem.
-const Path = "/eidos/run/auth_required.json"
+const defaultPath = "/eidos/run/auth_required.json"
+
+// Path is the marker-file path used by Write/Read/Clear. Defaults to
+// defaultPath; tests substitute a temp-file via SetPathForTest.
+var Path = defaultPath
+
+// SetPathForTest swaps the marker file path. Tests only.
+func SetPathForTest(p string) { Path = p }
+
+// ResetPathForTest restores Path to its default.
+func ResetPathForTest() { Path = defaultPath }
 
 // State is the on-disk payload. Minimal by design: timestamp only.
 // The slug is implicit (one mind-form per volume) and reasoning lives
@@ -39,8 +49,9 @@ type State struct {
 	Since int64 `json:"since"`
 }
 
-// Write atomically writes the marker. Pass time.Now() in production;
-// tests substitute a fixed clock.
+// Write atomically writes the marker to Path. Pass time.Now() in
+// production; tests substitute a fixed clock and/or path via
+// SetPathForTest.
 func Write(now time.Time) error {
 	return WriteAt(Path, now)
 }

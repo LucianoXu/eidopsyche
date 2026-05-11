@@ -5,10 +5,13 @@ package supervisor
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/authstate"
+	"github.com/LucianoXu/eidopsyche/internal/claudeexec"
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
 	"github.com/LucianoXu/eidopsyche/internal/sessionstate"
@@ -305,5 +308,59 @@ func TestComputeContext_PlanIDPropagated(t *testing.T) {
 	ctx := computeContext(sig, config.Config{}, dreamstate.State{}, now)
 	if ctx.PlanID != "20260509T123000Z-plan-7f2eab19" {
 		t.Errorf("PlanID = %q", ctx.PlanID)
+	}
+}
+
+func TestHandleClaudeExit_AuthOnExit1(t *testing.T) {
+	tmp := t.TempDir()
+	authstate.SetPathForTest(filepath.Join(tmp, "auth_required.json"))
+	defer authstate.ResetPathForTest()
+
+	cmd := exec.Command("sh", "-c", "exit 1")
+	_ = cmd.Run()
+
+	called := false
+	exitFn := func(code int) { called = true; _ = code }
+	verdict := handleClaudeExitTesting(
+		&exec.ExitError{ProcessState: cmd.ProcessState},
+		cmd.ProcessState,
+		[]byte("API Error: 401 Invalid authentication credentials"),
+		exitFn,
+	)
+	if verdict.Kind != claudeexec.ClaudeAuthRequired {
+		t.Errorf("Kind = %v, want ClaudeAuthRequired", verdict.Kind)
+	}
+	if !called {
+		t.Errorf("exitFn not called for auth-required path")
+	}
+	if _, err := os.Stat(authstate.Path); err != nil {
+		t.Errorf("auth_required marker not written: %v", err)
+	}
+}
+
+func TestHandleClaudeExit_ServerError_NoMarker(t *testing.T) {
+	tmp := t.TempDir()
+	authstate.SetPathForTest(filepath.Join(tmp, "auth_required.json"))
+	defer authstate.ResetPathForTest()
+
+	cmd := exec.Command("sh", "-c", "exit 1")
+	_ = cmd.Run()
+
+	called := false
+	exitFn := func(int) { called = true }
+	verdict := handleClaudeExitTesting(
+		&exec.ExitError{ProcessState: cmd.ProcessState},
+		cmd.ProcessState,
+		[]byte("API Error: 502 Bad Gateway"),
+		exitFn,
+	)
+	if verdict.Kind != claudeexec.ClaudeServerError {
+		t.Errorf("Kind = %v, want ClaudeServerError", verdict.Kind)
+	}
+	if called {
+		t.Errorf("exitFn should NOT be called for ClaudeServerError (retryable)")
+	}
+	if _, err := os.Stat(authstate.Path); err == nil {
+		t.Errorf("auth_required marker should not be written on server-error")
 	}
 }
