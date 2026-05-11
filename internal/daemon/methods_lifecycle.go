@@ -65,14 +65,6 @@ func lifecycleStatusMethod(_ context.Context, d *Daemon, _ *ipc.Conn, _ json.Raw
 	return d.LifecycleStatusSnapshot(), nil
 }
 
-// versionMethod returns the daemon and schema versions.
-func versionMethod(_ context.Context, _ *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
-	return map[string]any{
-		"daemon_version": "0.0.1",
-		"schema_version": 1,
-	}, nil
-}
-
 // subscribeRefresh asks the daemon to recompute its relay set and reattach.
 func subscribeRefresh(_ context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
 	d.Refresh()

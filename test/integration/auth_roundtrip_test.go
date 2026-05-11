@@ -116,26 +116,22 @@ func TestAuth_RoundTrip_TwoUsersOnSharedRelay(t *testing.T) {
 	// Subscriptions need a moment to attach + AUTH.
 	time.Sleep(2 * time.Second)
 
-	// Sanity: relays.health on both sides shows their home as connected
+	// Sanity: state.get relays on both sides shows their home as connected
 	// (no auth-failed); the AUTH dance happened transparently.
 	for _, in := range []*instance{alice, bob} {
 		c := dialIPC(t, in)
-		var rows []daemon.RelayHealth
-		if e, err := c.Call("relays.health", nil, &rows); err != nil || e != nil {
-			t.Fatalf("%s relays.health: %v %+v", in.stateDir, err, e)
+		resp := map[string]map[string]any{}
+		if e, err := c.Call("state.get", map[string]string{"path": "relays"}, &resp); err != nil || e != nil {
+			t.Fatalf("%s state.get relays: %v %+v", in.stateDir, err, e)
 		}
-		var found *daemon.RelayHealth
-		for i := range rows {
-			if rows[i].URL == alice.relayURL {
-				found = &rows[i]
-				break
-			}
+		entry, ok := resp[alice.relayURL]
+		if !ok {
+			t.Fatalf("%s did not surface %s in state.get relays: resp=%+v", in.stateDir, alice.relayURL, resp)
 		}
-		if found == nil {
-			t.Fatalf("%s did not surface %s in relays.health: rows=%+v", in.stateDir, alice.relayURL, rows)
-		}
-		if found.State == "auth-failed" {
-			t.Fatalf("%s: AUTH dance should have succeeded but state=auth-failed err=%q", in.stateDir, found.LastError)
+		state, _ := entry["state"].(string)
+		lastErr, _ := entry["last_error"].(string)
+		if state == "auth-failed" {
+			t.Fatalf("%s: AUTH dance should have succeeded but state=auth-failed err=%q", in.stateDir, lastErr)
 		}
 	}
 

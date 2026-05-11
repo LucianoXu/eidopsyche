@@ -130,17 +130,6 @@ func contactAdd(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMess
 	return map[string]bool{"ok": true}, nil
 }
 
-// contactList returns all contacts in the repo as the typed slice
-// the contacts package owns. CLI and dashboard both decode into the
-// same struct; npub-form rendering is a render-time concern.
-func contactList(ctx context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
-	all, err := d.Repo.List(ctx)
-	if err != nil {
-		return nil, internalErr(err)
-	}
-	return all, nil
-}
-
 // ContactSetTierParams is the JSON-stable parameter shape for
 // "contact.set-tier". Target accepts npub / hex / label (resolved via
 // resolveTarget); Tier must be one of the four constants in
@@ -148,30 +137,6 @@ func contactList(ctx context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage)
 type ContactSetTierParams struct {
 	Target string `json:"target"`
 	Tier   string `json:"tier"`
-}
-
-// contactGet looks up a single contact and returns the full record.
-// Target accepts npub / hex / label; the same resolveTarget rules as
-// every other target-bearing method apply.
-func contactGet(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
-	var p struct {
-		Target string `json:"target"`
-	}
-	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
-	}
-	pk, ipcErr := resolveTarget(ctx, d, p.Target)
-	if ipcErr != nil {
-		return nil, ipcErr
-	}
-	c, err := d.Repo.Get(ctx, pk)
-	if err != nil {
-		if errors.Is(err, contacts.ErrNotFound) {
-			return nil, &ipc.Error{Code: ipc.ErrContactNotFound, Message: pk}
-		}
-		return nil, internalErr(err)
-	}
-	return c, nil
 }
 
 // contactSetTier updates the tier of an existing contact. Validation

@@ -20,22 +20,10 @@ type ConfigSetParams struct {
 }
 
 // configPath is the canonical location of config.toml inside the daemon
-// state directory. Both configGet and configSet route through it so they
-// always touch the same file.
+// state directory. configSet and the config state contributor both
+// route through it so they always touch the same file.
 func (d *Daemon) configPath() string {
 	return filepath.Join(d.StateDir, "config.toml")
-}
-
-// configGet returns the current on-disk config snapshot. Surfaces use
-// internal/config.KeyByPath/KeyList to extract individual values; the
-// handler returns the full struct so single-key and full-list callers
-// share one round trip.
-func configGet(_ context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
-	cfg, err := config.Load(d.configPath())
-	if err != nil {
-		return nil, internalErr(err)
-	}
-	return cfg, nil
 }
 
 // configSet validates the path/value pair against the config.Key

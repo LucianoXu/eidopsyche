@@ -9,17 +9,6 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
 )
 
-// relayList returns own relays ordered by role then URL. Result is
-// the typed OwnRelayRow slice — AddedAt rides along so dashboard and
-// CLI can both decode the same projection. The CLI ignores AddedAt.
-func relayList(ctx context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
-	rows, err := d.ListOwnRelays(ctx)
-	if err != nil {
-		return nil, internalErr(err)
-	}
-	return rows, nil
-}
-
 // relayAdd inserts a relay URL with the given role (home|fallback).
 // Routes through daemon.Mutate so the change emits state.changed via the
 // common path. Both host and container daemons can write relays
@@ -81,15 +70,6 @@ func relayRemove(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 		return nil, asIPCError(err)
 	}
 	return map[string]bool{"ok": true}, nil
-}
-
-// relaysHealth returns the daemon's per-URL connection state. Consumers:
-// `eidos gate status`, `eidos gate whoami`, the dashboard.
-func relaysHealth(_ context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
-	if d.relayHealth == nil {
-		return []RelayHealth{}, nil
-	}
-	return d.relayHealth.snapshot(), nil
 }
 
 // relayListContains is a local set-membership helper used by
