@@ -160,6 +160,47 @@ func TestRemoveOwnRelay_NormalizesInput(t *testing.T) {
 	}
 }
 
+// TestPublishTargets_NormalizesAndDedupes asserts that publishTargets
+// folds trailing-slash variants from the three input layers (own_relays,
+// recipient relays, configured fallbacks) into a single entry. Without
+// this, a contact relay `wss://x/` and an own_relay `wss://x` would
+// each open their own WebSocket to the same Nostr endpoint, reopening
+// the duplicate-connection bug this PR is meant to eliminate.
+func TestPublishTargets_NormalizesAndDedupes(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+
+	if err := d.AddOwnRelay(ctx, "wss://relay.example", "home"); err != nil {
+		t.Fatal(err)
+	}
+	d.Cfg.Publish.FallbackRelays = []string{
+		"wss://relay.example/",       // trailing-slash variant of the own_relay
+		"wss://Other.Example/nostr/", // path-tail slash + mixed case
+	}
+	recipient := []string{
+		"wss://Relay.Example",        // mixed-case variant
+		"wss://other.example/nostr/", // identical (lowercased) to fallback after norm
+	}
+
+	urls, err := d.publishTargets(ctx, recipient)
+	if err != nil {
+		t.Fatalf("publishTargets: %v", err)
+	}
+	sort.Strings(urls)
+	want := []string{
+		"wss://other.example/nostr/",
+		"wss://relay.example",
+	}
+	if len(urls) != len(want) {
+		t.Fatalf("urls=%v, want %v", urls, want)
+	}
+	for i := range want {
+		if urls[i] != want[i] {
+			t.Errorf("url[%d]=%q, want %q", i, urls[i], want[i])
+		}
+	}
+}
+
 func TestNormRelayURL(t *testing.T) {
 	cases := []struct {
 		name, in, want string
