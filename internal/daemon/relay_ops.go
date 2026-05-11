@@ -102,6 +102,11 @@ func (d *Daemon) RemoveOwnRelay(ctx context.Context, rawURL string) error {
 	if rawURL == "" {
 		return errOwnRelayInvalidURL
 	}
+	// Match the canonicalization AddOwnRelay applies on insert. Without
+	// this, a caller who added `wss://x/` (stored as `wss://x` after
+	// normalize) and then tried to remove the same input form would hit
+	// errOwnRelayNotFound on the exact-match lookup below.
+	rawURL = normRelayURL(rawURL)
 	tx, err := d.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)

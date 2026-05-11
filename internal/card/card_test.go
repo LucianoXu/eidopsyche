@@ -76,6 +76,33 @@ func TestParseCanonicalizesRelay(t *testing.T) {
 	}
 }
 
+// TestRoundtripPreservesPathTailSlash locks the contract that
+// URI()/Parse() round-trip a relay URL whose path ends in a meaningful
+// trailing slash (e.g. `wss://host/nostr/`). The original implementation
+// used TrimRight on the unescaped relay and silently ate the path-tail
+// slash, leaving callers connecting to `wss://host/nostr` — a different
+// WebSocket route at path-sensitive relays. Parse must only undo URI()'s
+// own appended separator slash, not arbitrary trailing slashes.
+func TestRoundtripPreservesPathTailSlash(t *testing.T) {
+	original := card.Card{
+		Npub:  "npub1abc",
+		Relay: "wss://relay.example/nostr/",
+		Label: "PathTail",
+	}
+	uri, err := original.URI()
+	if err != nil {
+		t.Fatalf("URI(): %v", err)
+	}
+	parsed, err := card.Parse(uri)
+	if err != nil {
+		t.Fatalf("Parse(%q): %v", uri, err)
+	}
+	if parsed.Relay != original.Relay {
+		t.Errorf("Relay round-trip lost path-tail slash: got %q, want %q (uri=%q)",
+			parsed.Relay, original.Relay, uri)
+	}
+}
+
 // ---- TOML form tests ----
 
 func TestCard_TOML_RoundTrip(t *testing.T) {

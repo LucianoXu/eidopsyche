@@ -35,6 +35,36 @@ func TestAddOwnRelay_CanonicalizesURL(t *testing.T) {
 	}
 }
 
+// TestRemoveOwnRelay_NormalizesInput locks the contract that
+// RemoveOwnRelay treats `wss://x/` and `wss://x` as the same key. Without
+// this, an operator who adds `wss://x/` (stored canonical as `wss://x`)
+// and removes the same form they typed sees errOwnRelayNotFound from the
+// exact-match DELETE.
+func TestRemoveOwnRelay_NormalizesInput(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+
+	if err := d.AddOwnRelay(ctx, "wss://home.example", "home"); err != nil {
+		t.Fatalf("seed home: %v", err)
+	}
+	if err := d.AddOwnRelay(ctx, "wss://fallback.example", "fallback"); err != nil {
+		t.Fatalf("seed fallback: %v", err)
+	}
+
+	// Remove with trailing-slash form even though storage canonicalized.
+	if err := d.RemoveOwnRelay(ctx, "wss://fallback.example/"); err != nil {
+		t.Fatalf("RemoveOwnRelay with trailing slash: %v", err)
+	}
+
+	rows, err := d.ListOwnRelays(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].URL != "wss://home.example" {
+		t.Errorf("after remove: rows=%+v, want only [wss://home.example]", rows)
+	}
+}
+
 func TestNormRelayURL(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"wss://relay.example/", "wss://relay.example"},
