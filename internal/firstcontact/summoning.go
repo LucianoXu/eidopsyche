@@ -49,4 +49,11 @@ type Summoning struct {
 	// path. Phase 4 inspects it to choose the tar source and to skip
 	// claude-driven calling-words generation.
 	PrefabID string
+
+	// HeartbeatInterval is the cadence collected by Phase 3.5 (heart
+	// cadence). Empty means "use system default" (the supervisor
+	// falls back to config.DefaultHeartbeatInterval at PID-1 startup).
+	// Passed into forge.CreateOpts.HeartbeatInterval at seal time so
+	// init-volume stamps it into the freshly-written config.toml.
+	HeartbeatInterval string
 }

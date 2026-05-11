@@ -147,16 +147,17 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	// .tpl substitution surface (no-op for the scratch path's
 	// template/, which doesn't reference them).
 	createOpts := forge.CreateOpts{
-		Owner:        s.MasterNpub,
-		OwnerLabel:   s.MasterLabel,
-		MindFormNpub: s.MindFormNpub,
-		Relay:        s.HomeRelay,
-		Label:        s.SummonedName,
-		Image:        d.Image,
-		KeyHex:       s.MindFormKeyHex,
-		JournalEntry: book,
-		NoLogin:      true,
-		PrefabID:     s.PrefabID,
+		Owner:             s.MasterNpub,
+		OwnerLabel:        s.MasterLabel,
+		MindFormNpub:      s.MindFormNpub,
+		Relay:             s.HomeRelay,
+		Label:             s.SummonedName,
+		Image:             d.Image,
+		KeyHex:            s.MindFormKeyHex,
+		JournalEntry:      book,
+		NoLogin:           true,
+		PrefabID:          s.PrefabID,
+		HeartbeatInterval: s.HeartbeatInterval,
 	}
 	if err := forge.Orchestrate(ctx, d.DockerClient, s.Slug, createOpts); err != nil {
 		return nil, fmt.Errorf("forge.Orchestrate: %w", err)
