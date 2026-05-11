@@ -173,6 +173,28 @@ func TarStreamPrefab(w io.Writer, id string, params Params) error {
 		tw.Close() //nolint:errcheck // best-effort; return the walk error
 		return walkErr
 	}
+	// Append the wizard's pre-rendered summoning book as a literal file
+	// at journal/0000-summoning.md. Mirror TarStream's behaviour so the
+	// supervisor's birth handler can find the file regardless of which
+	// scaffold path produced the volume. Without this the prefab path
+	// leaves journal/ empty and the birth handler retries forever.
+	if params.JournalEntry != "" {
+		body := []byte(params.JournalEntry)
+		if err := tw.WriteHeader(&tar.Header{
+			Name:     "journal/0000-summoning.md",
+			Mode:     0o600,
+			Size:     int64(len(body)),
+			Typeflag: tar.TypeReg,
+			ModTime:  now,
+		}); err != nil {
+			tw.Close() //nolint:errcheck
+			return err
+		}
+		if _, err := tw.Write(body); err != nil {
+			tw.Close() //nolint:errcheck
+			return err
+		}
+	}
 	return tw.Close()
 }
 
