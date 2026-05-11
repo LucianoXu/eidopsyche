@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -189,4 +190,51 @@ func TestCaptureServer_ListenLocalhost(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
+}
+
+// TestRunCapture_Smoke: end-to-end against the real claude binary.
+// Skipped in -short mode and when claude is not on PATH.
+func TestRunCapture_Smoke(t *testing.T) {
+	if testing.Short() {
+		t.Skip("smoke test requires real claude binary")
+	}
+	if _, err := exec.LookPath("claude"); err != nil {
+		t.Skip("claude not on PATH")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	out, err := runCapture(ctx, runOpts{
+		Prompt:      "ping",
+		ExtraArgs:   nil,
+		NoPOSTAfter: 8 * time.Second,
+		Verbose:     false,
+	})
+	if err != nil {
+		t.Fatalf("runCapture: %v", err)
+	}
+
+	var envelope map[string]any
+	if err := json.Unmarshal(out, &envelope); err != nil {
+		t.Fatalf("envelope not valid JSON: %v\n%s", err, out)
+	}
+	req, ok := envelope["request"].(map[string]any)
+	if !ok {
+		t.Fatalf("envelope.request not an object; envelope=%v", envelope)
+	}
+	if _, has := req["model"]; !has {
+		t.Errorf("envelope.request.model missing; keys=%v", mapKeys(req))
+	}
+	if _, has := req["system"]; !has {
+		t.Errorf("envelope.request.system missing; keys=%v", mapKeys(req))
+	}
+}
+
+func mapKeys(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }

@@ -12,7 +12,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"runtime"
+	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -30,6 +35,9 @@ type captureServer struct {
 	mu       sync.Mutex
 	captured []byte
 	done     chan struct{}
+	// verbose, if true, logs every HTTP path the server receives to
+	// os.Stderr. Plumbed from runOpts.Verbose.
+	verbose bool
 }
 
 func newCaptureServer() *captureServer {
@@ -47,6 +55,9 @@ func (s *captureServer) handler() http.Handler {
 }
 
 func (s *captureServer) handleMessages(w http.ResponseWriter, r *http.Request) {
+	if s.verbose {
+		fmt.Fprintf(os.Stderr, "promptdump: proxy %s %s\n", r.Method, r.URL.Path)
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -79,6 +90,9 @@ func (s *captureServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *captureServer) handleOther(w http.ResponseWriter, r *http.Request) {
+	if s.verbose {
+		fmt.Fprintf(os.Stderr, "promptdump: proxy %s %s (stub)\n", r.Method, r.URL.Path)
+	}
 	// Permissive stub for ancillary endpoints (model list, MCP registry,
 	// telemetry). Most claude code paths tolerate a 404 here; we return
 	// 200 with an empty JSON object to be maximally polite.
@@ -166,6 +180,119 @@ func buildEnvelope(meta envelopeMeta, body []byte) ([]byte, error) {
 		out["parse_error"] = err.Error()
 	}
 	return json.MarshalIndent(out, "", "  ")
+}
+
+// runOpts collects the parameters of one capture run.
+type runOpts struct {
+	Prompt      string        // the -p argument to claude (default "ping")
+	ExtraArgs   []string      // appended to claude's argv before -p
+	NoPOSTAfter time.Duration // kill claude if no /v1/messages by then
+	KeepGoing   bool          // do not terminate claude after capture
+	Verbose     bool          // log proxy traffic + claude stderr
+}
+
+// runCapture orchestrates one full capture cycle: bring up the proxy,
+// spawn claude with env overrides, wait for capture, terminate child,
+// return the serialized envelope JSON.
+func runCapture(ctx context.Context, opts runOpts) ([]byte, error) {
+	if opts.Prompt == "" {
+		opts.Prompt = "ping"
+	}
+	if opts.NoPOSTAfter == 0 {
+		opts.NoPOSTAfter = 8 * time.Second
+	}
+
+	claudePath, err := exec.LookPath("claude")
+	if err != nil {
+		return nil, fmt.Errorf("claude binary not on PATH: %w", err)
+	}
+	claudeVer := probeClaudeVersion(claudePath)
+
+	srv := newCaptureServer()
+	srv.verbose = opts.Verbose
+	baseURL, shutdownProxy, err := srv.listen()
+	if err != nil {
+		return nil, err
+	}
+	defer shutdownProxy(context.Background())
+
+	args := append([]string{}, opts.ExtraArgs...)
+	args = append(args, "-p", opts.Prompt)
+
+	if opts.Verbose {
+		fmt.Fprintf(os.Stderr, "promptdump: spawning %s %s\n", claudePath, strings.Join(args, " "))
+		fmt.Fprintf(os.Stderr, "promptdump: proxy at %s\n", baseURL)
+	}
+
+	cmd := exec.CommandContext(ctx, claudePath, args...)
+	cmd.Env = append(os.Environ(),
+		"ANTHROPIC_BASE_URL="+baseURL,
+		"ANTHROPIC_API_KEY=sk-dummy-promptdump",
+	)
+	stderrBuf := &strings.Builder{}
+	cmd.Stderr = stderrBuf
+	cmd.Stdout = io.Discard
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("spawn claude: %w", err)
+	}
+
+	noPOSTTimer := time.NewTimer(opts.NoPOSTAfter)
+	defer noPOSTTimer.Stop()
+
+	select {
+	case <-srv.done:
+		// captured; let claude exit on its own (it should, because we
+		// returned a complete SSE stream) — but enforce a short grace.
+		if !opts.KeepGoing {
+			grace := time.NewTimer(3 * time.Second)
+			waitCh := make(chan error, 1)
+			go func() { waitCh <- cmd.Wait() }()
+			select {
+			case <-waitCh:
+			case <-grace.C:
+				_ = cmd.Process.Signal(syscall.SIGTERM)
+				<-waitCh
+			}
+			grace.Stop()
+		} else {
+			_ = cmd.Wait()
+		}
+	case <-noPOSTTimer.C:
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		_ = cmd.Wait()
+		return nil, fmt.Errorf("claude did not POST /v1/messages within %s; stderr:\n%s",
+			opts.NoPOSTAfter, stderrBuf.String())
+	case <-ctx.Done():
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		_ = cmd.Wait()
+		return nil, ctx.Err()
+	}
+
+	if opts.Verbose && stderrBuf.Len() > 0 {
+		fmt.Fprintf(os.Stderr, "promptdump: claude stderr:\n%s\n", stderrBuf.String())
+	}
+
+	cwd, _ := os.Getwd()
+	meta := envelopeMeta{
+		CapturedAt:    time.Now().UTC(),
+		ClaudeVersion: claudeVer,
+		ClaudePath:    claudePath,
+		ClaudeArgs:    args,
+		Host:          hostInfo{Platform: runtime.GOOS, CWD: cwd},
+	}
+	return buildEnvelope(meta, srv.captured)
+}
+
+// probeClaudeVersion runs `claude --version` with a short timeout and
+// returns the trimmed stdout, or the literal "unknown" on any failure.
+func probeClaudeVersion(claudePath string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, claudePath, "--version").Output()
+	if err != nil {
+		return "unknown"
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func main() {
