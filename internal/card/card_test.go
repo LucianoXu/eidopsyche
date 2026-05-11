@@ -48,29 +48,62 @@ func TestParseRejectsMissingNpub(t *testing.T) {
 	}
 }
 
-// TestParseCanonicalizesRelay locks the invariant that an encoded
-// trailing slash (`%2F`) and a literal trailing slash produce the same
-// Card.Relay. Regression for the bug where a hand-crafted URI with
-// `wss%3A%2F%2Frelay%2F` registered as a separate relay endpoint from
-// `wss://relay`, breaking the daemon's per-URL connection registry.
-func TestParseCanonicalizesRelay(t *testing.T) {
+// TestParseDecodesRelay locks the card-layer contract: Parse undoes the
+// literal `/` separator URI() appends but otherwise preserves the relay
+// URL exactly. Cross-form dedup (`wss://x` vs `wss://x/`) is the
+// daemon's job via normRelayURL; the card layer must round-trip URI()
+// output faithfully so that path-sensitive routes like
+// `wss://host/nostr/` survive unchanged.
+func TestParseDecodesRelay(t *testing.T) {
 	cases := []struct {
 		name string
 		uri  string
+		want string
 	}{
-		{"encoded slash", "mindgate://npub1abc@wss%3A%2F%2Frelay.example%2F?label=A"},
-		{"literal slash", "mindgate://npub1abc@wss%3A%2F%2Frelay.example/?label=A"},
-		{"no slash", "mindgate://npub1abc@wss%3A%2F%2Frelay.example?label=A"},
+		// URI() output: encoded relay + literal "/" separator. Parse
+		// strips exactly the separator.
+		{
+			"URI() output for slash-less relay",
+			"mindgate://npub1abc@wss%3A%2F%2Frelay.example/?label=A",
+			"wss://relay.example",
+		},
+		{
+			"URI() output for root-slash relay",
+			"mindgate://npub1abc@wss%3A%2F%2Frelay.example%2F/?label=A",
+			"wss://relay.example/",
+		},
+		{
+			"URI() output for path-tail-slash relay",
+			"mindgate://npub1abc@wss%3A%2F%2Fhost%2Fnostr%2F/?label=A",
+			"wss://host/nostr/",
+		},
+		// Hand-written URIs that skip URI()'s separator must round-trip
+		// the encoded relay verbatim — no separator means nothing to
+		// strip.
+		{
+			"hand-written no separator, no slash",
+			"mindgate://npub1abc@wss%3A%2F%2Frelay.example?label=A",
+			"wss://relay.example",
+		},
+		{
+			"hand-written no separator, encoded root slash",
+			"mindgate://npub1abc@wss%3A%2F%2Frelay.example%2F?label=A",
+			"wss://relay.example/",
+		},
+		{
+			"hand-written no separator, encoded path-tail slash",
+			"mindgate://npub1abc@wss%3A%2F%2Fhost%2Fnostr%2F?label=A",
+			"wss://host/nostr/",
+		},
 	}
-	const want = "wss://relay.example"
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c, err := card.Parse(tc.uri)
 			if err != nil {
 				t.Fatalf("Parse(%q): %v", tc.uri, err)
 			}
-			if c.Relay != want {
-				t.Errorf("Relay=%q, want %q", c.Relay, want)
+			if c.Relay != tc.want {
+				t.Errorf("Relay=%q, want %q", c.Relay, tc.want)
 			}
 		})
 	}

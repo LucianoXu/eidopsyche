@@ -188,11 +188,17 @@ func (d *Daemon) InviteRedeem(ctx context.Context, token string) (*InviteRedeemR
 		return nil, fmt.Errorf("decode issuer npub: %w", err)
 	}
 
+	// Canonicalize once: storage AND publish targets must agree on the
+	// relay key, otherwise a `wss://x/` payload + a stored `wss://x`
+	// own_relay open two connections to the same Nostr endpoint at
+	// redemption time and one side 503s.
+	issuerRelay := normRelayURL(payload.IssuerRelay)
+
 	contact := contacts.Contact{
 		Pubkey: issuerHex,
 		Label:  payload.IssuerLabelHint,
 		Tier:   contacts.TierFriend,
-		Relays: []string{normRelayURL(payload.IssuerRelay)},
+		Relays: []string{issuerRelay},
 	}
 	if addErr := d.Repo.Add(ctx, contact); addErr != nil && !errors.Is(addErr, contacts.ErrExists) {
 		return nil, fmt.Errorf("add issuer contact: %w", addErr)
@@ -224,14 +230,14 @@ func (d *Daemon) InviteRedeem(ctx context.Context, token string) (*InviteRedeemR
 		d.recordSelfWrap(selfWrap.ID)
 	}
 
-	targets := map[string]struct{}{payload.IssuerRelay: {}}
+	targets := map[string]struct{}{issuerRelay: {}}
 	if urls, ourErr := d.ownRelayURLs(ctx); ourErr == nil {
 		for _, u := range urls {
-			targets[u] = struct{}{}
+			targets[normRelayURL(u)] = struct{}{}
 		}
 	}
 	for _, u := range d.Cfg.Publish.FallbackRelays {
-		targets[u] = struct{}{}
+		targets[normRelayURL(u)] = struct{}{}
 	}
 	urls := make([]string, 0, len(targets))
 	for u := range targets {
@@ -261,7 +267,7 @@ func (d *Daemon) InviteRedeem(ctx context.Context, token string) (*InviteRedeemR
 
 	return &InviteRedeemResult{
 		IssuerNpub:  payload.IssuerNpub,
-		IssuerRelay: payload.IssuerRelay,
+		IssuerRelay: issuerRelay,
 		AcceptedBy:  accepted,
 	}, nil
 }
