@@ -284,11 +284,11 @@ func renderMarkdown(env map[string]any) (string, error) {
 		fmt.Fprintf(&b, "- **`%s`** — %s\n", name, firstNonEmptyLine(desc))
 	}
 	if len(tools) > 0 {
-		b.WriteString("\n<details><summary>Full tool schemas</summary>\n\n")
-		b.WriteString("```json\n")
-		toolsJSON, _ := json.MarshalIndent(tools, "", "  ")
-		b.Write(toolsJSON)
-		b.WriteString("\n```\n\n</details>\n\n")
+		b.WriteString("\n")
+	}
+	for _, t := range tools {
+		tm, _ := t.(map[string]any)
+		renderToolDetail(&b, tm)
 	}
 
 	messages, _ := req["messages"].([]any)
@@ -396,6 +396,35 @@ func renderOtherRequestFields(b *strings.Builder, req map[string]any) {
 		}
 	}
 	b.WriteString("\n")
+}
+
+// renderToolDetail appends a "### `<name>`" subsection for one tool:
+// its full description in a fenced block, and the input_schema in a
+// collapsible <details> block. Skipped when both name and description
+// are empty. The input_schema <details> block is omitted when the
+// tool has no schema.
+func renderToolDetail(b *strings.Builder, tool map[string]any) {
+	name, _ := tool["name"].(string)
+	desc, _ := tool["description"].(string)
+	if name == "" && desc == "" {
+		return
+	}
+	fmt.Fprintf(b, "### `%s`\n\n", name)
+	if desc != "" {
+		b.WriteString("```\n")
+		b.WriteString(desc)
+		if !strings.HasSuffix(desc, "\n") {
+			b.WriteString("\n")
+		}
+		b.WriteString("```\n\n")
+	}
+	if schema, ok := tool["input_schema"]; ok {
+		b.WriteString("<details><summary>input_schema</summary>\n\n")
+		b.WriteString("```json\n")
+		schemaJSON, _ := json.MarshalIndent(schema, "", "  ")
+		b.Write(schemaJSON)
+		b.WriteString("\n```\n\n</details>\n\n")
+	}
 }
 
 // formatMediaType returns the media-type prefixed with a single space,
