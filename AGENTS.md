@@ -159,6 +159,12 @@ The only sanctioned exception is bootstrap or diagnostic commands that operate o
 
 This rule is the structural answer to a class of bugs we hit in 2026-05: the dashboard's `Send` had silently forked from the IPC `send` handler — skipping the contact-existence check, the npub→hex resolution, and the two-phase outbox persistence. `config set` was a three-way fork (CLI direct-file-write, dashboard direct-file-write under a daemon mutex, no IPC method) racing on `config.toml`. See `docs/superpowers/specs/2026-05-09-unified-call-path-design.md` for the migration plan.
 
+### Operator/mindform symmetry
+
+Every adjustment and every read in the same state schema is reachable through the same IPC method table, regardless of whether the caller is the operator (against the host gate daemon or via `docker exec` into a mindform's container) or the mindform itself (in-container against its own daemon). Surfaces are parameter-packing wrappers; host-side `eidos forge config <name> ...` and in-container `eidos gate ...` funnel through identical method calls. Reads go through `state.get [path]`; mutations through the per-domain IPC methods, all of which route through `daemon.Mutate` (context check → lock → write → apply hook → emit `state.changed`).
+
+**Don't add a host-only or container-only side-channel for state actions.** State that exists only in one context (e.g. `lifecycle.*` on the mindform) is fine — the schema can have context-specific subtrees — but the verb that touches it is the same. Container-only config keys (e.g. `heartbeat.interval`, `mindform.model`) declare `Contexts: ContainerCtx` in their Key registration; the Mutate framework rejects host-side writes with `CONTEXT_MISMATCH` and an error pointing to the correct verb. See `docs/superpowers/specs/2026-05-11-unified-state-interface-design.md`.
+
 
 ## Commit & Pull Request Guidelines
 

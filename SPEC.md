@@ -90,7 +90,7 @@ Agent Skills 文件可以理解为基于自然语言的程序系统。
 - HeartBeat 间隔（cadence）由 `[heartbeat] interval` 配置项决定，写入容器内 `/eidos/gate/config.toml`。空值（未配置）回落到 `config.DefaultHeartbeatInterval`（当前为 2h）。支持集为 `{1m, 2m, 3m, 4m, 5m, 6m, 10m, 12m, 15m, 20m, 30m, 1h, 2h, 3h, 4h, 6h, 8h, 12h, 24h}`——即可被分钟数整除 60、或被小时数整除 24 的步长，保证 cron 表达式精确。配置有三个等价用户面：
   - **First-Contact Wizard**: Phase 3.5（heart cadence）提供选项菜单（默认 2h，外加 1h / 30m / 10m / 5m / 2m / 1m）加 Custom 自由输入。
   - **`eidos forge create --heartbeat-interval <duration>`**: 命令行非交互设置，通过 `EIDOS_FORGE_HEARTBEAT_INTERVAL` 环境变量传入 init-volume，由 `applyHeartbeatEnv` 在容器卷被填充时写入 config.toml。
-  - **`eidos forge config <name> --heartbeat-interval <duration>`**: 修改已存在的 mind-form。底层走 `eidos gate config set heartbeat.interval <duration>` IPC 路径（注册键见 `internal/config/keys.go`），写入完成后自动 `docker restart`——因为 supervisor 只在 PID-1 启动时读取一次 `[heartbeat] interval` 并渲染 crontab。
+  - **`eidos forge config <name> --heartbeat-interval <duration>`**: 修改已存在的 mind-form。底层走 `eidos gate config set heartbeat.interval <duration>` IPC 路径（注册键见 `internal/config/keys.go`）。容器内 daemon 在写入 `config.toml` 后通过 apply hook 同步重新渲染并安装 busybox crontab（atomic tmp+rename via sudo），无需 `docker restart`——busybox crond 检测 spool mtime 变化后自动重新读取。详见 `docs/superpowers/specs/2026-05-11-unified-state-interface-design.md`。
 - 做梦（Dream）是一种不响应外界、归纳整理本体文件自身的特殊活动。做梦时 MindForge 记录上下文对话、回忆情景记忆，归纳到语义记忆和skills，整理skills，并写一段散文式的梦到日志。做梦结束后心智体使用新的 session 和上下文（具体机制见下方"唤醒上下文生命周期"）。两次做梦间应当有一定时间间隔，并且应当尽量在用户睡觉的时候做梦。
 
 ### 唤醒上下文生命周期

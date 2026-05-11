@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/cron"
 	"github.com/LucianoXu/eidopsyche/internal/daemon"
 	"github.com/LucianoXu/eidopsyche/internal/service"
 )
@@ -26,6 +27,17 @@ var daemonCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		// Container-side daemon: take ContainerCtx and register apply
+		// hooks for keys that need in-container side effects beyond the
+		// config.toml write. heartbeat.interval re-renders + installs
+		// the busybox crontab so the new cadence takes effect without
+		// a `docker restart`. The supervisor's PID-1 startup-time
+		// render handles the cold path (process boot); this apply hook
+		// handles the hot path (config change on a running mindform).
+		if os.Getenv("EIDOS_IN_CONTAINER") == "1" {
+			d.SetContext(config.ContainerCtx)
+			d.RegisterApply("config.heartbeat.interval", heartbeatApplyHook)
+		}
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
 		fmt.Fprintf(os.Stderr, "eidos-gate-daemon starting state_dir=%s\n", dir)
@@ -37,6 +49,23 @@ var daemonCmd = &cobra.Command{
 			return d.Run(ctx)
 		})
 	},
+}
+
+// heartbeatApplyHook re-renders the busybox crontab from the new
+// heartbeat.interval value and writes it to /var/spool/cron/crontabs/eidos
+// atomically via sudo. busybox crond detects the spool mtime change and
+// re-reads on its next scan. Synchronous: the IPC call that triggered
+// the config.set returns only after the new crontab is in place.
+//
+// Empty `new` is valid (operator clears the override, falls back to the
+// 2h default). cron.Render handles "" → DefaultHeartbeatInterval.
+func heartbeatApplyHook(ctx context.Context, _ any, _ any, newVal any) error {
+	interval, _ := newVal.(string)
+	body, err := cron.Render(interval)
+	if err != nil {
+		return fmt.Errorf("heartbeat apply: render: %w", err)
+	}
+	return cron.DefaultInstaller().Install(ctx, body)
 }
 
 func init() { rootCmd.AddCommand(daemonCmd) }
