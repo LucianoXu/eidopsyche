@@ -7,11 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
 	"github.com/LucianoXu/eidopsyche/internal/invitedb"
 	"github.com/LucianoXu/eidopsyche/internal/nostr"
+	"github.com/LucianoXu/eidopsyche/internal/state"
 	"github.com/LucianoXu/eidopsyche/internal/store"
 )
 
@@ -46,6 +48,11 @@ func newTestDaemon(t *testing.T) *Daemon {
 		dedupe:        map[string]struct{}{},
 		selfWrapIDs:   map[string]struct{}{},
 		ackedInnerIDs: map[string]struct{}{},
+		applyRegistry: state.NewApplyRegistry(),
+		stateTree:     state.NewTree(),
+		// Default test daemon to HostCtx (the common case for unit tests).
+		// Container-only key tests override this with SetContext as needed.
+		Context: config.HostCtx,
 		// Default ack-emit to a silent no-op so unit tests don't try to
 		// publish over a nil/empty Pool with synthetic rumor IDs that
 		// fail envelope validation. Tests asserting ack behavior override.

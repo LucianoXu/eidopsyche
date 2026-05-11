@@ -8,6 +8,19 @@ import (
 	"strings"
 )
 
+// Context identifies in which daemon context a config key is valid.
+// The host gate daemon and the in-container PID-1 share most keys, but
+// a few (e.g. heartbeat.interval, mindform.model) only make sense
+// inside a mindform — the Mutate framework rejects mismatched writes
+// with CONTEXT_MISMATCH and points the operator to the correct verb.
+type Context uint8
+
+const (
+	HostCtx      Context = 1 << 0
+	ContainerCtx Context = 1 << 1
+	BothCtx              = HostCtx | ContainerCtx
+)
+
 // Key describes a single user-settable scalar config option exposed by
 // `eidos gate config get/set` and the dashboard's Settings → Config tab.
 //
@@ -25,6 +38,12 @@ type Key struct {
 	// human-readable message on bad input; the caller is responsible for
 	// surfacing it (CLI prints to stderr, dashboard renders inline).
 	Set func(*Config, string) error
+	// Contexts is a bitmask of daemon contexts in which this key is
+	// settable. Keys that only make sense in one context (e.g.
+	// heartbeat.interval inside a mindform container) declare it here so
+	// the Mutate framework can short-circuit attempts to write them from
+	// the wrong side with a helpful CONTEXT_MISMATCH error.
+	Contexts Context
 }
 
 // keys is the registry of supported scalar config keys. The order in which
@@ -61,6 +80,7 @@ func init() {
 	register(Key{
 		Path:        "log_level",
 		Description: "Daemon log verbosity (debug, info, warn, error).",
+		Contexts:    BothCtx,
 		Get:         func(c *Config) string { return c.LogLevel },
 		Set: func(c *Config, v string) error {
 			v = strings.ToLower(strings.TrimSpace(v))
@@ -76,6 +96,7 @@ func init() {
 	register(Key{
 		Path:        "daemon.socket",
 		Description: "Filename of the daemon's IPC unix socket inside the state directory.",
+		Contexts:    BothCtx,
 		Get:         func(c *Config) string { return c.Daemon.Socket },
 		Set: func(c *Config, v string) error {
 			v = strings.TrimSpace(v)
@@ -89,6 +110,7 @@ func init() {
 	register(Key{
 		Path:        "daemon.shutdown_grace_seconds",
 		Description: "Seconds to wait for in-flight requests before forcing daemon shutdown.",
+		Contexts:    BothCtx,
 		Get:         func(c *Config) string { return strconv.Itoa(c.Daemon.ShutdownGraceSeconds) },
 		Set: func(c *Config, v string) error {
 			n, err := strconv.Atoi(strings.TrimSpace(v))
@@ -105,6 +127,7 @@ func init() {
 	register(Key{
 		Path:        "dashboard.enabled",
 		Description: "Run the embedded local web dashboard alongside the daemon.",
+		Contexts:    BothCtx,
 		Get: func(c *Config) string {
 			if c.Dashboard.Enabled {
 				return "true"
@@ -126,6 +149,7 @@ func init() {
 	register(Key{
 		Path:        "dashboard.listen",
 		Description: "host:port for the dashboard webui. Loopback-only is enforced; non-loopback addresses are refused.",
+		Contexts:    BothCtx,
 		Get:         func(c *Config) string { return c.Dashboard.Listen },
 		Set: func(c *Config, v string) error {
 			v = strings.TrimSpace(v)
@@ -146,6 +170,7 @@ func init() {
 	register(Key{
 		Path:        "mindform.model",
 		Description: "Pin the claude model used by agent-runner (e.g. claude-sonnet-4-7). Empty lets claude pick its subscription default.",
+		Contexts:    ContainerCtx,
 		Get:         func(c *Config) string { return c.MindForm.Model },
 		Set: func(c *Config, v string) error {
 			v = strings.TrimSpace(v)
@@ -158,7 +183,8 @@ func init() {
 	})
 	register(Key{
 		Path:        "heartbeat.interval",
-		Description: "Mind-form heartbeat cadence. Supported: 1m,2m,3m,4m,5m,6m,10m,12m,15m,20m,30m,1h,2h,3h,4h,6h,8h,12h,24h. Empty uses the 2h default. Change requires a container restart so the supervisor re-renders the crontab.",
+		Description: "Mind-form heartbeat cadence. Supported: 1m,2m,3m,4m,5m,6m,10m,12m,15m,20m,30m,1h,2h,3h,4h,6h,8h,12h,24h. Empty uses the 2h default. Hot-reloaded by the apply hook framework — no container restart needed.",
+		Contexts:    ContainerCtx,
 		Get:         func(c *Config) string { return c.Heartbeat.Interval },
 		Set: func(c *Config, v string) error {
 			v = strings.TrimSpace(v)

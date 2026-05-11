@@ -52,4 +52,19 @@ const (
 	ErrInvitePrefixAmbiguous = "INVITE_PREFIX_AMBIGUOUS"
 	ErrLifecycleBusy         = "LIFECYCLE_BUSY"
 	ErrCardInvalid           = "CARD_INVALID"
+	ErrContextMismatch       = "CONTEXT_MISMATCH"
+	ErrPathNotFound          = "PATH_NOT_FOUND"
+	ErrInconsistent          = "STATE_INCONSISTENT"
 )
+
+// WrapInconsistent composes an apply-failure error with a rollback-
+// failure error into a single STATE_INCONSISTENT IPC error. Used by
+// daemon.Mutate when an apply hook fails AND the framework's rollback
+// attempt also fails — the on-disk state is at the new value but the
+// applied state may not be.
+func WrapInconsistent(applyErr, rollbackErr error) *Error {
+	return &Error{
+		Code:    ErrInconsistent,
+		Message: "apply failed (" + applyErr.Error() + ") AND rollback failed (" + rollbackErr.Error() + "); on-disk state may not match applied state; next daemon restart will reconcile",
+	}
+}

@@ -3,10 +3,10 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
-	"github.com/LucianoXu/eidopsyche/internal/dashboard"
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
 )
 
@@ -39,13 +39,12 @@ func configGet(_ context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (an
 }
 
 // configSet validates the path/value pair against the config.Key
-// registry, performs a locked read-modify-write of config.toml, and
-// emits config.changed. The lock lives on *Daemon so concurrent calls
-// from any surface (CLI over the socket, dashboard via in-process Call)
-// serialise on the same mutex — fixing the three-way fork that PR #9
-// review caught (CLI direct write + dashboard direct write under a
-// mutex that only protected one writer).
-func configSet(_ context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+// registry and routes the write through daemon.Mutate. The Mutate
+// helper performs the context check (rejects mindform-only keys on
+// host with a CONTEXT_MISMATCH error pointing to forge config),
+// serializes via d.configMu, dispatches the apply hook (e.g. crontab
+// hot-reload for heartbeat.interval), and emits state.changed.
+func configSet(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p ConfigSetParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
@@ -54,18 +53,59 @@ func configSet(_ context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage
 	if !ok {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: "unknown config key: " + p.Path}
 	}
-	d.configMu.Lock()
-	defer d.configMu.Unlock()
-	cfg, err := config.Load(d.configPath())
+
+	// Capture the post-write Config snapshot inside the closure so the
+	// IPC response reflects exactly this request's mutation — reloading
+	// after Mutate releases the lock could pick up a concurrent write.
+	var finalCfg config.Config
+	var rollbackArmed bool
+	var savedOld string
+	err := d.Mutate(ctx, "config."+p.Path, key.Contexts,
+		func() (any, any, error) {
+			cfg, err := config.Load(d.configPath())
+			if err != nil {
+				return nil, nil, err
+			}
+			currentVal := key.Get(&cfg)
+			// Second invocation is the rollback path: restore savedOld
+			// instead of applying p.Value again.
+			target := p.Value
+			isRollback := rollbackArmed
+			if !isRollback {
+				savedOld = currentVal
+				rollbackArmed = true
+			} else {
+				target = savedOld
+			}
+			if err := key.Set(&cfg, target); err != nil {
+				if isRollback {
+					return nil, nil, err
+				}
+				// Initial-call validation failure: surface as INVALID_PARAMS.
+				return nil, nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+			}
+			if err := config.Save(d.configPath(), cfg); err != nil {
+				return nil, nil, err
+			}
+			if !isRollback {
+				finalCfg = cfg
+			}
+			return currentVal, key.Get(&cfg), nil
+		})
 	if err != nil {
-		return nil, internalErr(err)
+		return nil, asIPCError(err)
 	}
-	if err := key.Set(&cfg, p.Value); err != nil {
-		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	return finalCfg, nil
+}
+
+// asIPCError unwraps an error into the typed IPC shape. Mutate may
+// return either an *ipc.Error (from context-mismatch / inconsistent
+// rollback / handlers that surface typed errors directly) or a plain
+// error from a handler's write / apply hook (which becomes INTERNAL).
+func asIPCError(err error) *ipc.Error {
+	var ipcErr *ipc.Error
+	if errors.As(err, &ipcErr) {
+		return ipcErr
 	}
-	if err := config.Save(d.configPath(), cfg); err != nil {
-		return nil, internalErr(err)
-	}
-	d.emitDashEvent(dashboard.Event{Kind: "config.changed"})
-	return cfg, nil
+	return internalErr(err)
 }

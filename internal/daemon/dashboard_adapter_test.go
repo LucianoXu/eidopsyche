@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/state"
 )
 
 // TestDashboardAdapter_ConfigSet_Concurrent verifies the configMu lock
@@ -26,7 +27,12 @@ func TestDashboardAdapter_ConfigSet_Concurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d := &Daemon{StateDir: tmp}
+	d := &Daemon{
+		StateDir:      tmp,
+		Context:       config.HostCtx,
+		applyRegistry: state.NewApplyRegistry(),
+		stateTree:     state.NewTree(),
+	}
 	a := dashboardAdapter{d: d}
 
 	var wg sync.WaitGroup

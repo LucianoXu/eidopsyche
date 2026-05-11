@@ -10,10 +10,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/cron"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
@@ -60,13 +60,14 @@ func startChildren(ctx context.Context, sp ChildSpawner) error {
 	if err := config.ValidateMindFormConfig(cfg); err != nil {
 		log.Printf("supervisor: config validation: %v (continuing with defaults where possible)", err)
 	}
-	body, rerr := renderCrontab(cfg)
+	body, _, rerr := cron.RenderOrDefault(cfg.Heartbeat.Interval)
 	if rerr != nil {
 		log.Printf("supervisor: crontab render: %v (using default 2h)", rerr)
 	}
-	// installCrontab requires root because /var/spool/cron/crontabs is
-	// root-owned. The supervisor runs as eidos, so we shell out to sudo.
-	// Tests substitute crontabInstaller to skip the real sudo invocation.
+	// Installer requires root because /var/spool/cron/crontabs is
+	// root-owned. The supervisor runs as eidos, so production routes
+	// through sudo (internal/cron handles that). Tests substitute
+	// crontabInstaller to skip the real sudo invocation.
 	if err := crontabInstaller(ctx, body); err != nil {
 		return fmt.Errorf("install crontab: %w", err)
 	}
@@ -97,29 +98,10 @@ func startChildren(ctx context.Context, sp ChildSpawner) error {
 }
 
 // crontabInstaller is the function startChildren calls to write the
-// crontab file. Tests swap this to a no-op; production points at
-// installCrontabAsRoot which uses sudo.
-var crontabInstaller = installCrontabAsRoot
-
-// installCrontabAsRoot writes body to crontabPath via sudo because the
-// crontab spool is root-owned. Mirrors the sudo pattern used by crond
-// itself (see startChildren).
-func installCrontabAsRoot(ctx context.Context, body string) error {
-	cmd := exec.CommandContext(ctx, "sudo", "-n", "tee", crontabPath)
-	cmd.Stdin = strings.NewReader(body)
-	cmd.Stdout = nil // discard tee's echo
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-	// Ownership/perms also need to be root-owned 0600 per busybox crond's
-	// expectations. Keep the chmod best-effort; tee's umask usually leaves
-	// 0644 which still works, but 0600 is the documented requirement.
-	chmod := exec.CommandContext(ctx, "sudo", "-n", "chmod", "0600", crontabPath)
-	chmod.Stdout = nil
-	chmod.Stderr = os.Stderr
-	_ = chmod.Run()
-	return nil
+// crontab file. Tests swap this to a no-op; production routes through
+// internal/cron's Installer which handles sudo.
+var crontabInstaller = func(ctx context.Context, body string) error {
+	return cron.DefaultInstaller().Install(ctx, body)
 }
 
 // SpawnAgent is invoked when the supervisor picks up a pending wake. The
