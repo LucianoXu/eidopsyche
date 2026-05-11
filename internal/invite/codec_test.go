@@ -6,12 +6,14 @@ import (
 	"time"
 
 	gnostr "github.com/nbd-wtf/go-nostr"
+
+	"github.com/LucianoXu/eidopsyche/internal/identity"
 )
 
 func TestEncodeDecodRoundtrip(t *testing.T) {
 	sk := gnostr.GeneratePrivateKey()
 	pk, _ := gnostr.GetPublicKey(sk)
-	npub, _ := encodeNpub(pk)
+	npub, _ := identity.EncodeNpub(pk)
 	id, _ := RandomID()
 	p := &Payload{
 		V:                 1,

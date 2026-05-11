@@ -81,10 +81,6 @@ func contactAddFromCard(ctx context.Context, d *Daemon, _ *ipc.Conn, params json
 	if err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrCardInvalid, Message: err.Error()}
 	}
-	// card.Parse canonicalizes Relay; re-normalize defensively so any
-	// other Card construction path (TOML Decode, future inputs) still
-	// keys a single registry entry per relay endpoint.
-	c.Relay = normRelayURL(c.Relay)
 	pk, err := identity.DecodeNpub(c.Npub)
 	if err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidNpub, Message: err.Error()}
@@ -140,16 +136,10 @@ func contactAddFromCard(ctx context.Context, d *Daemon, _ *ipc.Conn, params json
 	return saved, nil
 }
 
-// relayListContains is a local set-membership helper used by
-// contact.add-from-card's relay-hint dedup. Compares after normRelayURL
-// so a pre-normalization legacy hint like `wss://x/` is recognized as
-// the same endpoint as a freshly-canonicalized `wss://x`; without this,
-// re-scanning the same card would append a duplicate relay row to a
-// contact whose existing relay was written before normalization landed.
+// relayListContains is set-membership for contact.add-from-card's relay-hint dedup.
 func relayListContains(s []string, x string) bool {
-	want := normRelayURL(x)
 	for _, v := range s {
-		if normRelayURL(v) == want {
+		if v == x {
 			return true
 		}
 	}
