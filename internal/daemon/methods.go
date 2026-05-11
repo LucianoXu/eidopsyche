@@ -37,6 +37,7 @@ func init() {
 	register("invite.redeem", inviteRedeem)
 	register("config.get", configGet)
 	register("config.set", configSet)
+	register("state.get", stateGet)
 	register("contact.get", contactGet)
 	register("contact.set-tier", contactSetTier)
 	register("card.scan", cardScan)
