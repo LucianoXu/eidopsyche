@@ -327,3 +327,34 @@ func TestParseFlags(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildEnvelopeMap: buildEnvelopeMap returns the same shape that
+// buildEnvelope serializes, but as a map[string]any rather than bytes.
+// The renderer (added in a later task) will consume the map directly.
+func TestBuildEnvelopeMap(t *testing.T) {
+	captured := []byte(`{"model":"claude-sonnet-4-7","system":"foo"}`)
+	meta := envelopeMeta{
+		ClaudeVersion: "2.1.138",
+		ClaudePath:    "/usr/bin/claude",
+		ClaudeArgs:    []string{"--model", "sonnet"},
+		Host:          hostInfo{Platform: "linux", CWD: "/data/eidopsyche"},
+		CapturedAt:    time.Date(2026, 5, 11, 17, 23, 45, 0, time.UTC),
+	}
+	got, err := buildEnvelopeMap(meta, captured)
+	if err != nil {
+		t.Fatalf("buildEnvelopeMap: %v", err)
+	}
+	if got["captured_at"] != "2026-05-11T17:23:45Z" {
+		t.Errorf("captured_at = %v", got["captured_at"])
+	}
+	if got["claude_version"] != "2.1.138" {
+		t.Errorf("claude_version = %v", got["claude_version"])
+	}
+	req, ok := got["request"].(map[string]any)
+	if !ok {
+		t.Fatalf("request not an object: %T", got["request"])
+	}
+	if req["model"] != "claude-sonnet-4-7" {
+		t.Errorf("request.model = %v", req["model"])
+	}
+}

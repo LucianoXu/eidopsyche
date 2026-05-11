@@ -152,11 +152,12 @@ type hostInfo struct {
 	CWD      string `json:"cwd"`
 }
 
-// buildEnvelope serializes meta + body into the final pretty-printed JSON
-// envelope. If body parses as JSON, it lands under "request"; otherwise
-// the raw bytes are stringified under "raw_body" and a parse-error note
-// is added under "parse_error".
-func buildEnvelope(meta envelopeMeta, body []byte) ([]byte, error) {
+// buildEnvelopeMap builds the wrapper map captured alongside the
+// request body. Valid JSON body lands under "request"; malformed
+// body falls back to "raw_body" + "parse_error" so output is always
+// usable. Used by buildEnvelope (JSON output) and renderMarkdown
+// (human-readable output).
+func buildEnvelopeMap(meta envelopeMeta, body []byte) (map[string]any, error) {
 	out := map[string]any{
 		"captured_at":    meta.CapturedAt.UTC().Format(time.RFC3339),
 		"claude_version": meta.ClaudeVersion,
@@ -171,7 +172,17 @@ func buildEnvelope(meta envelopeMeta, body []byte) ([]byte, error) {
 		out["raw_body"] = string(body)
 		out["parse_error"] = err.Error()
 	}
-	return json.MarshalIndent(out, "", "  ")
+	return out, nil
+}
+
+// buildEnvelope serializes meta + body into the final pretty-printed
+// JSON envelope. Thin wrapper around buildEnvelopeMap.
+func buildEnvelope(meta envelopeMeta, body []byte) ([]byte, error) {
+	m, err := buildEnvelopeMap(meta, body)
+	if err != nil {
+		return nil, err
+	}
+	return json.MarshalIndent(m, "", "  ")
 }
 
 // runOpts collects the parameters of one capture run.
