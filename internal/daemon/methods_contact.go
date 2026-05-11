@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/LucianoXu/eidopsyche/internal/card"
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/dashboard"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
@@ -93,6 +94,10 @@ func contactAddFromCard(ctx context.Context, d *Daemon, _ *ipc.Conn, params json
 }
 
 // contactAdd adds a new contact from an npub + optional relays/label/tier.
+// Routes through daemon.Mutate so the change emits state.changed for
+// the contacts subtree. The Refresh() call (which re-evaluates which
+// relays the subscriber loop watches) stays outside Mutate so a slow
+// network refresh doesn't hold the lock; the write itself is fast.
 func contactAdd(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p struct {
 		Npub   string   `json:"npub"`
@@ -108,11 +113,18 @@ func contactAdd(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMess
 		return nil, &ipc.Error{Code: ipc.ErrInvalidNpub, Message: err.Error()}
 	}
 	c := contacts.Contact{Pubkey: pk, Label: p.Label, Tier: contacts.Tier(p.Tier), Relays: p.Relays}
-	if err := d.Repo.Add(ctx, c); err != nil {
-		if errors.Is(err, contacts.ErrExists) {
-			return nil, &ipc.Error{Code: ipc.ErrContactExists, Message: pk}
-		}
-		return nil, internalErr(err)
+	merr := d.Mutate(ctx, "contacts."+pk, config.BothCtx,
+		func() (any, any, error) {
+			if err := d.Repo.Add(ctx, c); err != nil {
+				if errors.Is(err, contacts.ErrExists) {
+					return nil, nil, &ipc.Error{Code: ipc.ErrContactExists, Message: pk}
+				}
+				return nil, nil, err
+			}
+			return nil, c, nil
+		})
+	if merr != nil {
+		return nil, asIPCError(merr)
 	}
 	d.Refresh()
 	return map[string]bool{"ok": true}, nil
@@ -164,7 +176,8 @@ func contactGet(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMess
 
 // contactSetTier updates the tier of an existing contact. Validation
 // lives in contacts.Repo.SetTier; invalid tier strings come back as
-// INVALID_PARAMS, missing contacts as CONTACT_NOT_FOUND.
+// INVALID_PARAMS, missing contacts as CONTACT_NOT_FOUND. Routes
+// through daemon.Mutate; emits state.changed.
 func contactSetTier(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p ContactSetTierParams
 	if err := json.Unmarshal(params, &p); err != nil {
@@ -174,17 +187,27 @@ func contactSetTier(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.Raw
 	if ipcErr != nil {
 		return nil, ipcErr
 	}
-	if err := d.Repo.SetTier(ctx, pk, contacts.Tier(p.Tier)); err != nil {
-		if errors.Is(err, contacts.ErrNotFound) {
-			return nil, &ipc.Error{Code: ipc.ErrContactNotFound, Message: pk}
-		}
-		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	merr := d.Mutate(ctx, "contacts."+pk+".tier", config.BothCtx,
+		func() (any, any, error) {
+			if err := d.Repo.SetTier(ctx, pk, contacts.Tier(p.Tier)); err != nil {
+				if errors.Is(err, contacts.ErrNotFound) {
+					return nil, nil, &ipc.Error{Code: ipc.ErrContactNotFound, Message: pk}
+				}
+				return nil, nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+			}
+			return nil, p.Tier, nil
+		})
+	if merr != nil {
+		return nil, asIPCError(merr)
 	}
 	d.emitDashEvent(dashboard.Event{Kind: "contact.tier-changed"})
 	return map[string]string{"pubkey": pk, "tier": p.Tier}, nil
 }
 
 // contactRemove removes a contact by npub, hex pubkey, or label.
+// Routes through daemon.Mutate; emits state.changed for the contacts
+// subtree. Refresh() runs after the lock releases so the subscriber
+// loop re-evaluates without blocking other mutations.
 func contactRemove(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p struct{ Npub string }
 	if err := json.Unmarshal(params, &p); err != nil {
@@ -194,11 +217,18 @@ func contactRemove(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawM
 	if ipcErr != nil {
 		return nil, ipcErr
 	}
-	if err := d.Repo.Remove(ctx, pk); err != nil {
-		if errors.Is(err, contacts.ErrNotFound) {
-			return nil, &ipc.Error{Code: ipc.ErrContactNotFound, Message: pk}
-		}
-		return nil, internalErr(err)
+	merr := d.Mutate(ctx, "contacts."+pk, config.BothCtx,
+		func() (any, any, error) {
+			if err := d.Repo.Remove(ctx, pk); err != nil {
+				if errors.Is(err, contacts.ErrNotFound) {
+					return nil, nil, &ipc.Error{Code: ipc.ErrContactNotFound, Message: pk}
+				}
+				return nil, nil, err
+			}
+			return pk, nil, nil
+		})
+	if merr != nil {
+		return nil, asIPCError(merr)
 	}
 	d.Refresh()
 	return map[string]bool{"ok": true}, nil
@@ -206,6 +236,7 @@ func contactRemove(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawM
 
 // contactSetLabel renames an existing contact. Target accepts npub, hex
 // pubkey, or current label (subject to the usual ambiguity rules).
+// Routes through daemon.Mutate; emits state.changed for the contact.
 func contactSetLabel(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p struct {
 		Target string
@@ -222,11 +253,18 @@ func contactSetLabel(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.Ra
 	if ipcErr != nil {
 		return nil, ipcErr
 	}
-	if err := d.Repo.SetLabel(ctx, pk, label); err != nil {
-		if errors.Is(err, contacts.ErrNotFound) {
-			return nil, &ipc.Error{Code: ipc.ErrContactNotFound, Message: pk}
-		}
-		return nil, internalErr(err)
+	merr := d.Mutate(ctx, "contacts."+pk+".label", config.BothCtx,
+		func() (any, any, error) {
+			if err := d.Repo.SetLabel(ctx, pk, label); err != nil {
+				if errors.Is(err, contacts.ErrNotFound) {
+					return nil, nil, &ipc.Error{Code: ipc.ErrContactNotFound, Message: pk}
+				}
+				return nil, nil, err
+			}
+			return nil, label, nil
+		})
+	if merr != nil {
+		return nil, asIPCError(merr)
 	}
 	return map[string]string{"pubkey": pk, "label": label}, nil
 }

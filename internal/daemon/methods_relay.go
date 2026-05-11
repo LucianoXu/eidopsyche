@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
 )
 
@@ -20,6 +21,10 @@ func relayList(ctx context.Context, d *Daemon, _ *ipc.Conn, _ json.RawMessage) (
 }
 
 // relayAdd inserts a relay URL with the given role (home|fallback).
+// Routes through daemon.Mutate so the change emits state.changed via the
+// common path. Both host and container daemons can write relays
+// (BothCtx); the host gate uses them for its own outbound publishing,
+// the container mindform uses them for its NIP-17 inbox.
 func relayAdd(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p struct {
 		URL  string `json:"url"`
@@ -28,14 +33,21 @@ func relayAdd(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessag
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
 	}
-	if err := d.AddOwnRelay(ctx, p.URL, p.Role); err != nil {
-		switch {
-		case errors.Is(err, errOwnRelayInvalidURL),
-			errors.Is(err, errOwnRelayInvalidRole),
-			errors.Is(err, errOwnRelayDuplicate):
-			return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
-		}
-		return nil, internalErr(err)
+	err := d.Mutate(ctx, "relays."+p.URL, config.BothCtx,
+		func() (any, any, error) {
+			if err := d.AddOwnRelay(ctx, p.URL, p.Role); err != nil {
+				switch {
+				case errors.Is(err, errOwnRelayInvalidURL),
+					errors.Is(err, errOwnRelayInvalidRole),
+					errors.Is(err, errOwnRelayDuplicate):
+					return nil, nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+				}
+				return nil, nil, err
+			}
+			return nil, map[string]string{"url": p.URL, "role": p.Role}, nil
+		})
+	if err != nil {
+		return nil, asIPCError(err)
 	}
 	return map[string]bool{"ok": true}, nil
 }
@@ -46,15 +58,22 @@ func relayRemove(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
 	}
-	if err := d.RemoveOwnRelay(ctx, p.URL); err != nil {
-		switch {
-		case errors.Is(err, errOwnRelayNotFound):
-			return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
-		case errors.Is(err, errOwnRelayInvalidURL),
-			errors.Is(err, errOwnRelayHomeRequired):
-			return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
-		}
-		return nil, internalErr(err)
+	err := d.Mutate(ctx, "relays."+p.URL, config.BothCtx,
+		func() (any, any, error) {
+			if err := d.RemoveOwnRelay(ctx, p.URL); err != nil {
+				switch {
+				case errors.Is(err, errOwnRelayNotFound):
+					return nil, nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+				case errors.Is(err, errOwnRelayInvalidURL),
+					errors.Is(err, errOwnRelayHomeRequired):
+					return nil, nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+				}
+				return nil, nil, err
+			}
+			return map[string]string{"url": p.URL}, nil, nil
+		})
+	if err != nil {
+		return nil, asIPCError(err)
 	}
 	return map[string]bool{"ok": true}, nil
 }

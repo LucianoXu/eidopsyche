@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/invitedb"
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
 )
@@ -35,22 +36,31 @@ func inviteCreate(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMe
 			return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
 		}
 	}
-	res, err := d.InviteCreate(ctx, InviteCreateOptions{
-		SingleUse:      p.SingleUse,
-		Unlimited:      p.Unlimited,
-		MaxUses:        p.MaxUses,
-		ExpiresSeconds: p.ExpiresSeconds,
-		IssuerLabel:    p.IssuerLabel,
-		RedeemerLabel:  p.RedeemerLabel,
-	})
-	if err != nil {
-		return nil, internalErr(err)
+	var result InviteCreateMethodResult
+	merr := d.Mutate(ctx, "invites", config.BothCtx,
+		func() (any, any, error) {
+			res, err := d.InviteCreate(ctx, InviteCreateOptions{
+				SingleUse:      p.SingleUse,
+				Unlimited:      p.Unlimited,
+				MaxUses:        p.MaxUses,
+				ExpiresSeconds: p.ExpiresSeconds,
+				IssuerLabel:    p.IssuerLabel,
+				RedeemerLabel:  p.RedeemerLabel,
+			})
+			if err != nil {
+				return nil, nil, err
+			}
+			inv, err := d.Invites.Get(ctx, res.ID)
+			if err != nil {
+				return nil, nil, err
+			}
+			result = InviteCreateMethodResult{Invite: inv, URI: res.URI}
+			return nil, inv, nil
+		})
+	if merr != nil {
+		return nil, asIPCError(merr)
 	}
-	inv, err := d.Invites.Get(ctx, res.ID)
-	if err != nil {
-		return nil, internalErr(err)
-	}
-	return InviteCreateMethodResult{Invite: inv, URI: res.URI}, nil
+	return result, nil
 }
 
 // inviteList returns invites filtered by status. The result is the
@@ -72,7 +82,8 @@ func inviteList(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMess
 	return invites, nil
 }
 
-// inviteRevoke revokes an invite by id prefix.
+// inviteRevoke revokes an invite by id prefix. Routes through
+// daemon.Mutate; emits state.changed for the invite.
 func inviteRevoke(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p struct {
 		IDPrefix string `json:"id_prefix"`
@@ -80,17 +91,26 @@ func inviteRevoke(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMe
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
 	}
-	fullID, err := d.InviteRevoke(ctx, p.IDPrefix)
-	if err != nil {
-		switch {
-		case errors.Is(err, errInviteIDPrefixRequired):
-			return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
-		case errors.Is(err, invitedb.ErrNotFound):
-			return nil, &ipc.Error{Code: ipc.ErrInviteInvalidToken, Message: "invite not found"}
-		case errors.Is(err, invitedb.ErrPrefixAmbiguous):
-			return nil, &ipc.Error{Code: ipc.ErrInvitePrefixAmbiguous, Message: "prefix matches multiple invites"}
-		}
-		return nil, internalErr(err)
+	var fullID string
+	merr := d.Mutate(ctx, "invites."+p.IDPrefix, config.BothCtx,
+		func() (any, any, error) {
+			id, err := d.InviteRevoke(ctx, p.IDPrefix)
+			if err != nil {
+				switch {
+				case errors.Is(err, errInviteIDPrefixRequired):
+					return nil, nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+				case errors.Is(err, invitedb.ErrNotFound):
+					return nil, nil, &ipc.Error{Code: ipc.ErrInviteInvalidToken, Message: "invite not found"}
+				case errors.Is(err, invitedb.ErrPrefixAmbiguous):
+					return nil, nil, &ipc.Error{Code: ipc.ErrInvitePrefixAmbiguous, Message: "prefix matches multiple invites"}
+				}
+				return nil, nil, err
+			}
+			fullID = id
+			return id, nil, nil
+		})
+	if merr != nil {
+		return nil, asIPCError(merr)
 	}
 	return map[string]any{
 		"ok":      true,
