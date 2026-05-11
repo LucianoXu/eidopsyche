@@ -625,3 +625,20 @@ func TestBuildEnvelopeMap_RoundTripsForRenderer(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderMarkdown_ClaudePath: claude_path must appear in the
+// metadata block. Regression guard for the original Markdown
+// renderer, which omitted this field entirely.
+func TestRenderMarkdown_ClaudePath(t *testing.T) {
+	env := map[string]any{
+		"claude_path":    "/usr/bin/claude",
+		"claude_version": "2.1.139",
+	}
+	out, err := renderMarkdown(env)
+	if err != nil {
+		t.Fatalf("renderMarkdown: %v", err)
+	}
+	if !strings.Contains(out, "**Claude path:** `/usr/bin/claude`") {
+		t.Errorf("missing claude_path line in metadata:\n%s", out)
+	}
+}

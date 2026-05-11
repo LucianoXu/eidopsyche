@@ -218,6 +218,9 @@ func renderMarkdown(env map[string]any) (string, error) {
 	if v, ok := env["claude_version"].(string); ok {
 		fmt.Fprintf(&b, "**Claude version:** %s\n", v)
 	}
+	if v, ok := env["claude_path"].(string); ok && v != "" {
+		fmt.Fprintf(&b, "**Claude path:** `%s`\n", v)
+	}
 	if v, ok := env["claude_args"].([]any); ok {
 		fmt.Fprintf(&b, "**Claude args:** `%s`\n", joinArgs(v))
 	}
