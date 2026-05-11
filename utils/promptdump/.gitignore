@@ -1,0 +1,5 @@
+# Compiled binary
+/promptdump
+
+# Captures
+*.json
