@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -237,4 +238,60 @@ func mapKeys(m map[string]any) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestParseFlags: covers the CLI surface contract independent of HTTP /
+// exec. Verifies -- splits promptdump flags from claude passthrough,
+// and default values.
+func TestParseFlags(t *testing.T) {
+	tests := []struct {
+		name     string
+		argv     []string
+		wantOpts runOpts
+		wantOut  string
+	}{
+		{
+			name:     "defaults",
+			argv:     []string{"promptdump"},
+			wantOpts: runOpts{Prompt: "ping", NoPOSTAfter: 8 * time.Second},
+			wantOut:  "",
+		},
+		{
+			name:     "prompt and output",
+			argv:     []string{"promptdump", "-p", "hi", "-o", "/tmp/x.json"},
+			wantOpts: runOpts{Prompt: "hi", NoPOSTAfter: 8 * time.Second},
+			wantOut:  "/tmp/x.json",
+		},
+		{
+			name: "passthrough after double-dash",
+			argv: []string{"promptdump", "-v", "--", "--model", "sonnet", "--effort", "medium"},
+			wantOpts: runOpts{
+				Prompt:      "ping",
+				ExtraArgs:   []string{"--model", "sonnet", "--effort", "medium"},
+				NoPOSTAfter: 8 * time.Second,
+				Verbose:     true,
+			},
+			wantOut: "",
+		},
+		{
+			name:     "keep-going",
+			argv:     []string{"promptdump", "--keep-going"},
+			wantOpts: runOpts{Prompt: "ping", NoPOSTAfter: 8 * time.Second, KeepGoing: true},
+			wantOut:  "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts, out, err := parseFlags(tt.argv)
+			if err != nil {
+				t.Fatalf("parseFlags: %v", err)
+			}
+			if !reflect.DeepEqual(opts, tt.wantOpts) {
+				t.Errorf("opts = %+v, want %+v", opts, tt.wantOpts)
+			}
+			if out != tt.wantOut {
+				t.Errorf("out = %q, want %q", out, tt.wantOut)
+			}
+		})
+	}
 }

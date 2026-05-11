@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -295,8 +296,71 @@ func probeClaudeVersion(claudePath string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// parseFlags parses promptdump's command-line surface. argv[0] is the
+// program name; argv[1:] is processed. Anything after a literal "--"
+// is collected verbatim into opts.ExtraArgs and passed through to
+// claude. Returns the opts, the output path ("" means stdout), and an
+// error suitable for printing + exiting non-zero.
+func parseFlags(argv []string) (opts runOpts, outPath string, err error) {
+	fs := flag.NewFlagSet(argv[0], flag.ContinueOnError)
+	prompt := fs.String("p", "ping", "prompt passed to claude as -p <prompt>")
+	outFlag := fs.String("o", "", "write captured envelope JSON to this file (default: stdout)")
+	verbose := fs.Bool("v", false, "verbose: log proxy traffic and claude stderr")
+	keepGoing := fs.Bool("keep-going", false, "do not SIGTERM claude after capture")
+
+	// Find the -- separator manually so flag.Parse doesn't try to
+	// interpret claude's flags.
+	var ourArgs, extra []string
+	sep := -1
+	for i, a := range argv[1:] {
+		if a == "--" {
+			sep = i
+			break
+		}
+	}
+	if sep == -1 {
+		ourArgs = argv[1:]
+	} else {
+		ourArgs = argv[1 : 1+sep]
+		extra = argv[1+sep+1:]
+	}
+	if err := fs.Parse(ourArgs); err != nil {
+		return runOpts{}, "", err
+	}
+
+	return runOpts{
+		Prompt:      *prompt,
+		ExtraArgs:   extra,
+		NoPOSTAfter: 8 * time.Second,
+		KeepGoing:   *keepGoing,
+		Verbose:     *verbose,
+	}, *outFlag, nil
+}
+
 func main() {
-	// Wired up in a later task. For now main() just announces itself so
-	// `go run .` continues to do something visible.
-	fmt.Println("promptdump: not yet implemented")
+	opts, outPath, err := parseFlags(os.Args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "promptdump: %v\n", err)
+		os.Exit(2)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	envelope, err := runCapture(ctx, opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "promptdump: %v\n", err)
+		os.Exit(1)
+	}
+
+	if outPath == "" {
+		os.Stdout.Write(envelope)
+		os.Stdout.Write([]byte("\n"))
+		return
+	}
+	if err := os.WriteFile(outPath, envelope, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "promptdump: write %s: %v\n", outPath, err)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stderr, "promptdump: wrote %s\n", outPath)
 }
