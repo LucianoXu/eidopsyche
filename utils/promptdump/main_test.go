@@ -454,3 +454,56 @@ func TestRenderMarkdown_HappyPath(t *testing.T) {
 		t.Errorf("unbalanced fenced blocks: %d ``` markers", fences)
 	}
 }
+
+// TestRenderMarkdown_MissingFields: empty/absent fields must not panic
+// and must produce sensible (possibly empty) sections.
+func TestRenderMarkdown_MissingFields(t *testing.T) {
+	env := map[string]any{
+		"captured_at":    "2026-05-11T17:23:45Z",
+		"claude_version": "2.1.138",
+		"request": map[string]any{
+			"model": "claude-opus-4-7",
+		},
+	}
+	out, err := renderMarkdown(env)
+	if err != nil {
+		t.Fatalf("renderMarkdown: %v", err)
+	}
+	for _, want := range []string{
+		"# promptdump capture",
+		"## System prompt (0 segments)",
+		"## Tools (0)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in degenerate-input output", want)
+		}
+	}
+	if strings.Contains(out, "## First user message") {
+		t.Error("user-message section rendered despite no messages")
+	}
+}
+
+// TestRenderMarkdown_RawBodyFallback: if the envelope contains a raw_body
+// (parse failure), the renderer emits a "Raw body" section instead of
+// the structured request sections.
+func TestRenderMarkdown_RawBodyFallback(t *testing.T) {
+	env := map[string]any{
+		"captured_at":    "2026-05-11T17:23:45Z",
+		"claude_version": "2.1.138",
+		"raw_body":       "not json at all",
+		"parse_error":    "invalid character 'n'",
+	}
+	out, err := renderMarkdown(env)
+	if err != nil {
+		t.Fatalf("renderMarkdown: %v", err)
+	}
+	if !strings.Contains(out, "## Raw body (failed to parse as JSON)") {
+		t.Error("raw-body section missing")
+	}
+	if !strings.Contains(out, "not json at all") {
+		t.Error("raw body content missing")
+	}
+	if strings.Contains(out, "## Request") {
+		t.Error("structured request section rendered despite parse failure")
+	}
+}
