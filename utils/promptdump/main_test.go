@@ -441,8 +441,8 @@ func TestRenderMarkdown_HappyPath(t *testing.T) {
 	if !strings.Contains(out, "**`Read`**") || !strings.Contains(out, "Reads a file") {
 		t.Error("Read tool not listed in bullet form")
 	}
-	if !strings.Contains(out, "<details><summary>Full tool schemas</summary>") {
-		t.Error("collapsible tool-schemas block missing")
+	if !strings.Contains(out, "### `Read`") {
+		t.Error("per-tool Read subsection missing")
 	}
 	if !strings.Contains(out, "## First user message") {
 		t.Error("user-message heading missing")
@@ -623,5 +623,140 @@ func TestBuildEnvelopeMap_RoundTripsForRenderer(t *testing.T) {
 		if !strings.Contains(md, want) {
 			t.Errorf("missing %q in rendered markdown — metadata line silently dropped?\n%s", want, md)
 		}
+	}
+}
+
+// TestRenderMarkdown_ClaudePath: claude_path must appear in the
+// metadata block. Regression guard for the original Markdown
+// renderer, which omitted this field entirely.
+func TestRenderMarkdown_ClaudePath(t *testing.T) {
+	env := map[string]any{
+		"claude_path":    "/usr/bin/claude",
+		"claude_version": "2.1.139",
+	}
+	out, err := renderMarkdown(env)
+	if err != nil {
+		t.Fatalf("renderMarkdown: %v", err)
+	}
+	if !strings.Contains(out, "**Claude path:** `/usr/bin/claude`") {
+		t.Errorf("missing claude_path line in metadata:\n%s", out)
+	}
+}
+
+// TestRenderMarkdown_OtherRequestFields: keys in request not covered
+// by the dedicated sections must surface under "Other request fields".
+// Scalars render as bullets; complex values render as fenced json.
+// Keys are sorted alphabetically for deterministic output.
+func TestRenderMarkdown_OtherRequestFields(t *testing.T) {
+	env := map[string]any{
+		"request": map[string]any{
+			"model":          "claude-opus-4-7",
+			"temperature":    1.0,
+			"anthropic_beta": "prompt-caching-2024-07-31",
+			"metadata": map[string]any{
+				"user_id": "u1",
+			},
+		},
+	}
+	out, err := renderMarkdown(env)
+	if err != nil {
+		t.Fatalf("renderMarkdown: %v", err)
+	}
+	if !strings.Contains(out, "### Other request fields") {
+		t.Error("missing Other request fields heading")
+	}
+	if !strings.Contains(out, "- **anthropic_beta:** `prompt-caching-2024-07-31`") {
+		t.Error("anthropic_beta bullet missing or malformed")
+	}
+	if !strings.Contains(out, "- **temperature:** 1") {
+		t.Error("temperature bullet missing or malformed (expected integer-shaped 1)")
+	}
+	if !strings.Contains(out, "- **metadata:**") {
+		t.Error("metadata bullet header missing")
+	}
+	if !strings.Contains(out, `"user_id": "u1"`) {
+		t.Error("metadata fenced JSON body missing")
+	}
+	ab := strings.Index(out, "anthropic_beta")
+	md := strings.Index(out, "metadata:")
+	tp := strings.Index(out, "temperature")
+	if !(ab < md && md < tp) {
+		t.Errorf("keys not alphabetically ordered: ab=%d md=%d tp=%d", ab, md, tp)
+	}
+}
+
+// TestRenderMarkdown_NoOtherFields: a request with only the well-known
+// fields must NOT emit an "Other request fields" heading.
+func TestRenderMarkdown_NoOtherFields(t *testing.T) {
+	env := map[string]any{
+		"request": map[string]any{
+			"model":      "claude-opus-4-7",
+			"max_tokens": float64(32000),
+			"stream":     true,
+			"system":     []any{},
+			"tools":      []any{},
+			"messages":   []any{},
+		},
+	}
+	out, err := renderMarkdown(env)
+	if err != nil {
+		t.Fatalf("renderMarkdown: %v", err)
+	}
+	if strings.Contains(out, "### Other request fields") {
+		t.Error("Other request fields heading rendered despite no extra keys")
+	}
+}
+
+// TestRenderMarkdown_PerToolSections: each tool gets a "### `<name>`"
+// subsection with the full multi-line description in a fenced block
+// and the input_schema in a per-tool <details> block. The old single
+// "Full tool schemas" combined block must be gone.
+func TestRenderMarkdown_PerToolSections(t *testing.T) {
+	env := map[string]any{
+		"request": map[string]any{
+			"tools": []any{
+				map[string]any{
+					"name":        "Read",
+					"description": "Reads a file from the local filesystem.\n\nUsage:\n- absolute path required\n- max 2000 lines per call",
+					"input_schema": map[string]any{
+						"type":     "object",
+						"required": []any{"file_path"},
+					},
+				},
+				map[string]any{
+					"name":        "Bash",
+					"description": "Runs a shell command.\nReturns stdout/stderr/exit_code.",
+					"input_schema": map[string]any{
+						"type":     "object",
+						"required": []any{"command"},
+					},
+				},
+			},
+		},
+	}
+	out, err := renderMarkdown(env)
+	if err != nil {
+		t.Fatalf("renderMarkdown: %v", err)
+	}
+
+	if strings.Contains(out, "<details><summary>Full tool schemas</summary>") {
+		t.Error("old combined Full tool schemas <details> block still present; should be removed")
+	}
+	for _, want := range []string{
+		"### `Read`",
+		"### `Bash`",
+		"Usage:\n- absolute path required\n- max 2000 lines per call",
+		"Returns stdout/stderr/exit_code.",
+		"<details><summary>input_schema</summary>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in rendered output", want)
+		}
+	}
+	if got := strings.Count(out, "<details><summary>input_schema</summary>"); got != 2 {
+		t.Errorf("expected 2 per-tool <details> blocks, got %d", got)
+	}
+	if strings.Count(out, "```")%2 != 0 {
+		t.Errorf("unbalanced fenced blocks")
 	}
 }

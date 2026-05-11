@@ -70,10 +70,14 @@ diff <(jq -S . /tmp/normal.json) <(jq -S . /tmp/bare.json) | head -200
 ## Reading the output
 
 For a quick visual read, capture with a basename or `.md` extension and
-open the Markdown file. Sections cover metadata, request config, each
-system-prompt segment (in fenced blocks with real newlines), the tool
-catalogue (name + lede; full schemas folded into a `<details>` block),
-and the first user message.
+open the Markdown file. The rendering is **lossless** with respect to
+the JSON envelope — every top-level field and every `request` field is
+reachable without expanding `<details>`. Sections cover metadata
+(including `claude_path` and any non-standard `request` fields under
+"Other request fields"), per-segment system prompt in fenced blocks
+with real newlines, a per-tool subsection for each tool with full
+description in a fenced block and `input_schema` folded into a per-tool
+`<details>`, and the first user message.
 
 For programmatic slicing, keep the JSON form and use `jq`:
 

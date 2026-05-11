@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -218,6 +219,9 @@ func renderMarkdown(env map[string]any) (string, error) {
 	if v, ok := env["claude_version"].(string); ok {
 		fmt.Fprintf(&b, "**Claude version:** %s\n", v)
 	}
+	if v, ok := env["claude_path"].(string); ok && v != "" {
+		fmt.Fprintf(&b, "**Claude path:** `%s`\n", v)
+	}
 	if v, ok := env["claude_args"].([]any); ok {
 		fmt.Fprintf(&b, "**Claude args:** `%s`\n", joinArgs(v))
 	}
@@ -250,6 +254,8 @@ func renderMarkdown(env map[string]any) (string, error) {
 	}
 	b.WriteString("\n")
 
+	renderOtherRequestFields(&b, req)
+
 	sys, _ := req["system"].([]any)
 	fmt.Fprintf(&b, "## System prompt (%d segments)\n\n", len(sys))
 	for i, seg := range sys {
@@ -278,11 +284,11 @@ func renderMarkdown(env map[string]any) (string, error) {
 		fmt.Fprintf(&b, "- **`%s`** — %s\n", name, firstNonEmptyLine(desc))
 	}
 	if len(tools) > 0 {
-		b.WriteString("\n<details><summary>Full tool schemas</summary>\n\n")
-		b.WriteString("```json\n")
-		toolsJSON, _ := json.MarshalIndent(tools, "", "  ")
-		b.Write(toolsJSON)
-		b.WriteString("\n```\n\n</details>\n\n")
+		b.WriteString("\n")
+	}
+	for _, t := range tools {
+		tm, _ := t.(map[string]any)
+		renderToolDetail(&b, tm)
 	}
 
 	messages, _ := req["messages"].([]any)
@@ -345,6 +351,80 @@ func firstNonEmptyLine(s string) string {
 		}
 	}
 	return ""
+}
+
+// renderOtherRequestFields appends an "### Other request fields"
+// subsection enumerating every key in req that is not already
+// covered by a dedicated section (model/max_tokens/stream as bullets;
+// system/tools/messages as their own sections). Skipped entirely if
+// no such key exists. Keys are sorted alphabetically for deterministic
+// output.
+//
+// Scalar values render as `- **key:** value` (strings backticked).
+// Complex values (objects, arrays) render as `- **key:**` followed
+// by a fenced `json` block.
+func renderOtherRequestFields(b *strings.Builder, req map[string]any) {
+	covered := map[string]struct{}{
+		"system": {}, "tools": {}, "messages": {},
+		"model": {}, "max_tokens": {}, "stream": {},
+	}
+	var keys []string
+	for k := range req {
+		if _, ok := covered[k]; ok {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	if len(keys) == 0 {
+		return
+	}
+	sort.Strings(keys)
+
+	b.WriteString("### Other request fields\n\n")
+	for _, k := range keys {
+		v := req[k]
+		switch vv := v.(type) {
+		case string:
+			fmt.Fprintf(b, "- **%s:** `%s`\n", k, vv)
+		case bool, float64, nil:
+			fmt.Fprintf(b, "- **%s:** %v\n", k, vv)
+		default:
+			fmt.Fprintf(b, "- **%s:**\n  ```json\n", k)
+			j, _ := json.MarshalIndent(vv, "  ", "  ")
+			b.Write(j)
+			b.WriteString("\n  ```\n")
+		}
+	}
+	b.WriteString("\n")
+}
+
+// renderToolDetail appends a "### `<name>`" subsection for one tool:
+// its full description in a fenced block, and the input_schema in a
+// collapsible <details> block. Skipped when both name and description
+// are empty. The input_schema <details> block is omitted when the
+// tool has no schema.
+func renderToolDetail(b *strings.Builder, tool map[string]any) {
+	name, _ := tool["name"].(string)
+	desc, _ := tool["description"].(string)
+	if name == "" && desc == "" {
+		return
+	}
+	fmt.Fprintf(b, "### `%s`\n\n", name)
+	if desc != "" {
+		b.WriteString("```\n")
+		b.WriteString(desc)
+		if !strings.HasSuffix(desc, "\n") {
+			b.WriteString("\n")
+		}
+		b.WriteString("```\n\n")
+	}
+	if schema, ok := tool["input_schema"]; ok {
+		b.WriteString("<details><summary>input_schema</summary>\n\n")
+		b.WriteString("```json\n")
+		schemaJSON, _ := json.MarshalIndent(schema, "", "  ")
+		b.Write(schemaJSON)
+		b.WriteString("\n```\n\n</details>\n\n")
+	}
 }
 
 // formatMediaType returns the media-type prefixed with a single space,
