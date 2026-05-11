@@ -13,6 +13,12 @@ import (
 	"testing"
 )
 
+// maxBodyBytes caps the request body the capture handler will accept.
+// Claude Code's observed payload is ~200 KB (probe 2026-05-11). 16 MB
+// is a generous ceiling that still defends against runaway memory if
+// a future version starts shipping huge payloads.
+const maxBodyBytes = 16 << 20
+
 // captureServer is the HTTP server claude POSTs to (via ANTHROPIC_BASE_URL).
 // It captures the first body sent to /v1/messages* and responds with a
 // minimal valid SSE 200 so claude's SDK can finalize the stream and exit.
@@ -41,9 +47,13 @@ func (s *captureServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
 	if err != nil {
 		http.Error(w, "read body: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if len(body) > maxBodyBytes {
+		http.Error(w, "request body exceeds 16 MB cap", http.StatusRequestEntityTooLarge)
 		return
 	}
 	s.mu.Lock()

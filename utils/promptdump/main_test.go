@@ -87,3 +87,25 @@ func TestCaptureServer_OnlyMessagesCaptures(t *testing.T) {
 	default:
 	}
 }
+
+// TestCaptureServer_BodyTooLarge: a POST with a body above the
+// maxBodyBytes cap must return 413 and leave srv.captured nil.
+func TestCaptureServer_BodyTooLarge(t *testing.T) {
+	srv := newCaptureServer()
+	httpSrv := srv.start(t)
+	defer httpSrv.Close()
+
+	big := bytes.Repeat([]byte("x"), maxBodyBytes+1)
+	resp, err := http.Post(httpSrv.URL+"/v1/messages",
+		"application/octet-stream", bytes.NewReader(big))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want 413", resp.StatusCode)
+	}
+	if srv.captured != nil {
+		t.Errorf("captured populated despite oversize body")
+	}
+}
