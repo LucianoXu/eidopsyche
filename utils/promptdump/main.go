@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -339,6 +340,48 @@ func formatMediaType(s string) string {
 	return " " + s
 }
 
+// writeJob is one filesystem write produced by dispatchOutput.
+// An empty path means "write to stdout"; main() interprets it.
+type writeJob struct {
+	path    string
+	content []byte
+}
+
+// dispatchOutput decides what files to write based on outPath's
+// extension. Pure (no filesystem side effects); main() iterates the
+// returned jobs.
+//
+// Rules:
+//
+//	outPath == ""        → [{stdout, jsonBytes}]
+//	ext == ".json"       → [{outPath, jsonBytes}]
+//	ext == ".md"         → [{outPath, markdown(env)}]
+//	anything else        → [{outPath+".json", jsonBytes}, {outPath+".md", markdown(env)}]
+func dispatchOutput(jsonBytes []byte, env map[string]any, outPath string) ([]writeJob, error) {
+	if outPath == "" {
+		return []writeJob{{path: "", content: jsonBytes}}, nil
+	}
+	switch filepath.Ext(outPath) {
+	case ".json":
+		return []writeJob{{path: outPath, content: jsonBytes}}, nil
+	case ".md":
+		md, err := renderMarkdown(env)
+		if err != nil {
+			return nil, err
+		}
+		return []writeJob{{path: outPath, content: []byte(md)}}, nil
+	default:
+		md, err := renderMarkdown(env)
+		if err != nil {
+			return nil, err
+		}
+		return []writeJob{
+			{path: outPath + ".json", content: jsonBytes},
+			{path: outPath + ".md", content: []byte(md)},
+		}, nil
+	}
+}
+
 // runOpts collects the parameters of one capture run.
 type runOpts struct {
 	Prompt      string        // the -p argument to claude (default "ping")
@@ -350,8 +393,9 @@ type runOpts struct {
 
 // runCapture orchestrates one full capture cycle: bring up the proxy,
 // spawn claude with env overrides, wait for capture, terminate child,
-// return the serialized envelope JSON.
-func runCapture(ctx context.Context, opts runOpts) ([]byte, error) {
+// return the serialized envelope JSON together with the parsed envelope
+// map so callers (e.g. the markdown renderer) don't re-parse.
+func runCapture(ctx context.Context, opts runOpts) ([]byte, map[string]any, error) {
 	if opts.Prompt == "" {
 		opts.Prompt = "ping"
 	}
@@ -361,7 +405,7 @@ func runCapture(ctx context.Context, opts runOpts) ([]byte, error) {
 
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
-		return nil, fmt.Errorf("claude binary not on PATH: %w", err)
+		return nil, nil, fmt.Errorf("claude binary not on PATH: %w", err)
 	}
 	claudeVer := probeClaudeVersion(claudePath)
 
@@ -369,7 +413,7 @@ func runCapture(ctx context.Context, opts runOpts) ([]byte, error) {
 	srv.verbose = opts.Verbose
 	baseURL, shutdownProxy, err := srv.listen()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer shutdownProxy(context.Background())
 
@@ -396,7 +440,7 @@ func runCapture(ctx context.Context, opts runOpts) ([]byte, error) {
 	cmd.Stderr = stderrBuf
 	cmd.Stdout = io.Discard
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("spawn claude: %w", err)
+		return nil, nil, fmt.Errorf("spawn claude: %w", err)
 	}
 
 	noPOSTTimer := time.NewTimer(opts.NoPOSTAfter)
@@ -423,12 +467,12 @@ func runCapture(ctx context.Context, opts runOpts) ([]byte, error) {
 	case <-noPOSTTimer.C:
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 		_ = cmd.Wait()
-		return nil, fmt.Errorf("claude did not POST /v1/messages within %s; stderr:\n%s",
+		return nil, nil, fmt.Errorf("claude did not POST /v1/messages within %s; stderr:\n%s",
 			opts.NoPOSTAfter, stderrBuf.String())
 	case <-ctx.Done():
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 		_ = cmd.Wait()
-		return nil, ctx.Err()
+		return nil, nil, ctx.Err()
 	}
 
 	if opts.Verbose && stderrBuf.Len() > 0 {
@@ -443,7 +487,15 @@ func runCapture(ctx context.Context, opts runOpts) ([]byte, error) {
 		ClaudeArgs:    args,
 		Host:          hostInfo{Platform: runtime.GOOS, CWD: cwd},
 	}
-	return buildEnvelope(meta, srv.captured)
+	envMap, err := buildEnvelopeMap(meta, srv.captured)
+	if err != nil {
+		return nil, nil, err
+	}
+	jsonBytes, err := json.MarshalIndent(envMap, "", "  ")
+	if err != nil {
+		return nil, nil, err
+	}
+	return jsonBytes, envMap, nil
 }
 
 // filterEnv returns env with any entries whose key matches one of names
@@ -532,20 +584,32 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	envelope, err := runCapture(ctx, opts)
+	jsonBytes, envMap, err := runCapture(ctx, opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "promptdump: %v\n", err)
 		os.Exit(1)
 	}
 
-	if outPath == "" {
-		os.Stdout.Write(envelope)
-		os.Stdout.Write([]byte("\n"))
-		return
-	}
-	if err := os.WriteFile(outPath, envelope, 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "promptdump: write %s: %v\n", outPath, err)
+	jobs, err := dispatchOutput(jsonBytes, envMap, outPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "promptdump: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "promptdump: wrote %s\n", outPath)
+
+	var wrote []string
+	for _, j := range jobs {
+		if j.path == "" {
+			os.Stdout.Write(j.content)
+			os.Stdout.Write([]byte("\n"))
+			continue
+		}
+		if err := os.WriteFile(j.path, j.content, 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "promptdump: write %s: %v\n", j.path, err)
+			os.Exit(1)
+		}
+		wrote = append(wrote, j.path)
+	}
+	if len(wrote) > 0 {
+		fmt.Fprintf(os.Stderr, "promptdump: wrote %s\n", strings.Join(wrote, ", "))
+	}
 }

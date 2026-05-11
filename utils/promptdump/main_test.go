@@ -238,7 +238,7 @@ func TestRunCapture_Smoke(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	out, err := runCapture(ctx, runOpts{
+	jsonBytes, _, err := runCapture(ctx, runOpts{
 		Prompt:      "ping",
 		ExtraArgs:   nil,
 		NoPOSTAfter: 8 * time.Second,
@@ -249,8 +249,8 @@ func TestRunCapture_Smoke(t *testing.T) {
 	}
 
 	var envelope map[string]any
-	if err := json.Unmarshal(out, &envelope); err != nil {
-		t.Fatalf("envelope not valid JSON: %v\n%s", err, out)
+	if err := json.Unmarshal(jsonBytes, &envelope); err != nil {
+		t.Fatalf("envelope not valid JSON: %v\n%s", err, jsonBytes)
 	}
 	req, ok := envelope["request"].(map[string]any)
 	if !ok {
@@ -535,5 +535,55 @@ func TestRenderMarkdown_MarkdownInDescription(t *testing.T) {
 	}
 	if strings.Count(out, "```")%2 != 0 {
 		t.Errorf("unbalanced fenced blocks: description's backticks broke structure")
+	}
+}
+
+// TestDispatchOutput: covers the -o extension dispatch table.
+// jsonBytes and env are dummy values; we only assert which paths
+// and content kinds the dispatcher produces.
+func TestDispatchOutput(t *testing.T) {
+	jsonBytes := []byte(`{"captured_at":"x"}`)
+	env := map[string]any{
+		"captured_at": "x",
+		"request":     map[string]any{},
+	}
+
+	tests := []struct {
+		name      string
+		outPath   string
+		wantPaths []string
+		wantKinds []string // "json" or "md"
+	}{
+		{"stdout", "", []string{""}, []string{"json"}},
+		{"json only", "snap.json", []string{"snap.json"}, []string{"json"}},
+		{"md only", "snap.md", []string{"snap.md"}, []string{"md"}},
+		{"basename → both", "snap", []string{"snap.json", "snap.md"}, []string{"json", "md"}},
+		{"other ext → both", "snap.txt", []string{"snap.txt.json", "snap.txt.md"}, []string{"json", "md"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jobs, err := dispatchOutput(jsonBytes, env, tt.outPath)
+			if err != nil {
+				t.Fatalf("dispatchOutput: %v", err)
+			}
+			if len(jobs) != len(tt.wantPaths) {
+				t.Fatalf("got %d jobs, want %d: %+v", len(jobs), len(tt.wantPaths), jobs)
+			}
+			for i, j := range jobs {
+				if j.path != tt.wantPaths[i] {
+					t.Errorf("job[%d].path = %q, want %q", i, j.path, tt.wantPaths[i])
+				}
+				switch tt.wantKinds[i] {
+				case "json":
+					if !bytes.Equal(j.content, jsonBytes) {
+						t.Errorf("job[%d] content not JSON bytes", i)
+					}
+				case "md":
+					if !bytes.Contains(j.content, []byte("# promptdump capture")) {
+						t.Errorf("job[%d] content not Markdown", i)
+					}
+				}
+			}
+		})
 	}
 }
