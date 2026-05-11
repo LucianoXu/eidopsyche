@@ -176,7 +176,7 @@ These are deliberately **not** exposed and would be added only on demand:
 4. **No-POST timeout** — Don't POST anything; expect the timeout error path.
 5. **Malformed JSON body** — POST `not json`; output still written (raw bytes under `"raw_body": "…"`) with a warning logged.
 
-**No integration test against the real `claude` binary.** Claude Code's prompt and behavior change every release; a fixture-based test would be a perpetual maintenance burden and would mask real regressions in the capture layer. The dev-loop test is "run it manually after upgrading claude."
+**Opt-in smoke test against the real `claude` binary** (`TestRunCapture_Smoke`), gated on `PROMPTDUMP_SMOKE=1`, `-short` absence, and `claude` being on `PATH`. It does **not** assert the contents of `request.system` (those change every claude release and a fixture-based assertion would be a perpetual maintenance burden) — it only asserts the envelope is well-formed JSON and contains a non-empty `request.system` / `request.model`, which guards the capture layer itself against regressions while staying tolerant to upstream prompt drift. CI does not enable the smoke test; the dev-loop expectation is "run it locally after upgrading claude."
 
 ## Implementation order (for the plan)
 

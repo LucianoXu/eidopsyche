@@ -10,6 +10,15 @@
 
 **Spec:** `docs/superpowers/specs/2026-05-11-utils-promptdump-design.md`
 
+> **Note on `go` invocations in this plan:** Because `utils/promptdump`
+> is intentionally outside the root `go.work`, **every `go build` /
+> `go test` / `go run` command below assumes `GOWORK=off` in the
+> environment.** Without it, Go finds the parent workspace and fails
+> with "main module ... does not contain package ...". From inside
+> `utils/promptdump/`: `GOWORK=off go test ./...`. From the repo root:
+> `GOWORK=off go -C utils/promptdump test ./...`. The bare forms are
+> kept in the steps for readability.
+
 ---
 
 ## File Structure
@@ -1282,26 +1291,41 @@ interpretation layer. Use `jq` to slice it.
 
 ## Build / run
 
+`utils/promptdump` is intentionally outside the root `go.work`, so all
+`go` invocations need `GOWORK=off` (Go otherwise applies the parent
+workspace and refuses with "main module ... does not contain package
+...").
+
+From inside `utils/promptdump/`:
+
+```sh
+GOWORK=off go build .          # produces ./promptdump (gitignored)
+GOWORK=off go run .            # default: Opus + no extra flags
+GOWORK=off go run . -o snap.json
+```
+
 From the repo root:
 
 ```sh
-go run ./utils/promptdump                 # default: Opus + no extra flags
-go run ./utils/promptdump -o snapshot.json
+GOWORK=off go -C utils/promptdump run .
+GOWORK=off go -C utils/promptdump run . -o snap.json
 ```
 
 ## Useful invocations
 
 ```sh
+cd utils/promptdump
+
 # Capture under the eidopsyche mindform defaults (sonnet + medium effort).
-go run ./utils/promptdump -- --model sonnet --effort medium
+GOWORK=off go run . -- --model sonnet --effort medium
 
 # Compare with identity injection.
-go run ./utils/promptdump -o /tmp/with-identity.json -- \
+GOWORK=off go run . -o /tmp/with-identity.json -- \
     --model sonnet --append-system-prompt "$(cat identity.md)"
 
 # Compare normal vs --bare mode (what --bare strips).
-go run ./utils/promptdump -o /tmp/normal.json
-go run ./utils/promptdump -o /tmp/bare.json -- --bare
+GOWORK=off go run . -o /tmp/normal.json
+GOWORK=off go run . -o /tmp/bare.json -- --bare
 diff <(jq -S . /tmp/normal.json) <(jq -S . /tmp/bare.json) | head -200
 ```
 
