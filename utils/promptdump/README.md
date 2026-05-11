@@ -51,6 +51,12 @@ cd utils/promptdump
 # Capture under the eidopsyche mindform defaults (sonnet + medium effort).
 GOWORK=off go run . -- --model sonnet --effort medium
 
+# Capture both forms at once — JSON for jq, Markdown for reading.
+GOWORK=off go run . -o /tmp/snap          # writes /tmp/snap.json + /tmp/snap.md
+
+# Just the readable view (no JSON file).
+GOWORK=off go run . -o /tmp/snap.md
+
 # Compare with identity injection.
 GOWORK=off go run . -o /tmp/with-identity.json -- \
     --model sonnet --append-system-prompt "$(cat identity.md)"
@@ -62,6 +68,14 @@ diff <(jq -S . /tmp/normal.json) <(jq -S . /tmp/bare.json) | head -200
 ```
 
 ## Reading the output
+
+For a quick visual read, capture with a basename or `.md` extension and
+open the Markdown file. Sections cover metadata, request config, each
+system-prompt segment (in fenced blocks with real newlines), the tool
+catalogue (name + lede; full schemas folded into a `<details>` block),
+and the first user message.
+
+For programmatic slicing, keep the JSON form and use `jq`:
 
 ```sh
 # The default system prompt segments (cache-control'd).
@@ -82,7 +96,7 @@ jq '.request.messages[0]' snap.json
 | Flag | Default | Meaning |
 |---|---|---|
 | `-p <text>` | `ping` | Prompt passed to claude as `-p <prompt>`. |
-| `-o <path>` | _stdout_ | Write envelope JSON to this file instead. |
+| `-o <path>` | _stdout_ | Write envelope to this file. Extension-driven: `.json` → JSON only; `.md` → Markdown only; anything else (incl. no extension) → both `<path>.json` and `<path>.md`. |
 | `-v` | off | Log proxy traffic and claude stderr. |
 | `--keep-going` | off | Do not SIGTERM claude after capture; let it finish on its own. |
 | `--` | — | Anything after this is passed verbatim to `claude`. |
@@ -118,8 +132,8 @@ your installed plugins. Don't commit raw captures to a public repo
 without redacting them. For a "clean" snapshot, run from a neutral
 working dir, e.g. `cd /tmp && GOWORK=off go run /path/to/utils/promptdump`.
 
-The `.gitignore` in this directory excludes `*.json` so captures
-written here with `-o` are not accidentally tracked.
+The `.gitignore` in this directory excludes `*.json` and `*.md` so
+captures written here with `-o` are not accidentally tracked.
 
 ## Limitations
 
