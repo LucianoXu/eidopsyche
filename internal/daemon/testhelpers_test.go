@@ -50,6 +50,7 @@ func newTestDaemon(t *testing.T) *Daemon {
 		ackedInnerIDs: map[string]struct{}{},
 		applyRegistry: state.NewApplyRegistry(),
 		stateTree:     state.NewTree(),
+		relayHealth:   newRelayHealthStore(),
 		// Default test daemon to HostCtx (the common case for unit tests).
 		// Container-only key tests override this with SetContext as needed.
 		Context: config.HostCtx,
