@@ -164,3 +164,29 @@ func TestBuildEnvelope_RawBodyFallback(t *testing.T) {
 		t.Errorf("raw_body = %v, want 'not json at all'", parsed["raw_body"])
 	}
 }
+
+// TestCaptureServer_ListenLocalhost: production-side listen helper binds
+// to 127.0.0.1 on a random port, returns a working URL, and is
+// shutdownable.
+func TestCaptureServer_ListenLocalhost(t *testing.T) {
+	srv := newCaptureServer()
+	addr, shutdown, err := srv.listen()
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer shutdown(context.Background())
+
+	if !strings.HasPrefix(addr, "http://127.0.0.1:") {
+		t.Errorf("addr = %q, want http://127.0.0.1: prefix", addr)
+	}
+
+	resp, err := http.Post(addr+"/v1/messages",
+		"application/json", strings.NewReader(`{"ping":true}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}

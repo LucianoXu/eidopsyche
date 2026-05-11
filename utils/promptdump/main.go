@@ -5,9 +5,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -102,9 +104,29 @@ const minimalSSE = "" +
 
 // start is a test-helper: it starts the server via httptest and returns
 // the *httptest.Server so the test can read its URL. Production wiring
-// (real http.Server on a random port) lives in listen(), added later.
+// (real http.Server on a random port) lives in listen().
 func (s *captureServer) start(_ testing.TB) *httptest.Server {
 	return httptest.NewServer(s.handler())
+}
+
+// listen binds the capture server to 127.0.0.1 on a kernel-assigned
+// port and starts serving in a goroutine. Returns the base URL (e.g.
+// "http://127.0.0.1:48273") and a shutdown function suitable for
+// `defer shutdown(ctx)`.
+func (s *captureServer) listen() (addr string, shutdown func(context.Context) error, err error) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", nil, fmt.Errorf("listen: %w", err)
+	}
+	httpSrv := &http.Server{
+		Handler:           s.handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		_ = httpSrv.Serve(lis)
+	}()
+	port := lis.Addr().(*net.TCPAddr).Port
+	return fmt.Sprintf("http://127.0.0.1:%d", port), httpSrv.Shutdown, nil
 }
 
 // envelopeMeta is the wrapper metadata captured alongside the request body.
