@@ -109,7 +109,7 @@ func productionBirthHandler(ctx context.Context, sig wake.BirthSignal, ontologyD
 	c.Stdout = os.Stdout
 	stderrBuf := &strings.Builder{}
 	c.Stderr = io.MultiWriter(os.Stderr, stderrBuf)
-	c.Env = append(os.Environ(), "CLAUDE_DIR="+filepath.Join(ontologyDir, ".claude"))
+	c.Env = claudeSpawnEnv(filepath.Join(ontologyDir, ".claude"))
 	if err := c.Run(); err != nil {
 		// Mirror agent_runner's behaviour: detect auth failures and
 		// persist the auth_required marker so forge status surfaces
