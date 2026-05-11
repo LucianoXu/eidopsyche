@@ -42,15 +42,24 @@ exit 0
 	}
 	t.Setenv("PATH", stubDir+":"+os.Getenv("PATH"))
 
-	// Resolve bin/eidos relative to the repo root (two dirs above this test file).
+	// Resolve repo root so `go build` finds ./cmd/eidos.
 	_, thisFile, _, _ := runtime.Caller(0)
-	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	eidosBin := filepath.Join(repoRoot, "bin", "eidos")
+	repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(thisFile)))
+
+	// Build a fresh eidos into the test's temp dir so the test is
+	// self-contained and does not depend on a pre-built bin/eidos.
+	binDir := t.TempDir()
+	eidos := filepath.Join(binDir, "eidos")
+	buildCmd := exec.Command("go", "build", "-o", eidos, "./cmd/eidos")
+	buildCmd.Dir = repoRoot
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("build eidos: %v\n%s", err, out)
+	}
 
 	// Slug: lower-case, docker-volume-safe name.
 	slug := "auth-test-isolated"
 	must := func(args ...string) {
-		cmd := exec.Command(eidosBin, args...)
+		cmd := exec.Command(eidos, args...)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("eidos %v: %v\n%s", args, err, out)
@@ -58,9 +67,9 @@ exit 0
 	}
 
 	// Best-effort purge in case a prior run left state behind.
-	_ = exec.Command(eidosBin, "forge", "purge", slug, "--yes").Run()
+	_ = exec.Command(eidos, "forge", "purge", slug, "--yes").Run()
 	t.Cleanup(func() {
-		_ = exec.Command(eidosBin, "forge", "purge", slug, "--yes").Run()
+		_ = exec.Command(eidos, "forge", "purge", slug, "--yes").Run()
 	})
 
 	// A dummy owner npub and a syntactically-valid relay URL are required by
