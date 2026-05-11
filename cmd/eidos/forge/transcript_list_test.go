@@ -86,6 +86,28 @@ func TestTranscriptList_HumanTable(t *testing.T) {
 	}
 }
 
+func TestTranscriptList_FailKind(t *testing.T) {
+	dir := transcriptsFixture(t)
+	s, _ := transcript.NewStore(dir)
+	s.WriteIndex(transcript.Index{V: 1, Wakes: []transcript.Entry{
+		{ID: "abc12345", Reason: "heartbeat", StartedAt: 1700000000, EndedAt: 1700000001, OK: false, ExitCode: 1, FailKind: "auth"},
+		{ID: "def67890", Reason: "heartbeat", StartedAt: 1700000002, EndedAt: 1700000003, OK: false, ExitCode: 1}, // no FailKind → fallback
+	}})
+	cmd := newTranscriptListCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "failed(auth)") {
+		t.Errorf("expected failed(auth), got:\n%s", out)
+	}
+	if !strings.Contains(out, "failed(1)") {
+		t.Errorf("expected failed(1) fallback for entry without FailKind, got:\n%s", out)
+	}
+}
+
 func TestTranscriptList_Limit(t *testing.T) {
 	dir := transcriptsFixture(t)
 	s, _ := transcript.NewStore(dir)

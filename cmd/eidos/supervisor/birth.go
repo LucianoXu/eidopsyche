@@ -5,14 +5,17 @@ package supervisor
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/authstate"
+	"github.com/LucianoXu/eidopsyche/internal/claudeexec"
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/prompts"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
@@ -104,7 +107,8 @@ func productionBirthHandler(ctx context.Context, sig wake.BirthSignal, ontologyD
 	c := exec.Command("claude", args...)
 	c.Dir = ontologyDir
 	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
+	stderrBuf := &strings.Builder{}
+	c.Stderr = io.MultiWriter(os.Stderr, stderrBuf)
 	c.Env = append(os.Environ(), "CLAUDE_DIR="+filepath.Join(ontologyDir, ".claude"))
 	if err := c.Run(); err != nil {
 		// Mirror agent_runner's behaviour: detect auth failures and
@@ -116,7 +120,8 @@ func productionBirthHandler(ctx context.Context, sig wake.BirthSignal, ontologyD
 		// short-circuits any subsequent wake until login clears the
 		// marker — and the host operator sees auth: REQUIRED in
 		// `eidos forge status <slug>`.
-		if isAuthError(err, c.ProcessState) {
+		v := claudeexec.ClassifyClaudeExit(err, c.ProcessState, []byte(stderrBuf.String()))
+		if v.Kind == claudeexec.ClaudeAuthRequired {
 			if werr := authstate.Write(time.Now()); werr != nil {
 				log.Printf("birth handler: write %s: %v", authstate.Path, werr)
 			}
