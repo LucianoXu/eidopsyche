@@ -2,6 +2,7 @@ package forge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -49,19 +50,29 @@ type orchestrateStep struct {
 
 // runSteps executes steps in order. On the first error, it runs the
 // undo of every step that completed successfully (in reverse) and
-// returns a wrapped error mentioning the failing step's name. Undo
-// errors are swallowed: the original failure is what the operator
-// needs to see, and the rollback is best-effort cleanup.
+// returns the original error. Rollback failures are logged to stderr
+// and joined onto the returned error so the operator knows when
+// orphan state may need manual cleanup; the do-failure remains the
+// primary cause so existing error-string contracts at call sites are
+// preserved.
 func runSteps(ctx context.Context, steps []orchestrateStep) error {
 	done := make([]orchestrateStep, 0, len(steps))
 	for _, s := range steps {
 		if err := s.do(ctx); err != nil {
+			rollbackErrs := []error{err}
 			for i := len(done) - 1; i >= 0; i-- {
-				if done[i].undo != nil {
-					_ = done[i].undo(ctx)
+				if done[i].undo == nil {
+					continue
+				}
+				if uerr := done[i].undo(ctx); uerr != nil {
+					fmt.Fprintf(os.Stderr, "orchestrate: rollback of %s failed: %v\n", done[i].name, uerr)
+					rollbackErrs = append(rollbackErrs, fmt.Errorf("rollback %s: %w", done[i].name, uerr))
 				}
 			}
-			return fmt.Errorf("%s: %w", s.name, err)
+			if len(rollbackErrs) == 1 {
+				return err
+			}
+			return errors.Join(rollbackErrs...)
 		}
 		done = append(done, s)
 	}
@@ -122,7 +133,12 @@ func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOp
 		},
 		{
 			name: "create-volume",
-			do:   func(ctx context.Context) error { return c.VolumeCreate(ctx, vol) },
+			do: func(ctx context.Context) error {
+				if err := c.VolumeCreate(ctx, vol); err != nil {
+					return fmt.Errorf("create volume: %w", err)
+				}
+				return nil
+			},
 			undo: func(ctx context.Context) error { return c.VolumeRemove(ctx, vol) },
 		},
 		{
@@ -178,7 +194,7 @@ func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOp
 					Stdin: pipeR,
 				})
 				if err != nil {
-					return fmt.Errorf("%w (stderr: %s)", err, string(res.Stderr))
+					return fmt.Errorf("init-volume: %w (stderr: %s)", err, string(res.Stderr))
 				}
 				return nil
 			},
@@ -192,11 +208,14 @@ func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOp
 			// image's default entrypoint (tini → entrypoint.sh →
 			// eidos supervisor run); no Cmd / Entrypoint override.
 			do: func(ctx context.Context) error {
-				return c.ContainerCreate(ctx, forgectl.CreateOpts{
+				if err := c.ContainerCreate(ctx, forgectl.CreateOpts{
 					Name:  cont,
 					Image: image,
 					Mount: forgectl.Mount{VolumeName: vol, Target: "/eidos"},
-				})
+				}); err != nil {
+					return fmt.Errorf("create container: %w", err)
+				}
+				return nil
 			},
 			undo: func(ctx context.Context) error { return c.ContainerRemove(ctx, cont) },
 		},
