@@ -37,9 +37,11 @@ func TestWrapSetupToken_RoundTrip(t *testing.T) {
 	}
 	// scopes must be a non-empty list — claude's runtime check rejects
 	// the blob otherwise even though Validate is satisfied. Discovered
-	// the hard way during deploy test 004 on v0.13.0.
+	// the hard way during deploy test 004 on v0.13.0. t.Fatal so we
+	// don't panic on the index below if a future regression empties the
+	// slice.
 	if len(got.ClaudeAiOauth.Scopes) == 0 {
-		t.Error("scopes empty; claude runtime check would reject the blob")
+		t.Fatal("scopes empty; claude runtime check would reject the blob")
 	}
 	if got.ClaudeAiOauth.Scopes[0] != "user:inference" {
 		t.Errorf("scopes[0] = %q, want %q", got.ClaudeAiOauth.Scopes[0], "user:inference")

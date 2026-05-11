@@ -11,15 +11,17 @@
 // invokes the refresh path — so a placeholder refreshToken paired with
 // a year-2099 expiresAt is sufficient to authenticate.
 //
-// Two extra fields are required on top of the Validate-required set:
-// `scopes: ["user:inference"]` matches what claude writes for its
-// `CLAUDE_CODE_OAUTH_TOKEN` env-var path. Without it, claude's
-// runtime credential check rejects the blob with "Not logged in" even
-// though Validate is satisfied. Discovered the hard way during deploy
-// test 004 on v0.13.0 — the in-container claude 2.1.138 enforces this
-// check more strictly than the 2.1.139 on the host. We omit
-// subscriptionType deliberately: setting "max" without knowing the
-// operator's actual tier would lie to claude's rate-limit display.
+// One extra field on top of the Validate-required set is needed for
+// claude's runtime credential check: the guard accepts the blob when
+// either `scopes` or `subscriptionType` is non-empty. We provide
+// `scopes: ["user:inference"]` — matching what claude writes for its
+// `CLAUDE_CODE_OAUTH_TOKEN` env-var path — and deliberately omit
+// `subscriptionType`. Without `scopes` the in-container claude 2.1.138
+// rejects the blob with "Not logged in" even though Validate is
+// satisfied (host claude 2.1.139 was more lenient and let this slip
+// through pre-merge testing on v0.13.0). Setting `subscriptionType`
+// to "max" without knowing the operator's actual tier would lie to
+// claude's rate-limit display, so we leave it absent.
 //
 // Trade-off: if Anthropic revokes the setup-token server-side, the
 // container's claude returns 401, the supervisor's exit classifier
