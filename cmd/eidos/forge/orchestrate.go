@@ -176,6 +176,7 @@ func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOp
 					"EIDOS_FORGE_OWNER=" + o.Owner,
 					"EIDOS_FORGE_RELAY=" + o.Relay,
 					"EIDOS_FORGE_MODEL=" + o.Model,
+					"EIDOS_FORGE_HEARTBEAT_INTERVAL=" + o.HeartbeatInterval,
 				}
 				if o.KeyHex != "" {
 					env = append(env, "EIDOS_FORGE_KEY_HEX="+o.KeyHex)
