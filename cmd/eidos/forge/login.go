@@ -1,60 +1,56 @@
+// Package forge provides the `eidos forge ...` cobra subcommand tree.
+// This file owns `eidos forge login`: authenticating claude inside a
+// mindform's docker volume.
+//
+// The login flow installs a per-mindform OAuth credentials blob into
+// /eidos/claude/.claude/.credentials.json. Operators provide the blob
+// in one of three ways:
+//
+//  1. --token-file <path>  — read a .credentials.json file produced
+//     by an earlier `claude setup-token` run anywhere convenient.
+//  2. --paste               — read the blob from stdin (good for piping).
+//  3. --generate            — drive `claude setup-token` here in an
+//     isolated HOME so the operator's host claude is not touched.
+//  4. No flag → interactive prompt offering paths 1+2 (paste/file) and 3.
+//
+// The old --from-host path (which copied the host's ~/.claude.json
+// verbatim into the volume) is removed: shared OAuth tokens between
+// host and container caused silent 401-on-exit-1 failures whenever
+// either side refreshed.
 package forge
 
 import (
-	"bytes"
+	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
-	"path/filepath"
+	"strings"
 
-	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 	"github.com/spf13/cobra"
+
+	"github.com/LucianoXu/eidopsyche/internal/claudeauth"
+	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 )
 
-// newLoginCmd authenticates Claude Code inside the mind-form's volume.
-//
-// Per SPEC, MindForge prefers Claude Pro/Max subscription auth over
-// Anthropic Console (API-billing). In headless containers the in-TUI
-// subscription OAuth flow (browser + localhost callback) is broken, so
-// we route the operator through the host's claude — where browser +
-// localhost work — and copy the resulting credentials into the volume.
-//
-// Resolution order (default → fallbacks):
-//
-//  1. Host-claude + setup-token (default). Run `claude setup-token` on
-//     the host: real browser opens, long-lived subscription token gets
-//     written to the host's ~/.claude.json. Copy ~/.claude.json (and
-//     ~/.claude/.credentials.json if present) into the mind-form's
-//     volume. Subsequent agent-runner spawns find the credentials
-//     under $HOME = /eidos/claude inside the container.
-//
-//  2. --from-host: skip setup-token, copy whatever ~/.claude.json the
-//     operator already has from a prior login. For operators who use
-//     Claude Code routinely.
-//
-//  3. --from-file <path>: copy a specific .claude.json file. For
-//     operators driving login from a different machine than where
-//     credentials were obtained (e.g., scp from laptop to a server).
-//
-//  4. --method <console|subscription|setup-token>: in-container OAuth.
-//     Only "console" actually works under SSH — the others need a
-//     local browser on the container host. Last-resort path.
-//
-// Empirical notes about the in-container flows we observed (Claude Code
-// 2.1.138 against the eidopsyche-mindform image):
-//   - `claude /login` (slash): localhost-callback in container; fails.
-//   - `claude setup-token`: same.
-//   - `claude auth login` (default --claudeai): same.
-//   - `claude auth login --console`: hosted callback at
-//     platform.claude.com — works under SSH, but bills via API usage,
-//     not subscription quota.
+// installVolume is the test seam — production wires it to a
+// claudeauth.VolumeWriter backed by forgectl + docker.
+var installVolume func(name, image string) (claudeauth.VolumeWriter, error)
+
+func init() {
+	// Set the default production implementation. Using init() keeps the
+	// var declaration clean while allowing tests to override per-call.
+	installVolume = func(name, image string) (claudeauth.VolumeWriter, error) {
+		return claudeauth.NewForgectlVolumeWriter(context.Background(), name, image)
+	}
+}
+
 func newLoginCmd() *cobra.Command {
-	var image, method, fromFile string
-	var fromHost bool
+	var image, tokenFile string
+	var paste, generate bool
 	cmd := &cobra.Command{
 		Use:   "login <name>",
-		Short: "Authenticate Claude Code inside a mind-form's volume (host-claude + setup-token by default)",
+		Short: "Authenticate Claude Code inside a mind-form's volume (isolated per-mindform setup-token)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -66,189 +62,111 @@ func newLoginCmd() *cobra.Command {
 				img = DefaultImage()
 			}
 
-			// Explicit file path wins over everything.
-			if fromFile != "" {
-				return installCredentialsFromFile(name, img, fromFile)
+			var (
+				blob []byte
+				err  error
+			)
+			switch {
+			case tokenFile != "":
+				blob, err = os.ReadFile(tokenFile)
+				if err != nil {
+					return fmt.Errorf("read %s: %w", tokenFile, err)
+				}
+			case paste:
+				blob, err = io.ReadAll(cmd.InOrStdin())
+				if err != nil {
+					return fmt.Errorf("read stdin: %w", err)
+				}
+			case generate:
+				blob, err = claudeauth.Generate(cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr(), "")
+				if err != nil {
+					return err
+				}
+			default:
+				blob, err = runInteractiveLogin(cmd, name)
+				if err != nil {
+					return err
+				}
 			}
-			// In-container OAuth flow — opt-in via --method.
-			if cmd.Flags().Changed("method") {
-				return runInContainerLogin(name, img, method)
+
+			writer, err := installVolume(name, img)
+			if err != nil {
+				return err
 			}
-			// --from-host: copy host's existing creds, no setup-token.
-			if fromHost {
-				return installFromHost(name, img, false)
+			if err := claudeauth.WriteToVolumeUsing(writer, blob); err != nil {
+				return err
 			}
-			// Default: drive setup-token on the host, then install.
-			return installFromHost(name, img, true)
+			fmt.Fprintf(cmd.OutOrStdout(), "✓ credentials installed into eidos-mindform-%s\n", name)
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&image, "image", "", "override container image")
-	cmd.Flags().BoolVar(&fromHost, "from-host", false,
-		"copy host's existing ~/.claude.json into the mind-form (skip setup-token; assumes the operator is already logged in to Claude Code on this machine)")
-	cmd.Flags().StringVar(&fromFile, "from-file", "",
-		"path to a .claude.json file (e.g., scp'd from a laptop) to copy into the mind-form")
-	cmd.Flags().StringVar(&method, "method", "console",
-		`fallback in-container OAuth: "console" (works under SSH, bills via API) | "subscription" | "setup-token". Both subscription and setup-token need a real browser on the container host`)
+	cmd.Flags().StringVar(&tokenFile, "token-file", "", "path to a .credentials.json file to install")
+	cmd.Flags().BoolVar(&paste, "paste", false, "read the credentials JSON from stdin")
+	cmd.Flags().BoolVar(&generate, "generate", false, "drive `claude setup-token` in an isolated HOME")
 	return cmd
 }
 
-// InstallLoginFromHost is the wizard-callable shim around the unexported
-// installFromHost. It copies the host's existing ~/.claude.json (and
-// ~/.claude/.credentials.json if present) into the new mind-form's
-// volume so the in-container claude is logged in before the supervisor
-// runs the birth-wake handler. Used by internal/firstcontact/phase3.
-//
-// Equivalent to running `eidos forge login <name> --from-host`.
-func InstallLoginFromHost(name, image string) error {
-	return installFromHost(name, image, false)
-}
+// runInteractiveLogin walks the operator through the two-path prompt
+// when no flag is given. Returns the credentials blob.
+func runInteractiveLogin(cmd *cobra.Command, name string) ([]byte, error) {
+	out := cmd.OutOrStdout()
+	in := bufio.NewReader(cmd.InOrStdin())
 
-// installFromHost drives the host's claude (optionally running
-// setup-token first) and copies the resulting credentials into the
-// mind-form's volume.
-func installFromHost(name, image string, runSetupToken bool) error {
-	claudePath, err := exec.LookPath("claude")
+	fmt.Fprintf(out, "How will %s authenticate?\n  [1] Paste a setup-token I've already generated\n  [2] Generate a fresh setup-token now (browser will be needed)\n> ", name)
+	choice, err := in.ReadString('\n')
 	if err != nil {
-		return fmt.Errorf(`no "claude" binary on host PATH; install Claude Code on this machine, or pass --from-file <path> with a credentials file scp'd from a host that does, or use --method console for the in-container Console OAuth flow`)
+		return nil, err
 	}
-
-	if runSetupToken {
-		fmt.Printf("running `%s setup-token` on host (a browser will open; complete the subscription login)…\n", claudePath)
-		c := exec.Command(claudePath, "setup-token")
-		c.Stdin = os.Stdin
-		c.Stdout = os.Stdout
-		c.Stderr = os.Stderr
-		if err := c.Run(); err != nil {
-			return fmt.Errorf("claude setup-token: %w", err)
+	switch strings.TrimSpace(choice) {
+	case "1":
+		fmt.Fprintf(out, "Source?\n  [1] Read from a file\n  [2] Paste contents (blank line ends)\n> ")
+		sub, err := in.ReadString('\n')
+		if err != nil {
+			return nil, err
 		}
-	}
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("locate $HOME: %w", err)
-	}
-	clauseJSONPath := filepath.Join(homeDir, ".claude.json")
-	credsBytes, err := os.ReadFile(clauseJSONPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("no credentials at %s; run `claude setup-token` on this host first or use --from-file", clauseJSONPath)
+		switch strings.TrimSpace(sub) {
+		case "1":
+			fmt.Fprintf(out, "Path to credentials file:\n> ")
+			path, err := in.ReadString('\n')
+			if err != nil {
+				return nil, err
+			}
+			return os.ReadFile(strings.TrimSpace(path))
+		case "2":
+			fmt.Fprintf(out, "Paste credentials (blank line ends):\n")
+			var buf strings.Builder
+			for {
+				line, err := in.ReadString('\n')
+				if err != nil && err != io.EOF {
+					return nil, err
+				}
+				if strings.TrimSpace(line) == "" {
+					break
+				}
+				buf.WriteString(line)
+				if err == io.EOF {
+					break
+				}
+			}
+			return []byte(buf.String()), nil
+		default:
+			return nil, fmt.Errorf("phase1: invalid choice %q", sub)
 		}
-		return fmt.Errorf("read %s: %w", clauseJSONPath, err)
-	}
-
-	if err := writeIntoVolume(name, image, "/eidos/claude/.claude.json", bytes.NewReader(credsBytes)); err != nil {
-		return err
-	}
-	// On Linux, subscription tokens may live in ~/.claude/.credentials.json
-	// rather than ~/.claude.json. Copy if present; ignore if not.
-	credsExtraPath := filepath.Join(homeDir, ".claude", ".credentials.json")
-	if extra, err := os.ReadFile(credsExtraPath); err == nil {
-		if err := writeIntoVolume(name, image, "/eidos/claude/.claude/.credentials.json", bytes.NewReader(extra)); err != nil {
-			return err
-		}
-	}
-	if err := clearAuthRequiredInVolume(name, image); err != nil {
-		// Hard error. Without the marker cleared, agent-runner's
-		// self-gate keeps refusing to invoke claude — so a "login OK"
-		// message followed by a permanently-locked mind-form is much
-		// worse than failing login here. Operator can re-run after
-		// fixing the underlying issue (typically docker not running).
-		return fmt.Errorf("login: clear auth_required marker: %w", err)
-	}
-	fmt.Printf("✓ credentials installed into eidos-mindform-%s\n", name)
-	return nil
-}
-
-// installCredentialsFromFile is --from-file's implementation.
-func installCredentialsFromFile(name, image, path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("open %s: %w", path, err)
-	}
-	defer f.Close()
-	if err := writeIntoVolume(name, image, "/eidos/claude/.claude.json", f); err != nil {
-		return err
-	}
-	if err := clearAuthRequiredInVolume(name, image); err != nil {
-		return fmt.Errorf("login: clear auth_required marker: %w", err)
-	}
-	fmt.Printf("✓ credentials installed into eidos-mindform-%s from %s\n", name, path)
-	return nil
-}
-
-// clearAuthRequiredInVolume removes /eidos/run/auth_required.json
-// inside the mind-form's volume after a successful login. Uses a
-// one-shot helper container running as uid 0 (the marker may have
-// been written by either the in-container eidos uid 1000 supervisor
-// or an init-time root process; only root can rm both). The container
-// is short-lived so the elevated uid is bounded. Tolerates absence
-// via rm -f.
-func clearAuthRequiredInVolume(name, image string) error {
-	c := exec.Command("docker", "run", "--rm",
-		"--user", "0:0",
-		"--mount", "source="+forgectl.VolumeName(name)+",target=/eidos",
-		"--entrypoint", "sh",
-		image,
-		"-c", "rm -f /eidos/run/auth_required.json",
-	) //nolint:gosec // argv built from validated inputs
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	if err := c.Run(); err != nil {
-		return fmt.Errorf("clear auth_required marker: %w", err)
-	}
-	return nil
-}
-
-// writeIntoVolume copies a file into the mind-form's volume by piping
-// the content through a one-shot `docker run` that does
-// `mkdir -p $(dirname dst) && cat > dst`.
-func writeIntoVolume(name, image, dst string, content io.Reader) error {
-	parent := filepath.Dir(dst)
-	script := fmt.Sprintf(`mkdir -p %q && cat > %q && chmod 600 %q`, parent, dst, dst)
-	c := exec.Command("docker", "run", "--rm", "-i",
-		"--mount", "source="+forgectl.VolumeName(name)+",target=/eidos",
-		"--entrypoint", "sh",
-		image,
-		"-c", script,
-	) //nolint:gosec // argv built from validated inputs
-	c.Stdin = content
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	if err := c.Run(); err != nil {
-		return fmt.Errorf("docker write to volume %s: %w", dst, err)
-	}
-	return nil
-}
-
-// runInContainerLogin is the legacy in-container OAuth path, retained
-// as a fallback when the host has no claude.
-func runInContainerLogin(name, image, method string) error {
-	var claudeArgv []string
-	switch method {
-	case "console":
-		claudeArgv = []string{"claude", "auth", "login", "--console"}
-	case "subscription":
-		claudeArgv = []string{"claude", "auth", "login"}
-	case "setup-token":
-		claudeArgv = []string{"claude", "setup-token"}
+	case "2":
+		return claudeauth.Generate(cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr(), "")
 	default:
-		return fmt.Errorf(`--method must be "console" | "subscription" | "setup-token" (got %q)`, method)
+		return nil, fmt.Errorf("invalid choice %q", choice)
 	}
-	argv := append([]string{
-		"run", "-it", "--rm",
-		"--mount", "source=" + forgectl.VolumeName(name) + ",target=/eidos",
-		"-e", "EIDOS_IN_CONTAINER=1",
-		image,
-	}, claudeArgv...)
-	c := exec.Command("docker", argv...) //nolint:gosec // argv built from validated inputs
-	c.Stdin = os.Stdin
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	if err := c.Run(); err != nil {
-		return err
-	}
-	if err := clearAuthRequiredInVolume(name, image); err != nil {
-		return fmt.Errorf("login: clear auth_required marker: %w", err)
-	}
-	return nil
+}
+
+// InstallLoginInteractive is the wizard-callable shim. Used by
+// internal/firstcontact/phase4_seal.go.
+func InstallLoginInteractive(name, image string, stdin io.Reader, stdout, stderr io.Writer) error {
+	cmd := newLoginCmd()
+	cmd.SetIn(stdin)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{name, "--image", image})
+	return cmd.Execute()
 }
