@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/LucianoXu/eidopsyche/internal/fileops"
 )
 
 // Defaults for rotation. Overrideable via the gate's [mindform] config.
@@ -150,13 +152,8 @@ func (s *Store) WriteIndex(idx Index) error {
 	if err != nil {
 		return fmt.Errorf("marshal index: %w", err)
 	}
-	tmp := s.IndexPath() + ".tmp"
-	if err := os.WriteFile(tmp, body, 0o600); err != nil {
-		return fmt.Errorf("write index tmp: %w", err)
-	}
-	if err := os.Rename(tmp, s.IndexPath()); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("rename index: %w", err)
+	if err := fileops.AtomicWrite(s.IndexPath(), body, 0o600); err != nil {
+		return fmt.Errorf("write index: %w", err)
 	}
 	return nil
 }

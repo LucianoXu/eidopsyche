@@ -23,6 +23,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/LucianoXu/eidopsyche/internal/fileops"
 )
 
 // Path is the in-container path to the marker file. Hard-coded — the
@@ -52,11 +54,7 @@ func WriteAt(path string, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, body, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return fileops.AtomicWrite(path, body, 0o600)
 }
 
 // Read returns the current state, or (nil, nil) if absent. Errors
