@@ -642,3 +642,67 @@ func TestRenderMarkdown_ClaudePath(t *testing.T) {
 		t.Errorf("missing claude_path line in metadata:\n%s", out)
 	}
 }
+
+// TestRenderMarkdown_OtherRequestFields: keys in request not covered
+// by the dedicated sections must surface under "Other request fields".
+// Scalars render as bullets; complex values render as fenced json.
+// Keys are sorted alphabetically for deterministic output.
+func TestRenderMarkdown_OtherRequestFields(t *testing.T) {
+	env := map[string]any{
+		"request": map[string]any{
+			"model":          "claude-opus-4-7",
+			"temperature":    1.0,
+			"anthropic_beta": "prompt-caching-2024-07-31",
+			"metadata": map[string]any{
+				"user_id": "u1",
+			},
+		},
+	}
+	out, err := renderMarkdown(env)
+	if err != nil {
+		t.Fatalf("renderMarkdown: %v", err)
+	}
+	if !strings.Contains(out, "### Other request fields") {
+		t.Error("missing Other request fields heading")
+	}
+	if !strings.Contains(out, "- **anthropic_beta:** `prompt-caching-2024-07-31`") {
+		t.Error("anthropic_beta bullet missing or malformed")
+	}
+	if !strings.Contains(out, "- **temperature:** 1") {
+		t.Error("temperature bullet missing or malformed (expected integer-shaped 1)")
+	}
+	if !strings.Contains(out, "- **metadata:**") {
+		t.Error("metadata bullet header missing")
+	}
+	if !strings.Contains(out, `"user_id": "u1"`) {
+		t.Error("metadata fenced JSON body missing")
+	}
+	ab := strings.Index(out, "anthropic_beta")
+	md := strings.Index(out, "metadata:")
+	tp := strings.Index(out, "temperature")
+	if !(ab < md && md < tp) {
+		t.Errorf("keys not alphabetically ordered: ab=%d md=%d tp=%d", ab, md, tp)
+	}
+}
+
+// TestRenderMarkdown_NoOtherFields: a request with only the well-known
+// fields must NOT emit an "Other request fields" heading.
+func TestRenderMarkdown_NoOtherFields(t *testing.T) {
+	env := map[string]any{
+		"request": map[string]any{
+			"model":      "claude-opus-4-7",
+			"max_tokens": float64(32000),
+			"stream":     true,
+			"system":     []any{},
+			"tools":      []any{},
+			"messages":   []any{},
+		},
+	}
+	out, err := renderMarkdown(env)
+	if err != nil {
+		t.Fatalf("renderMarkdown: %v", err)
+	}
+	if strings.Contains(out, "### Other request fields") {
+		t.Error("Other request fields heading rendered despite no extra keys")
+	}
+}

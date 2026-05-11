@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -253,6 +254,8 @@ func renderMarkdown(env map[string]any) (string, error) {
 	}
 	b.WriteString("\n")
 
+	renderOtherRequestFields(&b, req)
+
 	sys, _ := req["system"].([]any)
 	fmt.Fprintf(&b, "## System prompt (%d segments)\n\n", len(sys))
 	for i, seg := range sys {
@@ -348,6 +351,51 @@ func firstNonEmptyLine(s string) string {
 		}
 	}
 	return ""
+}
+
+// renderOtherRequestFields appends an "### Other request fields"
+// subsection enumerating every key in req that is not already
+// covered by a dedicated section (model/max_tokens/stream as bullets;
+// system/tools/messages as their own sections). Skipped entirely if
+// no such key exists. Keys are sorted alphabetically for deterministic
+// output.
+//
+// Scalar values render as `- **key:** value` (strings backticked).
+// Complex values (objects, arrays) render as `- **key:**` followed
+// by a fenced `json` block.
+func renderOtherRequestFields(b *strings.Builder, req map[string]any) {
+	covered := map[string]struct{}{
+		"system": {}, "tools": {}, "messages": {},
+		"model": {}, "max_tokens": {}, "stream": {},
+	}
+	var keys []string
+	for k := range req {
+		if _, ok := covered[k]; ok {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	if len(keys) == 0 {
+		return
+	}
+	sort.Strings(keys)
+
+	b.WriteString("### Other request fields\n\n")
+	for _, k := range keys {
+		v := req[k]
+		switch vv := v.(type) {
+		case string:
+			fmt.Fprintf(b, "- **%s:** `%s`\n", k, vv)
+		case bool, float64, nil:
+			fmt.Fprintf(b, "- **%s:** %v\n", k, vv)
+		default:
+			fmt.Fprintf(b, "- **%s:**\n  ```json\n", k)
+			j, _ := json.MarshalIndent(vv, "  ", "  ")
+			b.Write(j)
+			b.WriteString("\n  ```\n")
+		}
+	}
+	b.WriteString("\n")
 }
 
 // formatMediaType returns the media-type prefixed with a single space,
