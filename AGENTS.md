@@ -56,6 +56,24 @@ eidopsyche/
 ```
 
 
+## `deploy-test/` (untracked)
+
+The top-level `deploy-test/` directory holds machine-specific deploy-test
+scripts and runbooks (cross-machine playwright drivers, single-host
+smoke scripts, mind-form lifecycle drills, etc.). Its contents are
+tied to the maintainer's workstations (codenames, IPs, SSH config,
+absolute paths) and the whole directory is `.gitignore`d — agents and
+contributors should treat it as a local-only scratch area. Layout
+convention: one test per subfolder, each with a `script.md` runbook
+plus any helper scripts; ordering prefixes (e.g. `001-…/`, `002-…/`)
+are encouraged but not required.
+
+Do not commit anything under `deploy-test/`. If a deploy-test pattern
+turns out to be portable enough to ship, promote it into
+`test/integration/` (real Go integration test, behind the `integration`
+build tag) instead of trying to track it here.
+
+
 ## Prefab catalogue (top-level `prefab/`)
 
 The summon wizard's "pick a preset" branch reads from `prefab/<id>/`.
