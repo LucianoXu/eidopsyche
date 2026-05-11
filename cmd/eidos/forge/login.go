@@ -4,14 +4,19 @@
 //
 // The login flow installs a per-mindform OAuth credentials blob into
 // /eidos/claude/.claude/.credentials.json. Operators provide the blob
-// in one of three ways:
+// in one of four ways:
 //
-//  1. --token-file <path>  — read a .credentials.json file produced
-//     by an earlier `claude setup-token` run anywhere convenient.
-//  2. --paste               — read the blob from stdin (good for piping).
-//  3. --generate            — drive `claude setup-token` here in an
+//  1. --setup-token-stdin — read a raw sk-ant-oat01-... token from
+//     stdin (one line) and wrap it into a credentials.json blob.
+//     Stdin-only by design: passing the token via argv would leak it
+//     into shell history, `ps`, and CI logs.
+//  2. --token-file <path> — read a pre-built .credentials.json file
+//     (output of an earlier `claude setup-token` run).
+//  3. --paste             — read a pre-built credentials.json blob
+//     from stdin (good for piping).
+//  4. --generate          — drive `claude setup-token` here in an
 //     isolated HOME so the operator's host claude is not touched.
-//  4. No flag → interactive prompt offering paths 1+2 (paste/file) and 3.
+//  5. No flag → interactive prompt offering all four paths.
 //
 // The old --from-host path (which copied the host's ~/.claude.json
 // verbatim into the volume) is removed: shared OAuth tokens between
@@ -38,8 +43,6 @@ import (
 var installVolume func(name, image string) (claudeauth.VolumeWriter, error)
 
 func init() {
-	// Set the default production implementation. Using init() keeps the
-	// var declaration clean while allowing tests to override per-call.
 	installVolume = func(name, image string) (claudeauth.VolumeWriter, error) {
 		return claudeauth.NewForgectlVolumeWriter(context.Background(), name, image)
 	}
@@ -47,7 +50,7 @@ func init() {
 
 func newLoginCmd() *cobra.Command {
 	var image, tokenFile string
-	var paste, generate bool
+	var setupTokenStdin, paste, generate bool
 	cmd := &cobra.Command{
 		Use:   "login <name>",
 		Short: "Authenticate Claude Code inside a mind-form's volume (isolated per-mindform setup-token)",
@@ -67,6 +70,15 @@ func newLoginCmd() *cobra.Command {
 				err  error
 			)
 			switch {
+			case setupTokenStdin:
+				raw, readErr := io.ReadAll(cmd.InOrStdin())
+				if readErr != nil {
+					return fmt.Errorf("read stdin: %w", readErr)
+				}
+				blob, err = claudeauth.WrapSetupToken(string(raw))
+				if err != nil {
+					return err
+				}
 			case tokenFile != "":
 				blob, err = os.ReadFile(tokenFile)
 				if err != nil {
@@ -101,25 +113,42 @@ func newLoginCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&image, "image", "", "override container image")
-	cmd.Flags().StringVar(&tokenFile, "token-file", "", "path to a .credentials.json file to install")
-	cmd.Flags().BoolVar(&paste, "paste", false, "read the credentials JSON from stdin")
+	// Stdin-only by design: passing a bearer token via argv leaks it into
+	// shell history, `ps`, and CI logs. Operators pipe the token in.
+	cmd.Flags().BoolVar(&setupTokenStdin, "setup-token-stdin", false, "read a raw setup-token (sk-ant-oat01-...) from stdin and wrap it into a credentials blob")
+	cmd.Flags().StringVar(&tokenFile, "token-file", "", "path to a pre-built .credentials.json file")
+	cmd.Flags().BoolVar(&paste, "paste", false, "read a pre-built credentials.json blob from stdin")
 	cmd.Flags().BoolVar(&generate, "generate", false, "drive `claude setup-token` in an isolated HOME")
 	return cmd
 }
 
-// runInteractiveLogin walks the operator through the two-path prompt
-// when no flag is given. Returns the credentials blob.
+// runInteractiveLogin walks the operator through the menu when no flag
+// is given. Option ordering reflects expected operator frequency:
+// raw setup-token first (the typical case after browser setup),
+// pre-built credentials.json second (advanced/automation), interactive
+// generate third (operator without a token yet).
 func runInteractiveLogin(cmd *cobra.Command, name string) ([]byte, error) {
 	out := cmd.OutOrStdout()
 	in := bufio.NewReader(cmd.InOrStdin())
 
-	fmt.Fprintf(out, "How will %s authenticate?\n  [1] Paste a setup-token I've already generated\n  [2] Generate a fresh setup-token now (browser will be needed)\n> ", name)
+	fmt.Fprintf(out, "How will %s authenticate?\n"+
+		"  [1] Paste a setup-token string (sk-ant-oat01-... from claude.ai/setup)\n"+
+		"  [2] Use a pre-generated credentials.json blob\n"+
+		"  [3] Generate a fresh setup-token now (interactive, browser needed)\n"+
+		"> ", name)
 	choice, err := in.ReadString('\n')
 	if err != nil {
 		return nil, err
 	}
 	switch strings.TrimSpace(choice) {
 	case "1":
+		fmt.Fprintf(out, "Paste the setup-token (single line, enter to confirm):\n> ")
+		tok, err := in.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+		return claudeauth.WrapSetupToken(tok)
+	case "2":
 		fmt.Fprintf(out, "Source?\n  [1] Read from a file\n  [2] Paste contents (blank line ends)\n> ")
 		sub, err := in.ReadString('\n')
 		if err != nil {
@@ -151,9 +180,9 @@ func runInteractiveLogin(cmd *cobra.Command, name string) ([]byte, error) {
 			}
 			return []byte(buf.String()), nil
 		default:
-			return nil, fmt.Errorf("phase1: invalid choice %q", sub)
+			return nil, fmt.Errorf("credentials source: invalid choice %q", sub)
 		}
-	case "2":
+	case "3":
 		return claudeauth.Generate(cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr(), "")
 	default:
 		return nil, fmt.Errorf("invalid choice %q", choice)
