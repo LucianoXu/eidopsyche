@@ -47,7 +47,7 @@ go test -tags=integration ./test/integration/...
 - `internal/wake/birth.go` — adopt `fileops.AtomicWrite`
 - `internal/invite/payload.go` — drop private `encodeNpub`/`decodeNpub`, use `identity.EncodeNpub`/`identity.DecodeNpub`
 - `internal/daemon/methods.go` — keep only `init()`/`register()`, `internalErr`, `resolveTarget`, `isHex64`, `peerLabel`, `lookupLabel`, `annotateInboxLabels`, `annotateOutboxLabels`, and remove the stale "Phase 5" comment on `relayListContains` (the helper itself moves to `methods_relay.go`)
-- `internal/dashboard/handlers.go` — shrink to `registerHandlersWithRenderer`, `shellHandler`, `sidebarHandler`, `topbarHandler`, `buildSidebar`, `lastSeenByContact`, `lookupContact`, `pubkeyToNpub`, `humanSince`, `previewFor`
+- `internal/dashboard/handlers.go` — shrink to `registerHandlersWithRenderer`, `shellHandler`, `sidebarHandler`, `topbarHandler`, `buildSidebar`, `lastSeenByContact`, `lookupContact`, `pubkeyToNpub`, `humanSince` (`previewFor` ends up co-located with its msgToRow/sentToRow callers in `handlers_messages.go`)
 - `cmd/eidos/supervisor/agent_runner.go` — shrink `runWithTranscript` to ~70 lines by delegating store/open/finalize to `transcriptHandle`
 - `cmd/eidos/forge/orchestrate.go` — refactor `Orchestrate` into linear `[]orchestrateStep` + reverse-undo on failure
 - `cmd/eidos/forge/create_test.go` — add failure-mode tests for each step (RunInit fail, ContainerCreate fail, etc.)
@@ -335,8 +335,8 @@ Function placement map (source-of-truth for the split):
 
 | Destination | Functions (current handlers.go line in parens) |
 |---|---|
-| `handlers.go` (keep) | `registerHandlersWithRenderer` (23), `shellHandler` (57), `sidebarHandler` (90), `topbarHandler` (913), `buildSidebar` (318), `lastSeenByContact` (344), `lookupContact` (491), `pubkeyToNpub` (899), `humanSince` (1332), `previewFor` (425) |
-| `handlers_messages.go` | `messagesHandler` (113), `threadOrSendHandler` (129), `threadHandler` (141), `composeHandler` (206), `sendHandler` (221), `composeSendHandler` (240), `sendChat` (259), `buildMessagesView` (365), `msgToRow` (401), `sentToRow` (414), `buildBubbles` (433), `msgToBubble` (453), `sentToBubble` (469) |
+| `handlers.go` (keep) | `registerHandlersWithRenderer` (23), `shellHandler` (57), `sidebarHandler` (90), `topbarHandler` (913), `buildSidebar` (318), `lastSeenByContact` (344), `lookupContact` (491), `pubkeyToNpub` (899), `humanSince` (1332) |
+| `handlers_messages.go` | `messagesHandler` (113), `threadOrSendHandler` (129), `threadHandler` (141), `composeHandler` (206), `sendHandler` (221), `composeSendHandler` (240), `sendChat` (259), `buildMessagesView` (365), `msgToRow` (401), `sentToRow` (414), `previewFor` (425), `buildBubbles` (433), `msgToBubble` (453), `sentToBubble` (469) |
 | `handlers_relays_view.go` | `relaysHandler` (540), `buildRelaysView` (517), `sortRelayRows` (555) |
 | `handlers_settings.go` | `settingsShellHandler` (603), `settingsIdentityHandler` (633), `settingsLabelPostHandler` (658), `settingsConfigHandler` (713), `renderSettingsFullPage` (776), `buildSettingsShell` (806), `buildSettingsIdentity` (832), `buildSettingsConfig` (845), `configRowFromKey` (862), `slugifyPath` (877), `isSettingsURL` (884) |
 | `handlers_contacts.go` | `settingsContactsHandler` (946), `renderContactsErr` (994), `settingsContactsScanHandler` (1006), `settingsContactsByPubkeyHandler` (1052), `renderContactDetail` (1114), `renderContactRemoveModal` (1130), `handleContactSetLabel` (1155), `handleContactSetTier` (1195), `handleContactRemove` (1223), `buildSettingsContacts` (1260), `buildContactDetail` (1285), `shortHexID` (1306), `requireConfirm` (1318) |

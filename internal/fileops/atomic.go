@@ -8,10 +8,17 @@ import (
 	"path/filepath"
 )
 
-// AtomicWrite writes body to path durably by writing a sibling temp file
-// first and renaming it into place. The temp file lives in the same
-// directory so the rename is atomic on POSIX. On any failure the temp
+// AtomicWrite writes body to path by writing a sibling temp file first
+// and renaming it into place. The temp file lives in the same
+// directory so the rename is atomic on POSIX; either the new contents
+// are visible at path, or path is unchanged. On any failure the temp
 // file is removed.
+//
+// AtomicWrite does NOT fsync the temp file or its parent directory,
+// so a host crash or power loss between rename and OS flush may lose
+// the write even after a nil return. This matches the behavior of
+// every call site this helper replaces; if callers need crash
+// durability they should add their own fsync after AtomicWrite.
 //
 // Callers are responsible for ensuring path's parent directory exists.
 func AtomicWrite(path string, body []byte, perm fs.FileMode) error {
