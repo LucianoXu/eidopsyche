@@ -128,6 +128,10 @@ func runInitVolume(stdout, stderr io.Writer, stdin io.Reader) error {
 		return fmt.Errorf("save gate config (model): %w", err)
 	}
 
+	if err := applyHeartbeatEnv(cfgPath, os.Getenv("EIDOS_FORGE_HEARTBEAT_INTERVAL")); err != nil {
+		return fmt.Errorf("save gate config (heartbeat): %w", err)
+	}
+
 	// Add the master contact directly to state.db. We bypass `eidos gate
 	// add-contact` here on purpose: per the SPEC's single-call-path rule,
 	// every operator action goes through the gate daemon's methodTable —
@@ -201,6 +205,26 @@ func applyModelEnv(cfgPath, model string) error {
 		return fmt.Errorf("load gate config: %w", err)
 	}
 	cfg.MindForm.Model = model
+	return config.Save(cfgPath, cfg)
+}
+
+// applyHeartbeatEnv writes heartbeat.interval into the gate config when
+// interval is non-empty; validates first via
+// config.ValidateHeartbeatInterval. Empty is a no-op (operator did not
+// pin a cadence at create time, so the supervisor uses
+// config.DefaultHeartbeatInterval at PID-1 startup).
+func applyHeartbeatEnv(cfgPath, interval string) error {
+	if interval == "" {
+		return nil
+	}
+	if err := config.ValidateHeartbeatInterval(interval); err != nil {
+		return err
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return fmt.Errorf("load gate config: %w", err)
+	}
+	cfg.Heartbeat.Interval = interval
 	return config.Save(cfgPath, cfg)
 }
 
