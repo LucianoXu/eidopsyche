@@ -109,3 +109,58 @@ func TestCaptureServer_BodyTooLarge(t *testing.T) {
 		t.Errorf("captured populated despite oversize body")
 	}
 }
+
+// TestBuildEnvelope: wraps a captured body with metadata and returns a
+// well-formed JSON document. captured_at must be RFC3339; request must
+// be the parsed body, not a string blob.
+func TestBuildEnvelope(t *testing.T) {
+	captured := []byte(`{"model":"claude-sonnet-4-7","system":"foo"}`)
+	meta := envelopeMeta{
+		ClaudeVersion: "2.1.138",
+		ClaudePath:    "/usr/bin/claude",
+		ClaudeArgs:    []string{"--model", "sonnet", "-p", "ping"},
+		Host:          hostInfo{Platform: "linux", CWD: "/data/eidopsyche"},
+		CapturedAt:    time.Date(2026, 5, 11, 17, 23, 45, 0, time.UTC),
+	}
+	out, err := buildEnvelope(meta, captured)
+	if err != nil {
+		t.Fatalf("buildEnvelope: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(out, &parsed); err != nil {
+		t.Fatalf("output not valid JSON: %v\n%s", err, out)
+	}
+	if got := parsed["captured_at"]; got != "2026-05-11T17:23:45Z" {
+		t.Errorf("captured_at = %v, want 2026-05-11T17:23:45Z", got)
+	}
+	req, ok := parsed["request"].(map[string]any)
+	if !ok {
+		t.Fatalf("request not an object: %T", parsed["request"])
+	}
+	if req["model"] != "claude-sonnet-4-7" {
+		t.Errorf("request.model = %v, want claude-sonnet-4-7", req["model"])
+	}
+}
+
+// TestBuildEnvelope_RawBodyFallback: if the captured body is not valid
+// JSON, the envelope must include it under raw_body and omit request.
+func TestBuildEnvelope_RawBodyFallback(t *testing.T) {
+	out, err := buildEnvelope(envelopeMeta{
+		ClaudeVersion: "2.1.138",
+		CapturedAt:    time.Now().UTC(),
+	}, []byte("not json at all"))
+	if err != nil {
+		t.Fatalf("buildEnvelope: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(out, &parsed); err != nil {
+		t.Fatalf("envelope itself not JSON: %v", err)
+	}
+	if _, has := parsed["request"]; has {
+		t.Error("request field present on malformed body; should be absent")
+	}
+	if parsed["raw_body"] != "not json at all" {
+		t.Errorf("raw_body = %v, want 'not json at all'", parsed["raw_body"])
+	}
+}

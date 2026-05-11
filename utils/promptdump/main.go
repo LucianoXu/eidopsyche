@@ -5,12 +5,14 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 )
 
 // maxBodyBytes caps the request body the capture handler will accept.
@@ -103,6 +105,45 @@ const minimalSSE = "" +
 // (real http.Server on a random port) lives in listen(), added later.
 func (s *captureServer) start(_ testing.TB) *httptest.Server {
 	return httptest.NewServer(s.handler())
+}
+
+// envelopeMeta is the wrapper metadata captured alongside the request body.
+// Its JSON form is the top-level object promptdump writes out.
+type envelopeMeta struct {
+	CapturedAt    time.Time // formatted into captured_at by buildEnvelope
+	ClaudeVersion string
+	ClaudePath    string
+	ClaudeArgs    []string
+	Host          hostInfo
+}
+
+// hostInfo captures the host-side context that influences the dynamic
+// segments of the system prompt (cwd, platform).
+type hostInfo struct {
+	Platform string `json:"platform"`
+	CWD      string `json:"cwd"`
+}
+
+// buildEnvelope serializes meta + body into the final pretty-printed JSON
+// envelope. If body parses as JSON, it lands under "request"; otherwise
+// the raw bytes are stringified under "raw_body" and a parse-error note
+// is added under "parse_error".
+func buildEnvelope(meta envelopeMeta, body []byte) ([]byte, error) {
+	out := map[string]any{
+		"captured_at":    meta.CapturedAt.UTC().Format(time.RFC3339),
+		"claude_version": meta.ClaudeVersion,
+		"claude_path":    meta.ClaudePath,
+		"claude_args":    meta.ClaudeArgs,
+		"host":           meta.Host,
+	}
+	var parsed any
+	if err := json.Unmarshal(body, &parsed); err == nil {
+		out["request"] = parsed
+	} else {
+		out["raw_body"] = string(body)
+		out["parse_error"] = err.Error()
+	}
+	return json.MarshalIndent(out, "", "  ")
 }
 
 func main() {
