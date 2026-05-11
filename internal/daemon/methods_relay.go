@@ -33,7 +33,12 @@ func relayAdd(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessag
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
 	}
-	err := d.Mutate(ctx, "relays."+p.URL, config.BothCtx,
+	// Coarse path "relays": individual URLs contain dots (and the daemon
+	// also canonicalizes them on the way in), so a per-URL Mutate path
+	// wouldn't round-trip through state.get's dotted resolver. The
+	// state.changed:relays signal is enough; subscribers re-read the
+	// `relays` subtree to find what changed.
+	err := d.Mutate(ctx, "relays", config.BothCtx,
 		func() (any, any, error) {
 			if err := d.AddOwnRelay(ctx, p.URL, p.Role); err != nil {
 				switch {
@@ -58,7 +63,7 @@ func relayRemove(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
 	}
-	err := d.Mutate(ctx, "relays."+p.URL, config.BothCtx,
+	err := d.Mutate(ctx, "relays", config.BothCtx,
 		func() (any, any, error) {
 			if err := d.RemoveOwnRelay(ctx, p.URL); err != nil {
 				switch {

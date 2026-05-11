@@ -86,12 +86,25 @@ func TestStateContributors_ServiceVersionPresent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, ok := v.(map[string]string)
+	m, ok := v.(map[string]any)
 	if !ok {
-		t.Fatalf("expected map[string]string; got %T", v)
+		t.Fatalf("expected map[string]any; got %T", v)
 	}
 	if _, has := m["version"]; !has {
 		t.Errorf("service.version missing 'version': %+v", m)
+	}
+}
+
+// TestStateContributors_ServiceVersionDottedAccess pins the bugfix
+// for codex PR #59 review: version subtree must be map[string]any so
+// state.Tree's dotted-path walker can resolve service.version.version.
+// Was map[string]string before the fix; this test would have caught it.
+func TestStateContributors_ServiceVersionDottedAccess(t *testing.T) {
+	d := newTestDaemon(t)
+	d.registerCoreStateContributors()
+	_, err := d.stateTree.Snapshot(context.Background(), "service.version.version")
+	if err != nil {
+		t.Errorf("service.version.version should resolve via dotted walk; got %v", err)
 	}
 }
 

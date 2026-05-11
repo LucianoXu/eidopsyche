@@ -30,12 +30,16 @@ import (
 // container.*) land in internal/lifecycle in Phase D — those are not
 // registered by the host daemon.
 //
-// Each contributor body delegates to the existing per-domain method
-// helper so there is one source of truth for the shape: state.get
-// returns byte-for-byte what the legacy IPC reads return. The legacy
-// methods stay registered in this PR to keep dashboards / CLI / tests
-// working unchanged; the cleanup PR that removes them only needs to
-// migrate callers, not redesign the data.
+// Each contributor delegates to the same per-domain data layer
+// (Repo.List, Box.ListInbox, etc.) that the legacy IPC reads use, so
+// data sources are unified, but the *shape* state.get returns is
+// chosen to be Tree-walkable: contacts and relays land as maps keyed
+// by hex pubkey / url for indexed access; relays.* entries merge the
+// health field that the legacy relays.health surfaced separately;
+// identity exposes a card subtree that's a thin URI projection rather
+// than the full TOML card body card.export ships. The legacy IPC
+// methods stay registered for backward-compat callers; a cleanup PR
+// migrates them and removes the duplicates.
 
 func (d *Daemon) registerCoreStateContributors() {
 	d.RegisterStateContributor(identityContrib{d: d})
@@ -193,12 +197,12 @@ func (c relaysContrib) Snapshot(ctx context.Context) (any, error) {
 type inboxContrib struct{ d *Daemon }
 
 func (c inboxContrib) Path() string { return "inbox" }
-func (c inboxContrib) Snapshot(_ context.Context) (any, error) {
+func (c inboxContrib) Snapshot(ctx context.Context) (any, error) {
 	rows, err := c.d.Box.ListInbox(nil, "", 100)
 	if err != nil {
 		return nil, err
 	}
-	annotateInboxLabels(context.Background(), c.d, rows)
+	annotateInboxLabels(ctx, c.d, rows)
 	return map[string]any{
 		"recent": rows,
 		"count":  len(rows),
@@ -210,12 +214,12 @@ func (c inboxContrib) Snapshot(_ context.Context) (any, error) {
 type outboxContrib struct{ d *Daemon }
 
 func (c outboxContrib) Path() string { return "outbox" }
-func (c outboxContrib) Snapshot(_ context.Context) (any, error) {
+func (c outboxContrib) Snapshot(ctx context.Context) (any, error) {
 	rows, err := c.d.Box.ListOutbox(nil, "", 100)
 	if err != nil {
 		return nil, err
 	}
-	annotateOutboxLabels(context.Background(), c.d, rows)
+	annotateOutboxLabels(ctx, c.d, rows)
 	return map[string]any{
 		"recent": rows,
 		"count":  len(rows),
@@ -246,10 +250,13 @@ type serviceContrib struct{ d *Daemon }
 
 func (c serviceContrib) Path() string { return "service" }
 func (c serviceContrib) Snapshot(_ context.Context) (any, error) {
+	// version subtree must be map[string]any so state.Tree's walker
+	// (which understands map[string]any / structs, not map[string]string)
+	// can resolve dotted access like `state.get service.version.version`.
 	return map[string]any{
 		"socket":     filepath.Join(c.d.StateDir, c.d.Cfg.Daemon.Socket),
 		"started_at": c.d.startedAt.Unix(),
-		"version": map[string]string{
+		"version": map[string]any{
 			"version":    version.Version,
 			"commit":     version.Commit,
 			"build_date": version.BuildDate,

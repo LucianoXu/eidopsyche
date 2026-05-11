@@ -91,8 +91,13 @@ func inviteRevoke(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMe
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
 	}
+	// Coarse path "invites": p.IDPrefix may be a prefix rather than a
+	// full ID, and we don't know the canonical full id until InviteRevoke
+	// resolves it. The invitesContrib snapshots as a slice anyway, so
+	// per-id dotted access wouldn't resolve. state.changed:invites is
+	// enough; subscribers re-read.
 	var fullID string
-	merr := d.Mutate(ctx, "invites."+p.IDPrefix, config.BothCtx,
+	merr := d.Mutate(ctx, "invites", config.BothCtx,
 		func() (any, any, error) {
 			id, err := d.InviteRevoke(ctx, p.IDPrefix)
 			if err != nil {
