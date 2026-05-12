@@ -29,7 +29,7 @@ func newWatchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "watch <name>",
 		Short: "Stream a mind-form's headless reasoning chain (claude thinking + tool calls + results)",
-		Long: `Render the structured stream-json transcript captured by agent-runner.
+		Long: `Render the structured stream-json transcript captured by agent-loop.
 
 Defaults to following the current wake. With --wake <id> renders a past
 wake (use --list to see ids). With --raw the host renders nothing and
@@ -243,8 +243,12 @@ func runWatchTail(ctx context.Context, out io.Writer, c forgectl.Client, cont, w
 // header context. Returns zero value when the lookups fail (the renderer
 // then falls back to the legacy header). The "current" wake uses
 // runtime-state's session info (the active session's UUID + an ordinal
-// of WakesInSession+1, matching what IncrementWake will record at the
-// end of the wake).
+// of Turns+1, matching what the next OnTurnEnd will record).
+//
+// Under the always-on agent-loop there's no externally observable
+// "current wake ID" — turns are stream-json messages, not processes —
+// so WakeID is left blank for `--wake current` and the renderer falls
+// back to session+ordinal.
 func buildWakeRenderCtx(ctx context.Context, c forgectl.Client, cont, wakeArg string) wakeRenderCtx {
 	if wakeArg == "current" {
 		res, err := c.ContainerExec(ctx, cont, []string{"eidos", "forge", "runtime-state"})
@@ -259,14 +263,9 @@ func buildWakeRenderCtx(ctx context.Context, c forgectl.Client, cont, wakeArg st
 		if len(short) > 8 {
 			short = short[:8]
 		}
-		wakeShort := rs.ActiveWakeID
-		if len(wakeShort) > 8 {
-			wakeShort = wakeShort[:8]
-		}
 		return wakeRenderCtx{
-			WakeID:    wakeShort,
 			SessionID: short,
-			Ordinal:   rs.WakesInSession + 1,
+			Ordinal:   rs.Turns + 1,
 		}
 	}
 	res, err := c.ContainerExec(ctx, cont, []string{"eidos", "forge", "transcript-list", "--json"})
@@ -436,7 +435,7 @@ func renderStream(out io.Writer, src io.Reader, raw bool, opts renderOpts, wctx 
 	}
 }
 
-// readLineUnbounded matches the helper in supervisor/agent_runner.go:
+// readLineUnbounded matches the helper in internal/agentloop/drain.go:
 // reads up to and including the next '\n' from r, joining as many
 // ReadSlice chunks as needed. A trailing partial line at EOF is
 // returned with (line, io.EOF).

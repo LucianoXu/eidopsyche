@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LucianoXu/eidopsyche/internal/agentloop"
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 	"github.com/spf13/cobra"
 )
@@ -58,31 +57,21 @@ func computeStatus(ctx context.Context, c forgectl.Client, name string) (string,
 	// without the subcommand, exec error, malformed JSON), fall back to
 	// the legacy `state: running` line so old images stay supported.
 	if rs, ok := fetchRuntimeState(ctx, c, cont); ok {
-		fmt.Fprintf(&sb, "phase:   %s\n", formatPhase(rs))
+		fmt.Fprintf(&sb, "phase:   %s\n", rs.Phase)
 		if rs.SessionID != "" {
 			short := rs.SessionID
 			if len(short) > 8 {
 				short = short[:8]
 			}
 			age := time.Since(time.Unix(rs.SessionStartedAt, 0)).Truncate(time.Second)
-			fmt.Fprintf(&sb, "session: %s (age %s, %d wakes)\n", short, age, rs.WakesInSession)
+			fmt.Fprintf(&sb, "session: %s (age %s, %d turns)\n", short, age, rs.Turns)
+		}
+		if rs.LastEventAt > 0 {
+			age := time.Since(time.Unix(rs.LastEventAt, 0)).Round(time.Second)
+			fmt.Fprintf(&sb, "last_active: %s ago\n", age)
 		}
 	} else {
 		fmt.Fprintf(&sb, "state:   %s\n", state)
-	}
-
-	// Best-effort agent-state: thinking + last_active. Omitted when the
-	// agent-loop has not started yet or the exec fails (older images).
-	if as, ok := fetchAgentState(ctx, c, cont); ok {
-		if as.ClaudeBusy {
-			fmt.Fprintf(&sb, "thinking: yes\n")
-		} else {
-			fmt.Fprintf(&sb, "thinking: no\n")
-		}
-		if as.LastEventAt > 0 {
-			age := time.Since(time.Unix(as.LastEventAt, 0)).Round(time.Second)
-			fmt.Fprintf(&sb, "last_active: %s ago\n", age)
-		}
 	}
 
 	// Best-effort whoami via in-container reflection.
@@ -114,30 +103,4 @@ func fetchRuntimeState(ctx context.Context, c forgectl.Client, cont string) (Run
 		return RuntimeState{}, false
 	}
 	return rs, true
-}
-
-// fetchAgentState execs `eidos forge agent-state` in the container and
-// parses its JSON. Returns (zero, false) on any exec / parse failure so the
-// caller can silently omit the thinking + last_active lines on older images
-// or when the agent-loop has not started yet.
-func fetchAgentState(ctx context.Context, c forgectl.Client, cont string) (agentloop.AgentState, bool) {
-	res, err := c.ContainerExec(ctx, cont, []string{"eidos", "forge", "agent-state"})
-	if err != nil || res.ExitCode != 0 {
-		return agentloop.AgentState{}, false
-	}
-	var as agentloop.AgentState
-	if err := json.Unmarshal(res.Stdout, &as); err != nil {
-		return agentloop.AgentState{}, false
-	}
-	return as, true
-}
-
-// formatPhase renders the phase line: `awake (mindgate)` /
-// `awake+dreaming (heartbeat)` / `sleeping`. The wake reason is appended
-// only when the agent is awake AND the reason is known.
-func formatPhase(rs RuntimeState) string {
-	if (rs.Phase == "awake" || rs.Phase == "awake+dreaming") && rs.WakeReason != "" {
-		return fmt.Sprintf("%s (%s)", rs.Phase, rs.WakeReason)
-	}
-	return rs.Phase
 }

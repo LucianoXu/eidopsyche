@@ -1,5 +1,7 @@
 # Persistent wake context across wakes (with dream as session boundary)
 
+> **Partially superseded by [`2026-05-12-mindform-always-on-design.md`](2026-05-12-mindform-always-on-design.md) and [`2026-05-12-forge-status-always-on-alignment-design.md`](2026-05-12-forge-status-always-on-alignment-design.md).** Under the always-on agent-loop, `session.json` is the persistent crash-recovery snapshot (still maintained by `internal/sessionstate`), and `agent-state.json` carries the **live** counter (`WakesInSession`) and is the operator-visible source. `forge status` reads `agent-state.json`-derived `turns`, not `session.json`. The wake-counter mechanics and dream-as-session-boundary semantics in this doc remain accurate; only the read path for the display counter has moved.
+
 - **Date**: 2026-05-10
 - **Touches**: `cmd/eidos/supervisor/agent_runner.go`, `cmd/eidos/forge/{dream,runtime_state,status,transcript_list,watch,watch_render}.go`, `internal/transcript/{store,events}.go`, `internal/sessionstate/` (new package), `SPEC.md`, `EXAMPLE.md`
 - **Sequencing**: single PR. Small enough to land together; splitting would force the watch surface to ship without a session model to point at.

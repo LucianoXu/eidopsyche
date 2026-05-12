@@ -8,142 +8,137 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/agentloop"
 	"github.com/LucianoXu/eidopsyche/internal/authstate"
-	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
-	"github.com/LucianoXu/eidopsyche/internal/sessionstate"
-	"github.com/LucianoXu/eidopsyche/internal/wake"
 )
 
 // runtimeStateFixture redirects the package-level paths used by
 // computeRuntimeState to test-temp locations and restores them on
 // cleanup. Mirrors statusDetailFixture.
-func runtimeStateFixture(t *testing.T) (wakeT, dreamT, authT, procStatT, procBootT string) {
+func runtimeStateFixture(t *testing.T) (authT, procStatT, procBootT, agentStateT string) {
 	t.Helper()
-	prevWake := wakeDir
-	prevDream := dreamStatePath
 	prevAuth := authStatePath
 	prevProcStat := procStatPath
 	prevProcBoot := procBootTimePath
+	prevAgent := agentStateRuntimePath
 
-	wakeT = t.TempDir()
-	dreamT = filepath.Join(t.TempDir(), "dream-state.json")
 	authT = filepath.Join(t.TempDir(), "auth_required.json")
 	procStatT = filepath.Join(t.TempDir(), "proc1stat")
 	procBootT = filepath.Join(t.TempDir(), "procstat")
+	agentStateT = filepath.Join(t.TempDir(), "agent-state.json")
 
-	wakeDir = wakeT
-	dreamStatePath = dreamT
 	authStatePath = authT
 	procStatPath = procStatT
 	procBootTimePath = procBootT
+	agentStateRuntimePath = agentStateT
 
 	t.Cleanup(func() {
-		wakeDir = prevWake
-		dreamStatePath = prevDream
 		authStatePath = prevAuth
 		procStatPath = prevProcStat
 		procBootTimePath = prevProcBoot
+		agentStateRuntimePath = prevAgent
 	})
 	return
 }
 
-func TestRuntimeState_Sleeping(t *testing.T) {
+func TestRuntimeState_Starting(t *testing.T) {
+	// No agent-state.json yet: agent-loop hasn't written its first state.
 	runtimeStateFixture(t)
 	rs := computeRuntimeState(time.Now())
-	if rs.V != 1 {
-		t.Errorf("v=%d, want 1", rs.V)
+	if rs.V != runtimeStateSchemaVersion {
+		t.Errorf("v=%d, want %d", rs.V, runtimeStateSchemaVersion)
 	}
-	if rs.Phase != "sleeping" {
-		t.Errorf("phase=%q, want sleeping", rs.Phase)
-	}
-	if rs.WakeReason != "" {
-		t.Errorf("wake_reason should be empty when sleeping: %q", rs.WakeReason)
-	}
-	if rs.ActiveWakeID != "" {
-		t.Errorf("active_wake_id should be empty when sleeping: %q", rs.ActiveWakeID)
-	}
-	if rs.SincePhaseChangeSeconds != nil {
-		t.Errorf("since_phase_change_seconds should be nil when sleeping")
+	if rs.Phase != "starting" {
+		t.Errorf("phase=%q, want starting", rs.Phase)
 	}
 	if rs.AuthRequired {
 		t.Errorf("auth_required should be false")
 	}
-	if rs.Dreaming {
-		t.Errorf("dreaming should be false")
+	if rs.SessionID != "" || rs.Turns != 0 {
+		t.Errorf("session fields should be zero when agent-state missing: %+v", rs)
 	}
 }
 
-func TestRuntimeState_Awake(t *testing.T) {
-	wakeT, _, _, _, _ := runtimeStateFixture(t)
-	sig := wake.Signal{V: 1, ID: "1715000000-mindgate", Reason: wake.ReasonMindGate, TriggeredAt: 1715000000}
-	if err := wake.WritePending(wakeT, sig); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := wake.PromoteToActive(wakeT); err != nil {
+func TestRuntimeState_Idle(t *testing.T) {
+	_, _, _, agentT := runtimeStateFixture(t)
+	if err := agentloop.WriteAgentState(agentT, agentloop.AgentState{
+		ClaudeBusy:       false,
+		Dreaming:         false,
+		SessionID:        "session-1",
+		SessionStartedAt: 1700000000,
+		WakesInSession:   3,
+		LastEventAt:      1700000500,
+	}); err != nil {
 		t.Fatal(err)
 	}
 
 	rs := computeRuntimeState(time.Now())
-	if rs.Phase != "awake" {
-		t.Errorf("phase=%q, want awake", rs.Phase)
+	if rs.Phase != "idle" {
+		t.Errorf("phase=%q, want idle", rs.Phase)
 	}
-	if rs.WakeReason != "mindgate" {
-		t.Errorf("wake_reason=%q", rs.WakeReason)
+	if rs.SessionID != "session-1" {
+		t.Errorf("session_id=%q", rs.SessionID)
 	}
-	if rs.ActiveWakeID != "1715000000-mindgate" {
-		t.Errorf("active_wake_id=%q", rs.ActiveWakeID)
+	if rs.SessionStartedAt != 1700000000 {
+		t.Errorf("session_started_at=%d", rs.SessionStartedAt)
 	}
-	if rs.SincePhaseChangeSeconds == nil {
-		t.Errorf("since_phase_change_seconds should be set when awake")
+	if rs.Turns != 3 {
+		t.Errorf("turns=%d, want 3", rs.Turns)
+	}
+	if rs.LastEventAt != 1700000500 {
+		t.Errorf("last_event_at=%d", rs.LastEventAt)
 	}
 }
 
-func TestRuntimeState_AwakeDreaming(t *testing.T) {
-	wakeT, dreamT, _, _, _ := runtimeStateFixture(t)
-	sig := wake.Signal{V: 1, ID: "abc", Reason: wake.ReasonHeartBeat, TriggeredAt: 1}
-	if err := wake.WritePending(wakeT, sig); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := wake.PromoteToActive(wakeT); err != nil {
-		t.Fatal(err)
-	}
-	if err := dreamstate.Begin(dreamT, time.Now(), "consolidating"); err != nil {
+func TestRuntimeState_Thinking(t *testing.T) {
+	_, _, _, agentT := runtimeStateFixture(t)
+	if err := agentloop.WriteAgentState(agentT, agentloop.AgentState{
+		ClaudeBusy:       true,
+		Dreaming:         false,
+		SessionID:        "session-1",
+		SessionStartedAt: 1700000000,
+		WakesInSession:   7,
+	}); err != nil {
 		t.Fatal(err)
 	}
 
 	rs := computeRuntimeState(time.Now())
-	if rs.Phase != "awake+dreaming" {
-		t.Errorf("phase=%q, want awake+dreaming", rs.Phase)
+	if rs.Phase != "thinking" {
+		t.Errorf("phase=%q, want thinking", rs.Phase)
 	}
-	if !rs.Dreaming {
-		t.Errorf("dreaming should be true")
-	}
-	if rs.WakeReason != "heartbeat" {
-		t.Errorf("wake_reason=%q", rs.WakeReason)
+	if rs.Turns != 7 {
+		t.Errorf("turns=%d, want 7", rs.Turns)
 	}
 }
 
-func TestRuntimeState_DreamingWithoutActiveWake(t *testing.T) {
-	// Defensive: if dreamstate says dreaming but no active wake (race or
-	// inconsistency), phase should stay "sleeping" — but Dreaming bool
-	// surfaces the inconsistency to whoever inspects the JSON.
-	_, dreamT, _, _, _ := runtimeStateFixture(t)
-	if err := dreamstate.Begin(dreamT, time.Now(), "ghost dream"); err != nil {
+func TestRuntimeState_Dreaming(t *testing.T) {
+	_, _, _, agentT := runtimeStateFixture(t)
+	// Dreaming overrides busy: the consolidation pass is the meaningful
+	// state to surface even if claude is mid-token at the moment.
+	if err := agentloop.WriteAgentState(agentT, agentloop.AgentState{
+		ClaudeBusy: true,
+		Dreaming:   true,
+	}); err != nil {
 		t.Fatal(err)
 	}
 
 	rs := computeRuntimeState(time.Now())
-	if rs.Phase != "sleeping" {
-		t.Errorf("phase=%q, want sleeping (no active wake)", rs.Phase)
-	}
-	if !rs.Dreaming {
-		t.Errorf("dreaming should still be true (orthogonal field)")
+	if rs.Phase != "dreaming" {
+		t.Errorf("phase=%q, want dreaming (overrides thinking)", rs.Phase)
 	}
 }
 
 func TestRuntimeState_AuthRequired(t *testing.T) {
-	_, _, authT, _, _ := runtimeStateFixture(t)
+	authT, _, _, agentT := runtimeStateFixture(t)
 	if err := authstate.WriteAt(authT, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	// Even with claude_busy=true on disk, auth-required short-circuits
+	// because the agent-loop is intentionally gated; surfacing
+	// "thinking" would be misleading.
+	if err := agentloop.WriteAgentState(agentT, agentloop.AgentState{
+		ClaudeBusy: true,
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -151,12 +146,15 @@ func TestRuntimeState_AuthRequired(t *testing.T) {
 	if !rs.AuthRequired {
 		t.Errorf("auth_required should be true")
 	}
+	if rs.Phase != "auth-required" {
+		t.Errorf("phase=%q, want auth-required", rs.Phase)
+	}
 }
 
 func TestRuntimeState_ContainerStartedAt(t *testing.T) {
 	// Synthesise minimal /proc/1/stat and /proc/stat to exercise the
 	// best-effort start-time parser.
-	_, _, _, procStatT, procBootT := runtimeStateFixture(t)
+	_, procStatT, procBootT, _ := runtimeStateFixture(t)
 	// /proc/1/stat: pid (comm) state ppid pgrp session tty_nr tpgid flags
 	// minflt cminflt majflt cmajflt utime stime cutime cstime priority nice
 	// num_threads itrealvalue starttime ...
@@ -199,45 +197,10 @@ func TestRuntimeStateCmd_JSONOutput(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &rs); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
 	}
-	if rs.Phase != "sleeping" {
-		t.Errorf("phase=%q", rs.Phase)
+	if rs.Phase != "starting" {
+		t.Errorf("phase=%q, want starting (no agent-state.json present)", rs.Phase)
 	}
-}
-
-func TestComputeRuntimeState_SessionFieldsPresent(t *testing.T) {
-	dir := t.TempDir()
-	prev := sessionStateRuntimePath
-	sessionStateRuntimePath = filepath.Join(dir, "session.json")
-	t.Cleanup(func() { sessionStateRuntimePath = prev })
-
-	st, err := sessionstate.Mint(sessionStateRuntimePath, time.Unix(1700000000, 0))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sessionstate.IncrementWake(sessionStateRuntimePath); err != nil {
-		t.Fatal(err)
-	}
-
-	rs := computeRuntimeState(time.Unix(1700001000, 0))
-	if rs.SessionID != st.SessionID {
-		t.Fatalf("SessionID = %q, want %q", rs.SessionID, st.SessionID)
-	}
-	if rs.SessionStartedAt != 1700000000 {
-		t.Fatalf("SessionStartedAt = %d", rs.SessionStartedAt)
-	}
-	if rs.WakesInSession != 1 {
-		t.Fatalf("WakesInSession = %d", rs.WakesInSession)
-	}
-}
-
-func TestComputeRuntimeState_SessionFieldsOmittedWhenAbsent(t *testing.T) {
-	dir := t.TempDir()
-	prev := sessionStateRuntimePath
-	sessionStateRuntimePath = filepath.Join(dir, "session.json")
-	t.Cleanup(func() { sessionStateRuntimePath = prev })
-
-	rs := computeRuntimeState(time.Unix(1700000000, 0))
-	if rs.SessionID != "" || rs.SessionStartedAt != 0 || rs.WakesInSession != 0 {
-		t.Fatalf("expected zero session fields when session.json absent; got %+v", rs)
+	if rs.V != runtimeStateSchemaVersion {
+		t.Errorf("v=%d, want %d", rs.V, runtimeStateSchemaVersion)
 	}
 }

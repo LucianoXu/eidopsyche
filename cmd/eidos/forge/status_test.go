@@ -43,11 +43,11 @@ func TestStatusOffline(t *testing.T) {
 	}
 }
 
-func TestStatusAwake(t *testing.T) {
+func TestStatusThinking(t *testing.T) {
 	f := &statusFake{
 		state: "running",
 		execResponses: map[string]forgectl.ExecResult{
-			"runtime-state": {Stdout: []byte(`{"v":1,"phase":"awake","wake_reason":"mindgate","active_wake_id":"abc","dreaming":false,"auth_required":false,"container_started_at":1700000000}`)},
+			"runtime-state": {Stdout: []byte(`{"v":2,"phase":"thinking","auth_required":false,"container_started_at":1700000000}`)},
 			"whoami":        {Stdout: []byte("npub: npub1mfx\n")},
 			"status-detail": {Stdout: []byte("plans:   none\ndreams:  none yet\n")},
 		},
@@ -56,8 +56,13 @@ func TestStatusAwake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "phase:   awake (mindgate)") {
+	if !strings.Contains(out, "phase:   thinking") {
 		t.Errorf("phase line wrong: %q", out)
+	}
+	// The standalone `thinking: yes` line from the v1 output is gone —
+	// phase already conveys it.
+	if strings.Contains(out, "thinking: yes") {
+		t.Errorf("redundant thinking line should be removed: %q", out)
 	}
 	if !strings.Contains(out, "npub1mfx") {
 		t.Errorf("whoami missing: %q", out)
@@ -67,11 +72,11 @@ func TestStatusAwake(t *testing.T) {
 	}
 }
 
-func TestStatusAwakeDreaming(t *testing.T) {
+func TestStatusDreaming(t *testing.T) {
 	f := &statusFake{
 		state: "running",
 		execResponses: map[string]forgectl.ExecResult{
-			"runtime-state": {Stdout: []byte(`{"v":1,"phase":"awake+dreaming","wake_reason":"heartbeat","active_wake_id":"x","dreaming":true,"auth_required":false,"container_started_at":0}`)},
+			"runtime-state": {Stdout: []byte(`{"v":2,"phase":"dreaming","auth_required":false,"container_started_at":0}`)},
 			"whoami":        {Stdout: []byte("npub: npub1mfx\n")},
 		},
 	}
@@ -79,28 +84,40 @@ func TestStatusAwakeDreaming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "phase:   awake+dreaming (heartbeat)") {
+	if !strings.Contains(out, "phase:   dreaming") {
 		t.Errorf("phase line wrong: %q", out)
 	}
 }
 
-func TestStatusSleeping(t *testing.T) {
+func TestStatusIdle(t *testing.T) {
 	f := &statusFake{
 		state: "running",
 		execResponses: map[string]forgectl.ExecResult{
-			"runtime-state": {Stdout: []byte(`{"v":1,"phase":"sleeping","dreaming":false,"auth_required":false,"container_started_at":0}`)},
+			"runtime-state": {Stdout: []byte(`{"v":2,"phase":"idle","auth_required":false,"container_started_at":0}`)},
 		},
 	}
 	out, err := computeStatus(context.Background(), f, "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "phase:   sleeping") {
+	if !strings.Contains(out, "phase:   idle") {
 		t.Errorf("phase line wrong: %q", out)
 	}
-	// Sleeping phase has no `(reason)` suffix.
-	if strings.Contains(out, "sleeping (") {
-		t.Errorf("sleeping should not carry a wake_reason: %q", out)
+}
+
+func TestStatusAuthRequired(t *testing.T) {
+	f := &statusFake{
+		state: "running",
+		execResponses: map[string]forgectl.ExecResult{
+			"runtime-state": {Stdout: []byte(`{"v":2,"phase":"auth-required","auth_required":true,"container_started_at":0}`)},
+		},
+	}
+	out, err := computeStatus(context.Background(), f, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "phase:   auth-required") {
+		t.Errorf("phase line wrong: %q", out)
 	}
 }
 
@@ -139,11 +156,11 @@ func TestStatusAbsent(t *testing.T) {
 	}
 }
 
-func TestStatusAwake_WithSessionFields(t *testing.T) {
+func TestStatusThinking_WithSessionFields(t *testing.T) {
 	f := &statusFake{
 		state: "running",
 		execResponses: map[string]forgectl.ExecResult{
-			"runtime-state": {Stdout: []byte(`{"v":1,"phase":"awake","wake_reason":"heartbeat","active_wake_id":"abc","dreaming":false,"auth_required":false,"container_started_at":1700000000,"session_id":"7d2f6f2e-1b2a-4c3d-9e8f-aabbccddeeff","session_started_at":1700000000,"wakes_in_session":47}`)},
+			"runtime-state": {Stdout: []byte(`{"v":2,"phase":"thinking","auth_required":false,"container_started_at":1700000000,"session_id":"7d2f6f2e-1b2a-4c3d-9e8f-aabbccddeeff","session_started_at":1700000000,"turns":47}`)},
 			"whoami":        {Stdout: []byte("npub: npub1mfx\n")},
 		},
 	}
@@ -154,16 +171,16 @@ func TestStatusAwake_WithSessionFields(t *testing.T) {
 	if !strings.Contains(out, "session: 7d2f6f2e") {
 		t.Errorf("missing session line: %q", out)
 	}
-	if !strings.Contains(out, "47 wakes") {
-		t.Errorf("missing wake count: %q", out)
+	if !strings.Contains(out, "47 turns") {
+		t.Errorf("missing turn count: %q", out)
 	}
 }
 
-func TestStatusSleeping_NoSessionLineWhenAbsent(t *testing.T) {
+func TestStatusStarting_NoSessionLineWhenAbsent(t *testing.T) {
 	f := &statusFake{
 		state: "running",
 		execResponses: map[string]forgectl.ExecResult{
-			"runtime-state": {Stdout: []byte(`{"v":1,"phase":"sleeping","dreaming":false,"auth_required":false,"container_started_at":0}`)},
+			"runtime-state": {Stdout: []byte(`{"v":2,"phase":"starting","auth_required":false,"container_started_at":0}`)},
 		},
 	}
 	out, err := computeStatus(context.Background(), f, "alice")
@@ -172,5 +189,24 @@ func TestStatusSleeping_NoSessionLineWhenAbsent(t *testing.T) {
 	}
 	if strings.Contains(out, "session:") {
 		t.Errorf("session line should be omitted when absent: %q", out)
+	}
+	if strings.Contains(out, "last_active:") {
+		t.Errorf("last_active line should be omitted when absent: %q", out)
+	}
+}
+
+func TestStatusLastActive(t *testing.T) {
+	f := &statusFake{
+		state: "running",
+		execResponses: map[string]forgectl.ExecResult{
+			"runtime-state": {Stdout: []byte(`{"v":2,"phase":"idle","auth_required":false,"container_started_at":0,"last_event_at":1700000000}`)},
+		},
+	}
+	out, err := computeStatus(context.Background(), f, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "last_active:") {
+		t.Errorf("missing last_active line: %q", out)
 	}
 }

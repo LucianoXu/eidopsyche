@@ -14,28 +14,63 @@ func TestListPhase_Offline(t *testing.T) {
 	}
 }
 
-func TestListPhase_Sleeping(t *testing.T) {
+func TestListPhase_Starting(t *testing.T) {
 	f := &statusFake{
 		state: "running",
 		execResponses: map[string]forgectl.ExecResult{
-			"runtime-state": {Stdout: []byte(`{"v":1,"phase":"sleeping","dreaming":false,"auth_required":false,"container_started_at":0}`)},
+			"runtime-state": {Stdout: []byte(`{"v":2,"phase":"starting","auth_required":false,"container_started_at":0}`)},
 		},
 	}
-	if got := listPhase(context.Background(), f, "alice"); got != "sleeping" {
-		t.Errorf("got %q, want sleeping", got)
+	if got := listPhase(context.Background(), f, "alice"); got != "starting" {
+		t.Errorf("got %q, want starting", got)
 	}
 }
 
-func TestListPhase_Awake(t *testing.T) {
+func TestListPhase_Idle(t *testing.T) {
 	f := &statusFake{
 		state: "running",
 		execResponses: map[string]forgectl.ExecResult{
-			"runtime-state": {Stdout: []byte(`{"v":1,"phase":"awake","wake_reason":"mindgate","dreaming":false,"auth_required":false,"container_started_at":0}`)},
+			"runtime-state": {Stdout: []byte(`{"v":2,"phase":"idle","auth_required":false,"container_started_at":0}`)},
 		},
 	}
-	// list omits the wake reason — column stays narrow.
-	if got := listPhase(context.Background(), f, "alice"); got != "awake" {
-		t.Errorf("got %q, want awake", got)
+	if got := listPhase(context.Background(), f, "alice"); got != "idle" {
+		t.Errorf("got %q, want idle", got)
+	}
+}
+
+func TestListPhase_Thinking(t *testing.T) {
+	f := &statusFake{
+		state: "running",
+		execResponses: map[string]forgectl.ExecResult{
+			"runtime-state": {Stdout: []byte(`{"v":2,"phase":"thinking","auth_required":false,"container_started_at":0}`)},
+		},
+	}
+	if got := listPhase(context.Background(), f, "alice"); got != "thinking" {
+		t.Errorf("got %q, want thinking", got)
+	}
+}
+
+func TestListPhase_Dreaming(t *testing.T) {
+	f := &statusFake{
+		state: "running",
+		execResponses: map[string]forgectl.ExecResult{
+			"runtime-state": {Stdout: []byte(`{"v":2,"phase":"dreaming","auth_required":false,"container_started_at":0}`)},
+		},
+	}
+	if got := listPhase(context.Background(), f, "alice"); got != "dreaming" {
+		t.Errorf("got %q, want dreaming", got)
+	}
+}
+
+func TestListPhase_AuthRequired(t *testing.T) {
+	f := &statusFake{
+		state: "running",
+		execResponses: map[string]forgectl.ExecResult{
+			"runtime-state": {Stdout: []byte(`{"v":2,"phase":"auth-required","auth_required":true,"container_started_at":0}`)},
+		},
+	}
+	if got := listPhase(context.Background(), f, "alice"); got != "auth-required" {
+		t.Errorf("got %q, want auth-required", got)
 	}
 }
 

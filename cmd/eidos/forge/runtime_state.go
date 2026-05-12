@@ -4,48 +4,48 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/agentloop"
 	"github.com/LucianoXu/eidopsyche/internal/authstate"
-	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
-	"github.com/LucianoXu/eidopsyche/internal/sessionstate"
-	"github.com/LucianoXu/eidopsyche/internal/wake"
 	"github.com/spf13/cobra"
 )
 
 // In-container paths consulted by `forge runtime-state`. Vars (not
-// consts) so tests can substitute temp paths; mirrors plansDir /
-// dreamStatePath pattern.
+// consts) so tests can substitute temp paths; mirrors dreamStatePath
+// pattern in dream.go. agentStateRuntimePath is declared in
+// agent_state.go (shared with the agent-state subcommand).
 var (
-	wakeDir                 = "/eidos/run/wake"
-	authStatePath           = authstate.Path
-	procStatPath            = "/proc/1/stat"
-	procBootTimePath        = "/proc/stat"
-	sessionStateRuntimePath = "/eidos/run/session.json"
+	authStatePath    = authstate.Path
+	procStatPath     = "/proc/1/stat"
+	procBootTimePath = "/proc/stat"
 )
 
 // RuntimeState is the JSON shape emitted by `eidos forge runtime-state`.
-// See docs/superpowers/specs/2026-05-10-mindform-status-and-observer-design.md
-// §3.2 for the field semantics.
+// Schema v2 — see
+// docs/superpowers/specs/2026-05-12-forge-status-always-on-alignment-design.md
+// for the field semantics. The host's `forge status` and `forge list`
+// parse this verbatim.
 type RuntimeState struct {
-	V                       int    `json:"v"`
-	Phase                   string `json:"phase"`
-	WakeReason              string `json:"wake_reason,omitempty"`
-	ActiveWakeID            string `json:"active_wake_id,omitempty"`
-	Dreaming                bool   `json:"dreaming"`
-	AuthRequired            bool   `json:"auth_required"`
-	SincePhaseChangeSeconds *int64 `json:"since_phase_change_seconds,omitempty"`
-	ContainerStartedAt      int64  `json:"container_started_at"`
+	V                  int    `json:"v"`
+	Phase              string `json:"phase"`
+	AuthRequired       bool   `json:"auth_required"`
+	ContainerStartedAt int64  `json:"container_started_at"`
 
-	// Session fields, omitted when session.json is absent. Wake counter
-	// is the in-progress count (incremented after each wake completes).
-	// See docs/superpowers/specs/2026-05-10-persistent-wake-context-design.md.
+	// Session fields, omitted when agent-state.json is absent.
+	// Turns is the live counter from agent-state.json (every result-event
+	// is one turn; signal-driven and mailbox-driven turns both count).
 	SessionID        string `json:"session_id,omitempty"`
 	SessionStartedAt int64  `json:"session_started_at,omitempty"`
-	WakesInSession   int    `json:"wakes_in_session,omitempty"`
+	Turns            int    `json:"turns,omitempty"`
+	LastEventAt      int64  `json:"last_event_at,omitempty"`
 }
+
+// runtimeStateSchemaVersion is bumped when RuntimeState's JSON contract
+// changes. Pre-production: host parser is updated in lockstep, no v1
+// fallback path.
+const runtimeStateSchemaVersion = 2
 
 // newRuntimeStateCmd is an in-container hidden subcommand that prints the
 // current phase as JSON. The host's `forge status` and `forge list` parse
@@ -75,56 +75,54 @@ func newRuntimeStateCmd() *cobra.Command {
 	}
 }
 
-// computeRuntimeState derives the phase from the on-disk wake / dream-state
-// / authstate signals. Pure-ish (`now` injected for testability; file paths
-// are package-level vars overridable from tests).
+// computeRuntimeState derives the phase from the on-disk authstate and
+// agent-state.json signals. Pure-ish (`now` injected for testability;
+// file paths are package-level vars overridable from tests).
 //
-// Phase rules (from spec §3.1):
-//   - active.json present + CurrentlyDreaming → "awake+dreaming"
-//   - active.json present                      → "awake"
-//   - otherwise                                → "sleeping"
+// Phase derivation (single source of truth: agent-state.json under the
+// always-on agent-loop, with authstate as a short-circuit):
 //
-// "offline" is host-derived (the container itself isn't running) and never
-// emitted by this command.
-func computeRuntimeState(now time.Time) RuntimeState {
-	rs := RuntimeState{V: 1}
-
-	ds, _ := dreamstate.Read(dreamStatePath)
-	rs.Dreaming = ds.CurrentlyDreaming
-
-	active, _ := wake.ReadActive(wakeDir)
-	if active != nil {
-		rs.Phase = "awake"
-		rs.WakeReason = string(active.Reason)
-		rs.ActiveWakeID = active.ID
-		if rs.Dreaming {
-			rs.Phase = "awake+dreaming"
-		}
-		if info, err := os.Stat(filepath.Join(wakeDir, "active.json")); err == nil {
-			since := int64(now.Sub(info.ModTime()).Seconds())
-			if since < 0 {
-				since = 0
-			}
-			rs.SincePhaseChangeSeconds = &since
-		}
-	} else {
-		rs.Phase = "sleeping"
-	}
+//	authstate present                 → "auth-required"
+//	agent-state.json missing / empty  → "starting"
+//	agentState.Dreaming               → "dreaming"
+//	agentState.ClaudeBusy             → "thinking"
+//	otherwise                         → "idle"
+//
+// "offline" is host-derived (the container itself isn't running) and
+// never emitted by this command.
+//
+// The `now` parameter is currently unused but retained so callers and
+// tests don't need to be reworked when future phases need wall-clock
+// comparisons (e.g. stale-state detection).
+func computeRuntimeState(_ time.Time) RuntimeState {
+	rs := RuntimeState{V: runtimeStateSchemaVersion}
+	rs.ContainerStartedAt = readContainerStartTime()
 
 	if state, _ := authstate.ReadAt(authStatePath); state != nil {
 		rs.AuthRequired = true
+		rs.Phase = "auth-required"
+		return rs
 	}
 
-	rs.ContainerStartedAt = readContainerStartTime()
-
-	// Surface session info when session.json is present. A corrupt file
-	// is silently skipped (status command falls back gracefully).
-	if sess, err := sessionstate.Read(sessionStateRuntimePath); err == nil && sess.SessionID != "" {
-		rs.SessionID = sess.SessionID
-		rs.SessionStartedAt = sess.SessionStartedAt
-		rs.WakesInSession = sess.WakesInSession
+	as, err := agentloop.ReadAgentState(agentStateRuntimePath)
+	if err != nil || as.V == 0 {
+		rs.Phase = "starting"
+		return rs
 	}
 
+	switch {
+	case as.Dreaming:
+		rs.Phase = "dreaming"
+	case as.ClaudeBusy:
+		rs.Phase = "thinking"
+	default:
+		rs.Phase = "idle"
+	}
+
+	rs.SessionID = as.SessionID
+	rs.SessionStartedAt = as.SessionStartedAt
+	rs.Turns = as.WakesInSession
+	rs.LastEventAt = as.LastEventAt
 	return rs
 }
 

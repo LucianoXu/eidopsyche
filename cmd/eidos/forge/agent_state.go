@@ -1,9 +1,11 @@
 package forge
 
 import (
+	"context"
 	"encoding/json"
 
 	"github.com/LucianoXu/eidopsyche/internal/agentloop"
+	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 	"github.com/spf13/cobra"
 )
 
@@ -39,4 +41,21 @@ func newAgentStateCmd() *cobra.Command {
 			return err
 		},
 	}
+}
+
+// fetchAgentState execs `eidos forge agent-state` in the container and
+// parses its JSON. Returns (zero, false) on any exec / parse failure so
+// the caller can silently omit derived fields on older images or when
+// the agent-loop has not started yet. Used by `forge watch` to poll the
+// busy / idle transitions for `--wake current` follow mode.
+func fetchAgentState(ctx context.Context, c forgectl.Client, cont string) (agentloop.AgentState, bool) {
+	res, err := c.ContainerExec(ctx, cont, []string{"eidos", "forge", "agent-state"})
+	if err != nil || res.ExitCode != 0 {
+		return agentloop.AgentState{}, false
+	}
+	var as agentloop.AgentState
+	if err := json.Unmarshal(res.Stdout, &as); err != nil {
+		return agentloop.AgentState{}, false
+	}
+	return as, true
 }
