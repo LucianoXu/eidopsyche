@@ -47,5 +47,6 @@ func registerInContainer(root *cobra.Command) {
 		newAgentStateCmd(),
 		newTranscriptListCmd(),
 		newTranscriptTailCmd(),
+		newPromptDumpInContainerCmd(),
 	)
 }
