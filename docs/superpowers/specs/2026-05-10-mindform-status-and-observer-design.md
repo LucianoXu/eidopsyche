@@ -1,5 +1,7 @@
 # Mind-form status taxonomy & headless reasoning observer
 
+> **Superseded in part by [`2026-05-12-forge-status-always-on-alignment-design.md`](2026-05-12-forge-status-always-on-alignment-design.md).** The phase taxonomy described here (`sleeping`/`awake[reason]`/`awake+dreaming`) and the `RuntimeState` v1 schema were a fit for the per-wake-spawn `agent-runner` runtime that v0.14.0 (PR #71) replaced with the always-on `agent-loop`. The current phase values are `offline | starting | auth-required | dreaming | thinking | idle` and `RuntimeState` is at v2; see the linked spec for the live shape. The `forge watch` renderer design in §6 is still current.
+
 - **Date**: 2026-05-10
 - **Touches**: `cmd/eidos/forge/{status,list,status_detail,watch,transcript_tail,transcript_list,runtime_state}.go` (new + modified), `cmd/eidos/supervisor/agent_runner.go`, `internal/forgectl`, `internal/wake` (read-only), `docker/entrypoint.sh` (transcripts dir setup), `internal/config` (new fields), `README.md`, `EXAMPLE.md`
 - **Sequencing**: three PRs — PR-A (status taxonomy), PR-B1 (capture + storage), PR-B2 (`forge watch` renderer). See §8.

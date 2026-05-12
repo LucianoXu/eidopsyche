@@ -170,7 +170,7 @@ func init() {
 	})
 	register(Key{
 		Path:        "mindform.model",
-		Description: "Pin the claude model used by agent-runner (e.g. claude-sonnet-4-7). Empty lets claude pick its subscription default.",
+		Description: "Pin the claude model used by agent-loop (e.g. claude-sonnet-4-7). Empty lets claude pick its subscription default.",
 		Contexts:    ContainerCtx,
 		Get:         func(c *Config) string { return c.MindForm.Model },
 		Set: func(c *Config, v string) error {

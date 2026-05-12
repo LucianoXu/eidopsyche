@@ -32,7 +32,7 @@ func newConfigCmd() *cobra.Command {
 		Short: "Update a mind-form's runtime configuration (in-container gate)",
 		Long: `Update a runtime config key inside the mind-form's gate. Supported flags:
 
-  --model <id>                Pin the claude model used by agent-runner.
+  --model <id>                Pin the claude model used by agent-loop.
                               Re-read at every wake — no restart needed.
   --heartbeat-interval <dur>  HeartBeat cadence (e.g. 2m, 30m, 2h).
                               Hot-reloaded by the daemon's apply hook —

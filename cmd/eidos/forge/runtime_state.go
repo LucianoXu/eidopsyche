@@ -4,48 +4,67 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/agentloop"
 	"github.com/LucianoXu/eidopsyche/internal/authstate"
-	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
-	"github.com/LucianoXu/eidopsyche/internal/sessionstate"
-	"github.com/LucianoXu/eidopsyche/internal/wake"
 	"github.com/spf13/cobra"
 )
 
 // In-container paths consulted by `forge runtime-state`. Vars (not
-// consts) so tests can substitute temp paths; mirrors plansDir /
-// dreamStatePath pattern.
+// consts) so tests can substitute temp paths; mirrors dreamStatePath
+// pattern in dream.go. agentStateRuntimePath is declared in
+// agent_state.go (shared with the agent-state subcommand).
 var (
-	wakeDir                 = "/eidos/run/wake"
-	authStatePath           = authstate.Path
-	procStatPath            = "/proc/1/stat"
-	procBootTimePath        = "/proc/stat"
-	sessionStateRuntimePath = "/eidos/run/session.json"
+	authStatePath        = authstate.Path
+	procStatPath         = "/proc/1/stat"
+	procBootTimePath     = "/proc/stat"
+	agentLoopCrashedPath = "/eidos/run/agent-loop-crashed.json"
 )
 
 // RuntimeState is the JSON shape emitted by `eidos forge runtime-state`.
-// See docs/superpowers/specs/2026-05-10-mindform-status-and-observer-design.md
-// §3.2 for the field semantics.
+// Schema v2 — see
+// docs/superpowers/specs/2026-05-12-forge-status-always-on-alignment-design.md
+// for the field semantics. The host's `forge status` and `forge list`
+// parse this verbatim.
 type RuntimeState struct {
-	V                       int    `json:"v"`
-	Phase                   string `json:"phase"`
-	WakeReason              string `json:"wake_reason,omitempty"`
-	ActiveWakeID            string `json:"active_wake_id,omitempty"`
-	Dreaming                bool   `json:"dreaming"`
-	AuthRequired            bool   `json:"auth_required"`
-	SincePhaseChangeSeconds *int64 `json:"since_phase_change_seconds,omitempty"`
-	ContainerStartedAt      int64  `json:"container_started_at"`
+	V                  int    `json:"v"`
+	Phase              string `json:"phase"`
+	AuthRequired       bool   `json:"auth_required"`
+	ContainerStartedAt int64  `json:"container_started_at"`
 
-	// Session fields, omitted when session.json is absent. Wake counter
-	// is the in-progress count (incremented after each wake completes).
-	// See docs/superpowers/specs/2026-05-10-persistent-wake-context-design.md.
+	// CrashedExitCode and CrashedLastError carry the last agent-loop
+	// failure when phase == "crashed". The crash-loop guard in
+	// cmd/eidos/supervisor/run.go writes /eidos/run/agent-loop-crashed.json
+	// after 5 deaths in 60s; surfacing it here gives the operator a
+	// pointer to investigate without docker-execing in.
+	CrashedExitCode  int    `json:"crashed_exit_code,omitempty"`
+	CrashedLastError string `json:"crashed_last_error,omitempty"`
+
+	// Session fields, omitted when agent-state.json is absent.
+	// Turns is the live counter from agent-state.json (every result-event
+	// is one turn; signal-driven and mailbox-driven turns both count).
 	SessionID        string `json:"session_id,omitempty"`
 	SessionStartedAt int64  `json:"session_started_at,omitempty"`
-	WakesInSession   int    `json:"wakes_in_session,omitempty"`
+	Turns            int    `json:"turns,omitempty"`
+	LastEventAt      int64  `json:"last_event_at,omitempty"`
 }
+
+// agentLoopCrashed mirrors the on-disk
+// /eidos/run/agent-loop-crashed.json schema written by the supervisor's
+// crash-loop guard. Only the fields runtime-state surfaces are decoded.
+type agentLoopCrashed struct {
+	V         int    `json:"v"`
+	HaltedAt  string `json:"halted_at"`
+	ExitCode  int    `json:"exit_code"`
+	LastError string `json:"last_error"`
+}
+
+// runtimeStateSchemaVersion is bumped when RuntimeState's JSON contract
+// changes. Pre-production: host parser is updated in lockstep, no v1
+// fallback path.
+const runtimeStateSchemaVersion = 2
 
 // newRuntimeStateCmd is an in-container hidden subcommand that prints the
 // current phase as JSON. The host's `forge status` and `forge list` parse
@@ -75,57 +94,88 @@ func newRuntimeStateCmd() *cobra.Command {
 	}
 }
 
-// computeRuntimeState derives the phase from the on-disk wake / dream-state
-// / authstate signals. Pure-ish (`now` injected for testability; file paths
-// are package-level vars overridable from tests).
+// computeRuntimeState derives the phase from the on-disk authstate,
+// agent-loop crash marker, and agent-state.json signals. Pure-ish
+// (`now` injected for testability; file paths are package-level vars
+// overridable from tests).
 //
-// Phase rules (from spec §3.1):
-//   - active.json present + CurrentlyDreaming → "awake+dreaming"
-//   - active.json present                      → "awake"
-//   - otherwise                                → "sleeping"
+// Phase derivation (single source of truth: agent-state.json under the
+// always-on agent-loop, with auth and crash short-circuits):
 //
-// "offline" is host-derived (the container itself isn't running) and never
-// emitted by this command.
-func computeRuntimeState(now time.Time) RuntimeState {
-	rs := RuntimeState{V: 1}
-
-	ds, _ := dreamstate.Read(dreamStatePath)
-	rs.Dreaming = ds.CurrentlyDreaming
-
-	active, _ := wake.ReadActive(wakeDir)
-	if active != nil {
-		rs.Phase = "awake"
-		rs.WakeReason = string(active.Reason)
-		rs.ActiveWakeID = active.ID
-		if rs.Dreaming {
-			rs.Phase = "awake+dreaming"
-		}
-		if info, err := os.Stat(filepath.Join(wakeDir, "active.json")); err == nil {
-			since := int64(now.Sub(info.ModTime()).Seconds())
-			if since < 0 {
-				since = 0
-			}
-			rs.SincePhaseChangeSeconds = &since
-		}
-	} else {
-		rs.Phase = "sleeping"
-	}
+//	authstate present                       → "auth-required"
+//	agent-loop-crashed.json present         → "crashed"
+//	agent-state.json missing / empty        → "starting"
+//	agentState.Dreaming                     → "dreaming"
+//	agentState.ClaudeBusy                   → "thinking"
+//	otherwise                               → "idle"
+//
+// "offline" is host-derived (the container itself isn't running) and
+// never emitted by this command. The crash short-circuit overrides the
+// agent-state read because once the supervisor halts restart, the
+// agent-state snapshot is stale and surfacing "thinking" / "idle" from
+// it would be misleading. auth-required wins over crashed because it
+// is the more actionable signal (the operator's next step is
+// `eidos forge login`); a crashed marker may itself be the downstream
+// consequence of failed auth, in which case fixing auth is what
+// unblocks the loop.
+//
+// The `now` parameter is currently unused but retained so callers and
+// tests don't need to be reworked when future phases need wall-clock
+// comparisons (e.g. stale-state detection).
+func computeRuntimeState(_ time.Time) RuntimeState {
+	rs := RuntimeState{V: runtimeStateSchemaVersion}
+	rs.ContainerStartedAt = readContainerStartTime()
 
 	if state, _ := authstate.ReadAt(authStatePath); state != nil {
 		rs.AuthRequired = true
+		rs.Phase = "auth-required"
+		return rs
 	}
 
-	rs.ContainerStartedAt = readContainerStartTime()
-
-	// Surface session info when session.json is present. A corrupt file
-	// is silently skipped (status command falls back gracefully).
-	if sess, err := sessionstate.Read(sessionStateRuntimePath); err == nil && sess.SessionID != "" {
-		rs.SessionID = sess.SessionID
-		rs.SessionStartedAt = sess.SessionStartedAt
-		rs.WakesInSession = sess.WakesInSession
+	if crashed, ok := readAgentLoopCrashed(agentLoopCrashedPath); ok {
+		rs.Phase = "crashed"
+		rs.CrashedExitCode = crashed.ExitCode
+		rs.CrashedLastError = crashed.LastError
+		return rs
 	}
 
+	as, err := agentloop.ReadAgentState(agentStateRuntimePath)
+	if err != nil || as.V == 0 {
+		rs.Phase = "starting"
+		return rs
+	}
+
+	switch {
+	case as.Dreaming:
+		rs.Phase = "dreaming"
+	case as.ClaudeBusy:
+		rs.Phase = "thinking"
+	default:
+		rs.Phase = "idle"
+	}
+
+	rs.SessionID = as.SessionID
+	rs.SessionStartedAt = as.SessionStartedAt
+	rs.Turns = as.WakesInSession
+	rs.LastEventAt = as.LastEventAt
 	return rs
+}
+
+// readAgentLoopCrashed reads /eidos/run/agent-loop-crashed.json if
+// present. Returns (zero, false) on missing-file or parse failure —
+// the caller treats that as "no crash marker," which is also the
+// correct behaviour when the supervisor binary in the container
+// predates the crash-loop guard.
+func readAgentLoopCrashed(path string) (agentLoopCrashed, bool) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return agentLoopCrashed{}, false
+	}
+	var c agentLoopCrashed
+	if err := json.Unmarshal(body, &c); err != nil {
+		return agentLoopCrashed{}, false
+	}
+	return c, true
 }
 
 // readContainerStartTime parses /proc/1/stat field 22 (start_time, in clock

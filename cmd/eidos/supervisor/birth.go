@@ -112,14 +112,14 @@ func productionBirthHandler(ctx context.Context, sig wake.BirthSignal, ontologyD
 	c.Stderr = io.MultiWriter(os.Stderr, stderrBuf)
 	c.Env = claudeSpawnEnv(filepath.Join(ontologyDir, ".claude"))
 	if err := c.Run(); err != nil {
-		// Mirror agent_runner's behaviour: detect auth failures and
-		// persist the auth_required marker so forge status surfaces
-		// it and the supervisor stops retrying birth.json on every
-		// iteration. The wake-loop birth-handler itself doesn't exit;
-		// drainBirthIfPresent will treat the returned error as
-		// retry-this-iteration, but agent-runner's self-gate now
-		// short-circuits any subsequent wake until login clears the
-		// marker — and the host operator sees auth: REQUIRED in
+		// Match the agent-loop's auth-failure handling: persist the
+		// auth_required marker so forge status surfaces it and the
+		// supervisor stops retrying birth.json on every iteration. The
+		// birth handler itself doesn't exit; drainBirthIfPresent treats
+		// the returned error as retry-this-iteration, but the
+		// agent-loop's own self-gate (internal/agentloop) similarly
+		// short-circuits subsequent wakes on this marker — and the
+		// host operator sees phase: auth-required in
 		// `eidos forge status <slug>`.
 		v := claudeexec.ClassifyClaudeExit(err, c.ProcessState, []byte(stderrBuf.String()))
 		if v.Kind == claudeexec.ClaudeAuthRequired {
