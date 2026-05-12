@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/agentloop"
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -35,6 +36,19 @@ func newAgentLoopCmd() *cobra.Command {
 		Short:  "Internal: long-lived per-mindform claude harness (PID-1 child)",
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, _ := config.Load(agentLoopGateConfigPath)
+			idleWait := 5 * time.Minute
+			if cfg.MindForm.DreamIdleWait != "" {
+				if d, err := time.ParseDuration(cfg.MindForm.DreamIdleWait); err == nil && d > 0 {
+					idleWait = d
+				}
+			}
+			closeGrace := 60 * time.Second
+			if cfg.MindForm.DreamCloseGrace != "" {
+				if d, err := time.ParseDuration(cfg.MindForm.DreamCloseGrace); err == nil && d > 0 {
+					closeGrace = d
+				}
+			}
 			return agentloop.Run(cmd.Context(), agentloop.RunOpts{
 				ClaudeBin:        "claude",
 				OntologyDir:      agentLoopOntologyDir,
@@ -47,11 +61,8 @@ func newAgentLoopCmd() *cobra.Command {
 				AgentLockPath:    agentLoopAgentLockPath,
 				ConfigPath:       agentLoopGateConfigPath,
 				WakeStdin:        os.Stdin,
-				// Stage 16.1 will wire these from mindform.dream_idle_wait /
-				// mindform.dream_close_grace config keys; for now use the
-				// plan's defaults.
-				IdleWait:   5 * time.Minute,
-				CloseGrace: 60 * time.Second,
+				IdleWait:         idleWait,
+				CloseGrace:       closeGrace,
 			})
 		},
 	}
