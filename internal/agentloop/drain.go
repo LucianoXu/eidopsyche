@@ -84,7 +84,11 @@ func (d *Drainer) Run(ctx context.Context, src io.Reader) error {
 	go func() {
 		for {
 			line, err := readLineUnbounded(r)
-			lines <- lineOrErr{line: line, err: err}
+			select {
+			case lines <- lineOrErr{line: line, err: err}:
+			case <-ctx.Done():
+				return
+			}
 			if err != nil {
 				return
 			}
