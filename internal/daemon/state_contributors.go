@@ -180,12 +180,38 @@ func (c relaysContrib) Snapshot(ctx context.Context) (any, error) {
 	for _, r := range rows {
 		h := healthByURL[r.URL]
 		relays[r.URL] = map[string]any{
-			"url":           r.URL,
-			"role":          r.Role,
-			"added_at":      r.AddedAt,
-			"state":         h.State,
-			"last_error":    h.LastError,
-			"last_event_at": h.LastEventAt,
+			"url":              r.URL,
+			"role":             r.Role,
+			"added_at":         r.AddedAt,
+			"state":            h.State,
+			"last_error":       h.LastError,
+			"last_event_at":    h.LastEventAt,
+			"last_publish_ok":  h.LastPublishOk,
+			"last_publish_err": h.LastPublishErr,
+			"last_publish_at":  h.LastPublishAt,
+		}
+	}
+	// Surface URLs that exist only in relayHealth (contact relays we
+	// subscribed to, configured fallback relays, invite-issuer relays —
+	// anywhere recordPublishHealth has fired without a matching
+	// own_relays row). Without this, a user-visible publish to a
+	// contact's relay can be rejected and recorded in relayHealth, but
+	// the rejection never surfaces in state.get relays because the
+	// loop above only iterates own_relays.
+	for url, h := range healthByURL {
+		if _, dup := relays[url]; dup {
+			continue
+		}
+		relays[url] = map[string]any{
+			"url":              url,
+			"role":             h.Role, // may be "" for publish-only targets
+			"added_at":         int64(0),
+			"state":            h.State,
+			"last_error":       h.LastError,
+			"last_event_at":    h.LastEventAt,
+			"last_publish_ok":  h.LastPublishOk,
+			"last_publish_err": h.LastPublishErr,
+			"last_publish_at":  h.LastPublishAt,
 		}
 	}
 	return relays, nil

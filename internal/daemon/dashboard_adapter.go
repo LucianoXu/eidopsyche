@@ -153,7 +153,10 @@ func contactFromMap(pubkey string, m map[string]any) contacts.Contact {
 
 func (a dashboardAdapter) ListRelayHealth() []dashboard.RelayState {
 	// state.get relays returns map[url -> {role, state, last_error,
-	// last_event_at, ...}]. Project into the dashboard's typed shape.
+	// last_event_at, last_publish_*, ...}]. Project into the dashboard's
+	// typed shape. Publish-health fields ride alongside subscription
+	// fields so the dashboard can show "subscribed but every publish is
+	// being rejected" rather than a misleading bare "connected".
 	resp := map[string]map[string]any{}
 	if err := a.d.Call(context.Background(), "state.get", map[string]string{"path": "relays"}, &resp); err != nil {
 		return nil
@@ -163,16 +166,24 @@ func (a dashboardAdapter) ListRelayHealth() []dashboard.RelayState {
 		role, _ := e["role"].(string)
 		state, _ := e["state"].(string)
 		lastErr, _ := e["last_error"].(string)
-		var lastEventAt int64
+		pubOk, _ := e["last_publish_ok"].(bool)
+		pubErr, _ := e["last_publish_err"].(string)
+		var lastEventAt, lastPublishAt int64
 		if v, ok := e["last_event_at"].(float64); ok {
 			lastEventAt = int64(v)
 		}
+		if v, ok := e["last_publish_at"].(float64); ok {
+			lastPublishAt = int64(v)
+		}
 		out = append(out, dashboard.RelayState{
-			URL:         url,
-			Role:        role,
-			State:       state,
-			LastError:   lastErr,
-			LastEventAt: lastEventAt,
+			URL:            url,
+			Role:           role,
+			State:          state,
+			LastError:      lastErr,
+			LastEventAt:    lastEventAt,
+			LastPublishOk:  pubOk,
+			LastPublishErr: pubErr,
+			LastPublishAt:  lastPublishAt,
 		})
 	}
 	return out

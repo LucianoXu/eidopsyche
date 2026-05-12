@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
@@ -12,6 +13,31 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
 	"github.com/LucianoXu/eidopsyche/internal/nostr"
 )
+
+// formatNoRelaysError builds the NO_RELAYS_REACHABLE IPC error returned
+// when every relay rejects (or fails to deliver) a publish. Each failing
+// relay's reason is included so callers can distinguish "TCP/WS dead"
+// from "relay returned OK false: blocked: spam" — without this, the
+// mind-form sees a fixed "publish failed on all N relays" string and
+// retries blindly, treating NIP-20 rejections as transient outages.
+func formatNoRelaysError(results []nostr.PublishResult, urlCount int) *ipc.Error {
+	msg := fmt.Sprintf("publish failed on all %d relays", urlCount)
+	parts := make([]string, 0, len(results))
+	for _, r := range results {
+		if r.OK {
+			continue
+		}
+		reason := r.Reason
+		if reason == "" {
+			reason = "no reason reported"
+		}
+		parts = append(parts, fmt.Sprintf("%s: %s", r.Relay, reason))
+	}
+	if len(parts) > 0 {
+		msg = msg + "; " + strings.Join(parts, "; ")
+	}
+	return &ipc.Error{Code: ipc.ErrNoRelaysReachable, Message: msg}
+}
 
 // SendParams is the JSON-stable parameter shape for the "send" IPC method.
 // Callers (CLI ipc.Client.Call, dashboard adapter via *Daemon.Call, future
@@ -100,6 +126,11 @@ func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 	publishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	resBob := d.Pool.Publish(publishCtx, urls, wrapBob)
+	// Record publish-health ONLY for the user-visible recipient publish.
+	// The self-copy below is best-effort archive; letting it touch
+	// RelayHealth would let a self-copy success mask a real recipient
+	// failure on the same relay (codex review on PR for this fix).
+	d.recordPublishHealth(resBob)
 	resSelf := d.Pool.Publish(publishCtx, urls, wrapSelf)
 	_ = resSelf // self-copy publish is best-effort
 
@@ -110,8 +141,7 @@ func sendMessage(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMes
 		}
 	}
 	if len(accepted) == 0 {
-		return nil, &ipc.Error{Code: ipc.ErrNoRelaysReachable,
-			Message: fmt.Sprintf("publish failed on all %d relays", len(urls))}
+		return nil, formatNoRelaysError(resBob, len(urls))
 	}
 	final := pre
 	final.AcceptedBy = accepted

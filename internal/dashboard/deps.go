@@ -239,10 +239,18 @@ type Event struct {
 // RelayState mirrors daemon.RelayHealth for dashboard consumption. Kept
 // in the dashboard package to avoid importing daemon (would create a
 // cycle: dashboard → daemon → dashboard).
+//
+// State / LastError / LastEventAt come from the Subscribe pump;
+// LastPublish* come from Publish results. Both surfaces are needed
+// because a relay can keep the sub connection alive while rejecting
+// every NIP-17 wrap (spam filter, per-pubkey rate limit, etc.).
 type RelayState struct {
-	URL         string `json:"url"`
-	Role        string `json:"role"`
-	State       string `json:"state"`
-	LastError   string `json:"last_error,omitempty"`
-	LastEventAt int64  `json:"last_event_at,omitempty"`
+	URL            string `json:"url"`
+	Role           string `json:"role"`
+	State          string `json:"state"`
+	LastError      string `json:"last_error,omitempty"`
+	LastEventAt    int64  `json:"last_event_at,omitempty"`
+	LastPublishOk  bool   `json:"last_publish_ok,omitempty"`
+	LastPublishErr string `json:"last_publish_err,omitempty"`
+	LastPublishAt  int64  `json:"last_publish_at,omitempty"`
 }

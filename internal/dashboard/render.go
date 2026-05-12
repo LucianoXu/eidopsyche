@@ -370,6 +370,15 @@ type ownRelayRow struct {
 	LastEventAgo   string // "5s" / "12m" / "1d"
 	LastEventKnown bool   // true iff health snapshot has a non-zero LastEventAt
 	IsLastHome     bool   // true when role==home AND HomeCount==1
+
+	// Publish health is orthogonal to subscription State: a relay can
+	// be "connected" (sub is alive) while rejecting every publish, or
+	// vice versa. PublishKnown == false means no publish has been
+	// attempted yet; the template renders nothing in that case.
+	PublishKnown bool
+	PublishOk    bool
+	PublishErr   string // empty when PublishOk
+	PublishAgo   string // "5s" / "12m" / "1d"
 }
 
 // sortContactsForSidebar orders contacts by most-recent activity, then by

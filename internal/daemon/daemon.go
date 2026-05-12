@@ -214,13 +214,33 @@ func Start(stateDir string) (*Daemon, error) {
 // this helper keeps the conversion in one place.
 func (d *Daemon) emitRelayState(h RelayHealth) {
 	state := dashboard.RelayState{
-		URL:         h.URL,
-		Role:        h.Role,
-		State:       h.State,
-		LastError:   h.LastError,
-		LastEventAt: h.LastEventAt,
+		URL:            h.URL,
+		Role:           h.Role,
+		State:          h.State,
+		LastError:      h.LastError,
+		LastEventAt:    h.LastEventAt,
+		LastPublishOk:  h.LastPublishOk,
+		LastPublishErr: h.LastPublishErr,
+		LastPublishAt:  h.LastPublishAt,
 	}
 	d.emitDashEvent(dashboard.Event{Kind: "relay.state", Relay: &state})
+}
+
+// recordPublishHealth updates each result's URL in d.relayHealth and
+// fans the resulting RelayHealth out to dashboard SSE subscribers.
+//
+// Call this ONLY from user-visible publishes (recipient publish in
+// sendMessage, command-reply publish in sendChatReply, invite publish).
+// System-internal publishes — best-effort self-copies, ack rebroadcasts,
+// invite self-copy — MUST NOT feed this, because a success on one of
+// those would overwrite a real failure on the same relay and the
+// operator/mind-form would see a stale "publish ok" while the actual
+// recipient send had failed with NO_RELAYS_REACHABLE.
+func (d *Daemon) recordPublishHealth(results []nostr.PublishResult) {
+	for _, r := range results {
+		h := d.relayHealth.setPublish(r.Relay, r.OK, r.Reason)
+		d.emitRelayState(h)
+	}
 }
 
 // Stop closes the relay pool and database.
@@ -630,12 +650,13 @@ func (d *Daemon) sendChatReply(ctx context.Context, toPubkey string, text string
 	publishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	res := d.Pool.Publish(publishCtx, urls, wrap)
+	d.recordPublishHealth(res)
 	for _, r := range res {
 		if r.OK {
 			return nil
 		}
 	}
-	return fmt.Errorf("publish failed on all %d relays", len(urls))
+	return errors.New(formatNoRelaysError(res, len(urls)).Message)
 }
 
 // ownRelayURLs returns the URLs from own_relays for command-reply publish.

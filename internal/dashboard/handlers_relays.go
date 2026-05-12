@@ -256,6 +256,12 @@ func buildSettingsRelays(ctx context.Context, deps DashboardDeps, addErr string)
 				row.LastEventAgo = humanSince(time.Duration(now-h.LastEventAt) * time.Second)
 				row.LastEventKnown = true
 			}
+			if h.LastPublishAt > 0 {
+				row.PublishKnown = true
+				row.PublishOk = h.LastPublishOk
+				row.PublishErr = h.LastPublishErr
+				row.PublishAgo = humanSince(time.Duration(now-h.LastPublishAt) * time.Second)
+			}
 		} else {
 			// No relay-health entry yet (race between own_relays
 			// insert and the subscriber's first connect attempt). The

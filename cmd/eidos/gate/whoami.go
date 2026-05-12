@@ -2,6 +2,7 @@ package gate
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -42,11 +43,33 @@ var whoamiCmd = &cobra.Command{
 			if h, ok := relays[r["url"]]; ok {
 				state, _ := h["state"].(string)
 				lastErr, _ := h["last_error"].(string)
+				pubOk, _ := h["last_publish_ok"].(bool)
+				pubErr, _ := h["last_publish_err"].(string)
+				pubAt, _ := h["last_publish_at"].(float64)
+
+				parts := []string{}
 				if state != "" {
-					tag = " [" + state + "]"
+					seg := state
 					if lastErr != "" {
-						tag = " [" + state + ": " + lastErr + "]"
+						seg += ": " + lastErr
 					}
+					parts = append(parts, seg)
+				}
+				// Only mention publish state once a publish has been
+				// attempted — last_publish_at == 0 means "no data".
+				if pubAt > 0 {
+					if pubOk {
+						parts = append(parts, "publish ok")
+					} else {
+						seg := "publish failing"
+						if pubErr != "" {
+							seg += ": " + pubErr
+						}
+						parts = append(parts, seg)
+					}
+				}
+				if len(parts) > 0 {
+					tag = " [" + strings.Join(parts, "; ") + "]"
 				}
 			}
 			fmt.Printf("  %-10s %s%s\n", r["role"], r["url"], tag)

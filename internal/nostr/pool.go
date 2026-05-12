@@ -33,7 +33,8 @@ type Pool struct {
 	relays      map[string]*gnostr.Relay
 	dialer      func(ctx context.Context, url string) (*gnostr.Relay, error)
 	alive       func(*gnostr.Relay) bool
-	closer      func(*gnostr.Relay) error // test seam; defaults to (*gnostr.Relay).Close
+	closer      func(*gnostr.Relay) error                                // test seam; defaults to (*gnostr.Relay).Close
+	publisher   func(*gnostr.Relay, context.Context, gnostr.Event) error // test seam; defaults to (*gnostr.Relay).Publish
 	timeout     time.Duration
 	signer      Signer                           // optional; when set, Subscribe handles NIP-42 AUTH transparently
 	stateHookMu sync.RWMutex                     // protects stateHook against concurrent SetStateHook calls
@@ -46,11 +47,12 @@ type Pool struct {
 // must handle).
 func NewPool() *Pool {
 	return &Pool{
-		relays:  make(map[string]*gnostr.Relay),
-		dialer:  defaultDial,
-		alive:   defaultAlive,
-		closer:  func(r *gnostr.Relay) error { return r.Close() },
-		timeout: 5 * time.Second,
+		relays:    make(map[string]*gnostr.Relay),
+		dialer:    defaultDial,
+		alive:     defaultAlive,
+		closer:    func(r *gnostr.Relay) error { return r.Close() },
+		publisher: func(r *gnostr.Relay, ctx context.Context, ev gnostr.Event) error { return r.Publish(ctx, ev) },
+		timeout:   5 * time.Second,
 	}
 }
 
@@ -175,6 +177,13 @@ func (p *Pool) Close() {
 
 // Publish sends ev to each URL concurrently and returns one PublishResult per
 // URL. A per-relay timeout of p.timeout is applied.
+//
+// Publish does NOT side-channel publish-health into any hook: callers
+// already hold the results and know whether this is a user-visible
+// publish or a best-effort internal one (self-copy, ack rebroadcast),
+// and only the former should feed RelayHealth — otherwise a self-copy
+// succeeding on a relay that rejected the recipient publish would mask
+// the real failure. See internal/daemon.(*Daemon).recordPublishHealth.
 func (p *Pool) Publish(ctx context.Context, urls []string, ev *gnostr.Event) []PublishResult {
 	out := make([]PublishResult, len(urls))
 	var wg sync.WaitGroup
@@ -191,7 +200,7 @@ func (p *Pool) Publish(ctx context.Context, urls []string, ev *gnostr.Event) []P
 				out[i] = PublishResult{Relay: u, OK: false, Reason: err.Error()}
 				return
 			}
-			if err = r.Publish(pubCtx, *ev); err != nil {
+			if err = p.publisher(r, pubCtx, *ev); err != nil {
 				out[i] = PublishResult{Relay: u, OK: false, Reason: err.Error()}
 				return
 			}

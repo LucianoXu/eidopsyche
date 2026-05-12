@@ -20,6 +20,51 @@ func TestStateContributors_AllPathsResolveForFreshDaemon(t *testing.T) {
 	}
 }
 
+// TestStateContributors_RelaysSnapshot_IncludesPublishOnlyURLs: when
+// recordPublishHealth records a relay that isn't in own_relays (a
+// contact relay, a fallback, an invite-issuer relay), state.get relays
+// must still include it — otherwise the recorded publish failure for
+// that URL is invisible to mind-form consumers, defeating Bug #1's
+// whole point.
+func TestStateContributors_RelaysSnapshot_IncludesPublishOnlyURLs(t *testing.T) {
+	d := newTestDaemon(t)
+	d.registerCoreStateContributors()
+
+	// Simulate a user-visible publish to a URL we don't own.
+	d.relayHealth.setPublish("wss://contact.example/", false, "blocked: spam")
+
+	snap, err := d.stateTree.Snapshot(context.Background(), "relays")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, ok := snap.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map; got %T", snap)
+	}
+	entry, found := m["wss://contact.example/"]
+	if !found {
+		t.Fatalf("relays snapshot missing publish-only URL; got keys=%v", keysOf(m))
+	}
+	row, ok := entry.(map[string]any)
+	if !ok {
+		t.Fatalf("expected row map; got %T", entry)
+	}
+	if row["last_publish_err"] != "blocked: spam" {
+		t.Errorf("last_publish_err = %v, want %q", row["last_publish_err"], "blocked: spam")
+	}
+	if row["last_publish_ok"] != false {
+		t.Errorf("last_publish_ok = %v, want false", row["last_publish_ok"])
+	}
+}
+
+func keysOf(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 func TestStateContributors_IdentitySnapshot(t *testing.T) {
 	d := newTestDaemon(t)
 	d.registerCoreStateContributors()
