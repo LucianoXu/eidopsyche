@@ -62,6 +62,11 @@ func init() {
 	// map[string]any projection yet.
 	register("service.status", serviceStatus)
 	register("lifecycle.status", lifecycleStatusMethod)
+
+	// agent runtime state — reads /eidos/run/agent-state.json written by
+	// the in-container agent loop; missing file yields zero-value map so
+	// callers don't have to special-case "agent-loop not yet started".
+	register("agent.state", agentStateMethod)
 }
 
 // internalErr wraps a Go error into an IPC internal error response.
