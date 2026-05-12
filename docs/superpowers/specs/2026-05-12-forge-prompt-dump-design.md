@@ -145,7 +145,7 @@ func newPromptDumpInContainerCmd() *cobra.Command {
         Short: "(in-container) Capture this mind-form's /v1/messages envelope",
         RunE: func(cmd *cobra.Command, args []string) error {
             // 1. read /eidos/ontology/self/identity.md (best-effort)
-            // 2. config.Load("/eidos/ontology/config.toml") → cfg.MindForm.Model
+            // 2. config.Load("/eidos/gate/config.toml") → cfg.MindForm.Model
             // 3. envelope, err := promptcapture.Run(ctx, promptcapture.Opts{
             //        ClaudeBin:      "claude",
             //        Cwd:            "/eidos/ontology",
@@ -175,7 +175,7 @@ The in-container subcommand is registered alongside the existing in-container in
             "--prompt","ping"])
 4. in-container:
    4a. os.ReadFile("/eidos/ontology/self/identity.md") → identity
-   4b. config.Load("/eidos/ontology/config.toml")      → cfg
+   4b. config.Load("/eidos/gate/config.toml")      → cfg
    4c. promptcapture.Run(ctx, Opts{
          ClaudeBin:"claude", Cwd:"/eidos/ontology",
          IdentityPrompt: identity, Model: cfg.MindForm.Model,
@@ -185,7 +185,8 @@ The in-container subcommand is registered alongside the existing in-container in
        ii.  exec.Cmd "claude" with argv: --append-system-prompt <identity>
             [--model <model>] --dangerously-skip-permissions -p "ping",
             env += ANTHROPIC_BASE_URL=http://127.0.0.1:<port>,
-                   ANTHROPIC_API_KEY=sk-dummy-promptdump
+                   ANTHROPIC_API_KEY=sk-dummy-promptdump,
+                   CLAUDE_DIR=/eidos/ontology/.claude   (matches agent-loop)
        iii. proxy receives body, writes minimal valid SSE response,
             signals captured-chan, returns 200
        iv.  claude exits clean (single-shot -p with stub stream)
