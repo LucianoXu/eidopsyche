@@ -259,6 +259,11 @@ func buildWakeRenderCtx(ctx context.Context, c forgectl.Client, cont, wakeArg st
 		if err := json.Unmarshal(res.Stdout, &rs); err != nil || rs.SessionID == "" {
 			return wakeRenderCtx{}
 		}
+		// Reject v1 responses: rs.Turns would default to 0 and produce
+		// a misleading ordinal. Fall back to the legacy header instead.
+		if rs.V != runtimeStateSchemaVersion {
+			return wakeRenderCtx{}
+		}
 		short := rs.SessionID
 		if len(short) > 8 {
 			short = short[:8]

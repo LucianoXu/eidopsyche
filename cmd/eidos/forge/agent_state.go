@@ -14,15 +14,20 @@ import (
 var agentStateRuntimePath = "/eidos/run/agent-state.json"
 
 // newAgentStateCmd is an in-container hidden subcommand that prints the
-// current agent-state.json as JSON. The host's `forge status` parses it
-// via docker-exec to surface the thinking + last_active lines.
+// current agent-state.json as JSON. The host's `forge watch --wake
+// current` polls it via docker-exec to detect busy/idle transitions
+// during a turn. The same file is exposed via the gate daemon's
+// `agent.state` IPC method to the dashboard and other in-container
+// callers (see internal/daemon/agentstate.go); this subcommand is the
+// docker-exec channel for host-side consumers that cannot dial the
+// gate socket.
 //
-// Hidden because operators are expected to use `forge status`, not this
-// command directly.
+// Hidden because operators are expected to use `forge status` / `forge
+// watch`, not invoke this directly.
 func newAgentStateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "agent-state",
-		Short:  "Internal: print agent-state JSON for forge status",
+		Short:  "Internal: print agent-state JSON for forge watch",
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			st, err := agentloop.ReadAgentState(agentStateRuntimePath)
