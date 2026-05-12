@@ -10,6 +10,7 @@ type fakeVolumeWriter struct {
 		relPath string
 		body    string
 	}
+	removed []string
 	cleared bool
 	err     error
 }
@@ -22,6 +23,11 @@ func (f *fakeVolumeWriter) Write(relPath string, body []byte) error {
 		relPath string
 		body    string
 	}{relPath, string(body)})
+	return nil
+}
+
+func (f *fakeVolumeWriter) Remove(relPath string) error {
+	f.removed = append(f.removed, relPath)
 	return nil
 }
 

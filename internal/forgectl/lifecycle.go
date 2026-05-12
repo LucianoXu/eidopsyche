@@ -28,10 +28,17 @@ func WriteToVolume(ctx context.Context, c Client, image, slug, relPath string, b
 	}
 	target := filepath.ToSlash(filepath.Join("/eidos", relPath))
 	dir := filepath.ToSlash(filepath.Dir(target))
-	// Use sh + tee under root so we can write anywhere in the volume
-	// regardless of the persistent container's USER.
-	script := fmt.Sprintf("mkdir -p %q && cat > %q && chown -R 1000:1000 %q",
-		dir, target, dir)
+	// Use sh + redirection under root so we can write anywhere in the
+	// volume regardless of the persistent container's USER. chmod 600
+	// is the VolumeWriter contract — claudeauth callers store bearer
+	// tokens here (credentials.json, setup_token) and depend on
+	// non-world-readable perms. Without it the file lands as 0644 under
+	// root's default umask, contradicting the interface comment in
+	// claudeauth/volume.go. Non-secret callers (calling-words.md,
+	// birth.json) tolerate the tighter mode since the container only
+	// runs as eidos:1000.
+	script := fmt.Sprintf("mkdir -p %q && cat > %q && chmod 600 %q && chown -R 1000:1000 %q",
+		dir, target, target, dir)
 	res, err := c.RunInit(ctx, RunInitOpts{
 		Image: image,
 		Mount: Mount{VolumeName: VolumeName(slug), Target: "/eidos"},

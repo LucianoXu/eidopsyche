@@ -9,14 +9,22 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/claudeauth"
 )
 
-// fakeForgeVolumeWriter implements claudeauth.VolumeWriter with in-memory storage.
+// fakeForgeVolumeWriter implements claudeauth.VolumeWriter with in-memory
+// storage. Records every write and remove so tests can assert that the
+// setup-token and credentials.json paths land at distinct on-disk
+// locations and that each install clears the other.
 type fakeForgeVolumeWriter struct {
 	writes  []struct{ relPath, body string }
+	removed []string
 	cleared bool
 }
 
 func (f *fakeForgeVolumeWriter) Write(relPath string, body []byte) error {
 	f.writes = append(f.writes, struct{ relPath, body string }{relPath, string(body)})
+	return nil
+}
+func (f *fakeForgeVolumeWriter) Remove(relPath string) error {
+	f.removed = append(f.removed, relPath)
 	return nil
 }
 func (f *fakeForgeVolumeWriter) ClearAuthRequired() error { f.cleared = true; return nil }
@@ -30,6 +38,26 @@ func installFakeWriter(t *testing.T) (*fakeForgeVolumeWriter, func()) {
 	prev := installVolume
 	installVolume = func(name, image string) (claudeauth.VolumeWriter, error) { return w, nil }
 	return w, func() { installVolume = prev }
+}
+
+// findWriteAt returns the (recorded) body written at relPath, or empty
+// string when there was no such write.
+func findWriteAt(w *fakeForgeVolumeWriter, relPath string) string {
+	for _, wr := range w.writes {
+		if wr.relPath == relPath {
+			return wr.body
+		}
+	}
+	return ""
+}
+
+func contains(slice []string, want string) bool {
+	for _, s := range slice {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestLogin_TokenFileFlag(t *testing.T) {
@@ -50,8 +78,12 @@ func TestLogin_TokenFileFlag(t *testing.T) {
 	if !w.cleared {
 		t.Errorf("auth_required not cleared after login")
 	}
-	if len(w.writes) != 1 {
-		t.Errorf("want 1 write, got %d", len(w.writes))
+	// File path -> credentials.json written, stale setup-token removed.
+	if findWriteAt(w, claudeauth.CredentialsFile) == "" {
+		t.Errorf("credentials.json not written; writes=%v", w.writes)
+	}
+	if !contains(w.removed, claudeauth.SetupTokenFile) {
+		t.Errorf("stale setup-token not removed; removed=%v", w.removed)
 	}
 }
 
@@ -65,8 +97,8 @@ func TestLogin_PasteFlag(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if len(w.writes) != 1 {
-		t.Errorf("want 1 write, got %d", len(w.writes))
+	if findWriteAt(w, claudeauth.CredentialsFile) == "" {
+		t.Errorf("credentials.json not written; writes=%v", w.writes)
 	}
 }
 
@@ -84,19 +116,17 @@ func TestLogin_SetupTokenStdinFlag(t *testing.T) {
 	if !w.cleared {
 		t.Errorf("auth_required not cleared after login")
 	}
-	if len(w.writes) != 1 {
-		t.Fatalf("want 1 write, got %d", len(w.writes))
+	// Env-var path -> setup-token file written with the raw bytes, no
+	// credentials.json written, stale credentials.json removed.
+	body := findWriteAt(w, claudeauth.SetupTokenFile)
+	if body != token {
+		t.Errorf("setup-token bytes = %q, want %q", body, token)
 	}
-	body := w.writes[0].body
-	if !strings.Contains(body, `"accessToken": "sk-ant-oat01-XYZ"`) {
-		t.Errorf("wrapped credentials missing accessToken; got: %s", body)
+	if findWriteAt(w, claudeauth.CredentialsFile) != "" {
+		t.Errorf("env-var path must not write credentials.json; writes=%v", w.writes)
 	}
-	// Round-trip guard: if WrapSetupToken ever drifts from Validate's
-	// requirements, WriteToVolumeUsing would fail before reaching the
-	// writer. This explicit check catches the same regression with a
-	// clearer error message.
-	if err := claudeauth.Validate([]byte(body)); err != nil {
-		t.Errorf("wrapped credentials fail Validate: %v", err)
+	if !contains(w.removed, claudeauth.CredentialsFile) {
+		t.Errorf("stale credentials.json not removed; removed=%v", w.removed)
 	}
 }
 
@@ -126,11 +156,8 @@ func TestLogin_SetupTokenStdinFlag_NoTrailingNewline(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if len(w.writes) != 1 {
-		t.Fatalf("want 1 write, got %d", len(w.writes))
-	}
-	if !strings.Contains(w.writes[0].body, `"accessToken": "sk-ant-oat01-ABC"`) {
-		t.Errorf("token from EOF-terminated stdin missing; got: %s", w.writes[0].body)
+	if findWriteAt(w, claudeauth.SetupTokenFile) != "sk-ant-oat01-ABC" {
+		t.Errorf("token from EOF-terminated stdin missing or wrong; writes=%v", w.writes)
 	}
 }
 
@@ -148,10 +175,10 @@ func TestLogin_InteractiveSetupTokenPath(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if len(w.writes) != 1 {
-		t.Fatalf("want 1 write, got %d", len(w.writes))
+	if findWriteAt(w, claudeauth.SetupTokenFile) != "sk-ant-oat01-ABC" {
+		t.Errorf("interactive setup-token path didn't write expected bytes; writes=%v", w.writes)
 	}
-	if !strings.Contains(w.writes[0].body, `"accessToken": "sk-ant-oat01-ABC"`) {
-		t.Errorf("setup-token not wrapped into accessToken; got: %s", w.writes[0].body)
+	if findWriteAt(w, claudeauth.CredentialsFile) != "" {
+		t.Errorf("interactive setup-token path must not write credentials.json; writes=%v", w.writes)
 	}
 }

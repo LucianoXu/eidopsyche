@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/authstate"
+	"github.com/LucianoXu/eidopsyche/internal/claudeauth"
 	"github.com/LucianoXu/eidopsyche/internal/claudeexec"
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
@@ -267,7 +268,7 @@ func runWithoutTranscript(ontologyDir string, args []string) error {
 	c.Stdout = os.Stdout
 	stderrBuf := &strings.Builder{}
 	c.Stderr = io.MultiWriter(os.Stderr, stderrBuf)
-	c.Env = append(os.Environ(), "CLAUDE_DIR="+filepath.Join(ontologyDir, ".claude"))
+	c.Env = claudeSpawnEnv(filepath.Join(ontologyDir, ".claude"))
 	runErr := c.Run()
 	if runErr != nil && matchSessionNotFound(stderrBuf.String()) {
 		return errors.Join(errSessionNotFound, runErr)
@@ -323,7 +324,7 @@ func runWithTranscript(sig wake.Signal, ontologyDir string, args []string, sessi
 	c.Dir = ontologyDir
 	stderrBuf := &strings.Builder{}
 	c.Stderr = io.MultiWriter(os.Stderr, stderrBuf)
-	c.Env = append(os.Environ(), "CLAUDE_DIR="+filepath.Join(ontologyDir, ".claude"))
+	c.Env = claudeSpawnEnv(filepath.Join(ontologyDir, ".claude"))
 
 	stdoutPipe, err := c.StdoutPipe()
 	if err != nil {
@@ -717,4 +718,25 @@ func buildClaudeArgs(identity, msg, configPath string, streamJSON bool, sess Ses
 	}
 	args = append(args, "-p", msg)
 	return args
+}
+
+// claudeSpawnEnv returns the env slice every claude spawn site should
+// pass to exec.Cmd.Env. Starts from os.Environ() (so HOME, PATH, model
+// hints from `eidos forge config` survive), pins CLAUDE_DIR to the
+// ontology's .claude tree, and — if a per-mindform setup-token file is
+// present at $HOME/setup_token — appends CLAUDE_CODE_OAUTH_TOKEN so
+// claude reads its credentials from the env-var path instead of the
+// .credentials.json file.
+//
+// Read errors from the setup-token file are logged but do not abort
+// the spawn: the credentials.json fallback may still succeed and the
+// operator sees the failure in supervisor logs + can re-run
+// `eidos forge login` to remediate.
+func claudeSpawnEnv(claudeDir string) []string {
+	env := append(os.Environ(), "CLAUDE_DIR="+claudeDir)
+	env, err := claudeauth.InjectSetupTokenEnv(env, os.Getenv("HOME"))
+	if err != nil {
+		log.Printf("agent-runner: read setup-token: %v (falling through to .credentials.json)", err)
+	}
+	return env
 }
