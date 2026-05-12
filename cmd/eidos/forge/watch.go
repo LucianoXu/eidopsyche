@@ -47,7 +47,7 @@ script around it.`,
 			}
 			cont := forgectl.ContainerName(name)
 			if listOnly {
-				return runWatchList(cmd, c, cont, limit)
+				return runWatchList(cmd, c, cont, limit, raw)
 			}
 			opts := renderOpts{ShowThinking: showThinking}
 			return runWatchTail(cmd.Context(), cmd.OutOrStdout(), c, cont, wakeArg, !noFollow, raw, opts)
@@ -64,7 +64,7 @@ script around it.`,
 
 // runWatchList shows the table of recent wakes by execing
 // `transcript-list --json` in the container and rendering the index.
-func runWatchList(cmd *cobra.Command, c forgectl.Client, cont string, limit int) error {
+func runWatchList(cmd *cobra.Command, c forgectl.Client, cont string, limit int, raw bool) error {
 	args := []string{"eidos", "forge", "transcript-list", "--json"}
 	res, err := c.ContainerExec(cmd.Context(), cont, args)
 	if err != nil {
@@ -78,13 +78,15 @@ func runWatchList(cmd *cobra.Command, c forgectl.Client, cont string, limit int)
 		return fmt.Errorf("parse index: %w", err)
 	}
 	out := cmd.OutOrStdout()
-	// Best-effort thinking indicator above the table.
-	if as, ok := fetchAgentState(cmd.Context(), c, cont); ok {
-		indicator := "○ idle"
-		if as.ClaudeBusy {
-			indicator = "● thinking"
+	// Best-effort thinking indicator above the table (non-raw mode only).
+	if !raw {
+		if as, ok := fetchAgentState(cmd.Context(), c, cont); ok {
+			indicator := "○ idle"
+			if as.ClaudeBusy {
+				indicator = "● thinking"
+			}
+			fmt.Fprintf(out, "mind-form: %s  [%s]\n", cont, indicator)
 		}
-		fmt.Fprintf(out, "mind-form: %s  [%s]\n", cont, indicator)
 	}
 	for _, line := range renderListTableForWatch(idx, limit) {
 		fmt.Fprintln(out, line)
@@ -159,7 +161,10 @@ func runWatchTail(ctx context.Context, out io.Writer, c forgectl.Client, cont, w
 	}
 
 	// In follow mode, poll agent-state and emit thinking↔idle event lines.
-	if follow {
+	// Gate by !raw so `forge watch --raw --follow` keeps its passthrough-NDJSON
+	// contract — the poller injects non-NDJSON separator lines that break piped
+	// consumers (e.g. jq).
+	if follow && !raw {
 		stopPoller := startThinkingPoller(ctx, out, c, cont)
 		defer stopPoller()
 	}

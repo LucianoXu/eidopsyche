@@ -130,7 +130,7 @@ func startChildren(ctx context.Context, sp ChildSpawner) (*forwarder, error) {
 				}
 			}
 			crashTimes = append(kept, now)
-			if len(crashTimes) > crashLoopThreshold {
+			if len(crashTimes) >= crashLoopThreshold {
 				log.Printf("supervisor: agent-loop crashed %d times in %s; halting restart loop", len(crashTimes), crashLoopWindow)
 				writeAgentLoopCrashed(err, exitCode)
 				return RestartDecision{Halt: true}

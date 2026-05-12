@@ -28,8 +28,10 @@ type DrainerConfig struct {
 
 	// OnTurnStart and OnTurnEnd are optional hooks for the rotation
 	// goroutine to track when claude becomes idle. nil → no-op.
+	// OnTurnEnd receives a wakeDriven bool: true when the turn was
+	// triggered by a real wake signal, false for mailbox-driven turns.
 	OnTurnStart func()
-	OnTurnEnd   func()
+	OnTurnEnd   func(wakeDriven bool)
 
 	// AgentStatePath, if non-empty, causes the drainer to write
 	// agent-state.json snapshots on every state transition + on a 5s
@@ -44,7 +46,8 @@ type DrainerConfig struct {
 	ResultsSeen      *atomic.Int64
 
 	// SessionID is the current claude session UUID; used in agent-state
-	// snapshots. Updated by rotation when a new session starts.
+	// snapshots and transcript index entries. Updated by rotation when a
+	// new session starts.
 	SessionID func() string
 
 	// SessionStartedAt mirrors sessionstate.SessionStartedAt for the
@@ -64,21 +67,31 @@ type DrainerConfig struct {
 	// event after each `result` and finalizes it on the next `result`.
 	Store *transcript.Store
 
-	// NextTurnID is called by the drainer at turn-open time to assign
-	// the transcript filename. Wake-driven turns return the wake.ID;
-	// mailbox-driven turns return a synthesized "mailbox-<unix_nano>".
-	NextTurnID func() string
+	// NextTurn is called by the drainer at turn-open time to assign the
+	// transcript filename and index Reason. Wake-driven turns return the
+	// real wake.Signal.ID and wake.Reason; mailbox-driven turns return a
+	// synthesized "mailbox-<unix_nano>" id with reason "mailbox". The
+	// wakeDriven field controls whether OnTurnEnd counts the turn toward
+	// the session wake counter.
+	NextTurn func() wakeMeta
 
-	// NextTurnReason is called at turn-open time to stamp the index
-	// Entry's Reason field. Returns the wake.Reason string for
-	// wake-driven turns; "mailbox" for synthetic turns.
-	NextTurnReason func() string
+	// TranscriptMaxCount returns the per-mindform max transcript count
+	// override (config.MindForm.TranscriptsMaxCount), or 0 to use
+	// transcript.DefaultMaxCount.
+	TranscriptMaxCount func() int
+
+	// TranscriptMaxBytes returns the per-mindform max transcript bytes
+	// override (config.MindForm.TranscriptsMaxBytes parsed), or 0 to use
+	// transcript.DefaultMaxBytes.
+	TranscriptMaxBytes func() int64
 }
 
-// transcriptHandle holds the open file and ID for the current turn.
+// transcriptHandle holds the open file and metadata for the current turn.
 type transcriptHandle struct {
-	id   string
-	file *os.File
+	id         string
+	reason     string
+	wakeDriven bool
+	file       *os.File
 }
 
 // Drainer reads stream-json from src, parses each line into a
@@ -161,14 +174,19 @@ func (d *Drainer) handleLine(line []byte) {
 
 	// Open a new per-turn transcript on the first assistant or user event
 	// arriving while no handle is open.
-	if d.curHandle == nil && d.cfg.Store != nil && d.cfg.NextTurnID != nil &&
+	if d.curHandle == nil && d.cfg.Store != nil && d.cfg.NextTurn != nil &&
 		(ev.Type == transcript.TypeAssistant || ev.Type == transcript.TypeUser) {
-		id := d.cfg.NextTurnID()
-		f, openErr := d.cfg.Store.Open(id)
+		meta := d.cfg.NextTurn()
+		f, openErr := d.cfg.Store.Open(meta.id)
 		if openErr != nil {
 			fmt.Fprintf(stderr(), "agent-loop: drain: open transcript: %v\n", openErr)
 		} else {
-			d.curHandle = &transcriptHandle{id: id, file: f}
+			d.curHandle = &transcriptHandle{
+				id:         meta.id,
+				reason:     meta.reason,
+				wakeDriven: meta.wakeDriven,
+				file:       f,
+			}
 			d.turnStart = now.Unix()
 			d.counter = &transcript.Counter{}
 		}
@@ -192,10 +210,11 @@ func (d *Drainer) handleLine(line []byte) {
 		if d.cfg.ResultsSeen != nil {
 			d.cfg.ResultsSeen.Add(1)
 		}
-		if d.cfg.OnTurnEnd != nil {
-			d.cfg.OnTurnEnd()
-		}
+		wakeDriven := d.curHandle != nil && d.curHandle.wakeDriven
 		d.finalizeCurrentTurn(now.Unix())
+		if d.cfg.OnTurnEnd != nil {
+			d.cfg.OnTurnEnd(wakeDriven)
+		}
 	}
 	d.writeSnapshot()
 }
@@ -206,16 +225,16 @@ func (d *Drainer) finalizeCurrentTurn(endedAt int64) {
 	if d.curHandle == nil || d.cfg.Store == nil {
 		return
 	}
-	reason := ""
-	if d.cfg.NextTurnReason != nil {
-		reason = d.cfg.NextTurnReason()
-	}
 	entry := transcript.Entry{
 		ID:        d.curHandle.id,
-		Reason:    reason,
+		Reason:    d.curHandle.reason,
 		StartedAt: d.turnStart,
 		EndedAt:   endedAt,
 		OK:        true, // default; overridden below if a result event carried is_error
+	}
+	// Fix 3: stamp SessionID so historical rows surface session boundaries.
+	if d.cfg.SessionID != nil {
+		entry.SessionID = d.cfg.SessionID()
 	}
 	if d.counter != nil {
 		entry.ToolUseCount = d.counter.ToolUseCount
@@ -228,9 +247,21 @@ func (d *Drainer) finalizeCurrentTurn(endedAt int64) {
 			}
 		}
 	}
+	// Fix 4: honor per-mindform transcript limits from config.
+	maxCount := transcript.DefaultMaxCount
+	maxBytes := transcript.DefaultMaxBytes
+	if d.cfg.TranscriptMaxCount != nil {
+		if n := d.cfg.TranscriptMaxCount(); n > 0 {
+			maxCount = n
+		}
+	}
+	if d.cfg.TranscriptMaxBytes != nil {
+		if b := d.cfg.TranscriptMaxBytes(); b > 0 {
+			maxBytes = b
+		}
+	}
 	_ = d.curHandle.file.Close()
-	if err := d.cfg.Store.Finalize(entry,
-		transcript.DefaultMaxCount, transcript.DefaultMaxBytes); err != nil {
+	if err := d.cfg.Store.Finalize(entry, maxCount, maxBytes); err != nil {
 		fmt.Fprintf(stderr(), "agent-loop: drain: finalize: %v\n", err)
 	}
 	d.curHandle = nil

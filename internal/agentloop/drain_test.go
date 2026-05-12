@@ -73,8 +73,9 @@ func TestDrain_OpensAndFinalizesPerTurnTranscript(t *testing.T) {
 		Store:          store,
 		StateMachine:   sm,
 		Clock:          func() time.Time { return time.Unix(1715500100, 0) },
-		NextTurnID:     func() string { return "1715500000" },
-		NextTurnReason: func() string { return "heartbeat" },
+		NextTurn: func() wakeMeta {
+			return wakeMeta{id: "1715500000", reason: "heartbeat", wakeDriven: true}
+		},
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -104,4 +105,82 @@ func TestDrain_OpensAndFinalizesPerTurnTranscript(t *testing.T) {
 	if idx.Wakes[0].CostUSD == nil || *idx.Wakes[0].CostUSD != 0.01 {
 		t.Errorf("index CostUSD: got %v, want pointer to 0.01", idx.Wakes[0].CostUSD)
 	}
+}
+
+func TestDrain_OnTurnEndRespectsWakeDriven(t *testing.T) {
+	makeStream := func(evType string) string {
+		return strings.Join([]string{
+			`{"type":"system","subtype":"init","session_id":"s1"}`,
+			`{"type":"assistant","session_id":"s1"}`,
+			`{"type":"result","subtype":"success","session_id":"s1"}`,
+			``,
+		}, "\n")
+	}
+
+	// Case 1: mailbox-driven turn (wakeDriven=false) — OnTurnEnd receives false.
+	t.Run("mailbox_does_not_increment_wake", func(t *testing.T) {
+		dir := t.TempDir()
+		sm := NewStateMachine(time.Unix(1715500000, 0))
+		store, err := transcript.NewStore(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var gotWakeDriven *bool
+		d := NewDrainer(DrainerConfig{
+			TranscriptsDir: dir,
+			Store:          store,
+			StateMachine:   sm,
+			Clock:          func() time.Time { return time.Unix(1715500100, 0) },
+			NextTurn: func() wakeMeta {
+				return wakeMeta{id: "mailbox-123", reason: "mailbox", wakeDriven: false}
+			},
+			OnTurnEnd: func(wd bool) {
+				gotWakeDriven = &wd
+			},
+		})
+		src := strings.NewReader(makeStream(""))
+		if err := d.Run(context.Background(), src); err != nil && err != io.EOF {
+			t.Fatalf("drain: %v", err)
+		}
+		if gotWakeDriven == nil {
+			t.Fatal("OnTurnEnd was not called")
+		}
+		if *gotWakeDriven {
+			t.Errorf("mailbox turn: OnTurnEnd wakeDriven: got true, want false")
+		}
+	})
+
+	// Case 2: wake-driven turn (wakeDriven=true) — OnTurnEnd receives true.
+	t.Run("wake_driven_increments_wake", func(t *testing.T) {
+		dir := t.TempDir()
+		sm := NewStateMachine(time.Unix(1715500000, 0))
+		store, err := transcript.NewStore(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var gotWakeDriven *bool
+		d := NewDrainer(DrainerConfig{
+			TranscriptsDir: dir,
+			Store:          store,
+			StateMachine:   sm,
+			Clock:          func() time.Time { return time.Unix(1715500100, 0) },
+			NextTurn: func() wakeMeta {
+				return wakeMeta{id: "hb-999", reason: "heartbeat", wakeDriven: true}
+			},
+			OnTurnEnd: func(wd bool) {
+				gotWakeDriven = &wd
+			},
+		})
+		src := strings.NewReader(makeStream(""))
+		if err := d.Run(context.Background(), src); err != nil && err != io.EOF {
+			t.Fatalf("drain: %v", err)
+		}
+		if gotWakeDriven == nil {
+			t.Fatal("OnTurnEnd was not called")
+		}
+		if !*gotWakeDriven {
+			t.Errorf("wake-driven turn: OnTurnEnd wakeDriven: got false, want true")
+		}
+	})
+	_ = makeStream
 }

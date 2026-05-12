@@ -37,6 +37,10 @@ type ForwarderConfig struct {
 	// FirstWakeFlagGetAndClear returns (and clears) whether the next
 	// wake should render with IsFirstWakeOfNewSession=true.
 	FirstWakeFlagGetAndClear func() bool
+	// WakeQueue, when non-nil, receives a wakeMeta entry before each
+	// deliverToClaude write. The drainer pops from this queue at
+	// turn-open time so transcript filenames match the real wake ID/Reason.
+	WakeQueue *wakeQueue
 }
 
 // Forwarder pumps wake JSONL from supervisor stdin to claude stdin.
@@ -118,6 +122,16 @@ func (f *Forwarder) deliverToClaude(sig wake.Signal) error {
 		return fmt.Errorf("marshal user message: %w", err)
 	}
 	body = append(body, '\n')
+	// Push wake meta before writing to stdin so the drainer can dequeue
+	// it before any output from this turn can possibly arrive.
+	if f.cfg.WakeQueue != nil {
+		f.cfg.WakeQueue.push(wakeMeta{
+			id:         sig.ID,
+			reason:     string(sig.Reason),
+			firstWake:  firstWake,
+			wakeDriven: true,
+		})
+	}
 	if _, err := f.cfg.ClaudeStdin.Write(body); err != nil {
 		return fmt.Errorf("write claude stdin: %w", err)
 	}

@@ -108,6 +108,7 @@ func Run(ctx context.Context, opts RunOpts) error {
 	var wakesInSession atomic.Int64
 	var firstWakeFlag atomic.Bool
 	firstWakeFlag.Store(isFirstWake)
+	wq := newWakeQueue()
 
 	// ── 6. Spawn claude ───────────────────────────────────────────────────
 	claude, err := SpawnClaude(SpawnOpts{
@@ -158,11 +159,35 @@ func Run(ctx context.Context, opts RunOpts) error {
 			SessionStartedAt: currentSessionStartedAt,
 			WakesInSession:   func() int { return int(wakesInSession.Load()) },
 			Dreaming:         dw.Dreaming,
-			NextTurnID:       func() string { return fmt.Sprintf("turn-%d", time.Now().UnixNano()) },
-			NextTurnReason:   func() string { return "wake" },
-			OnTurnEnd: func() {
-				_ = sessionstate.IncrementWake(opts.SessionStatePath)
-				wakesInSession.Add(1)
+			NextTurn: func() wakeMeta {
+				if m, ok := wq.pop(); ok {
+					return m
+				}
+				return wakeMeta{
+					id:         fmt.Sprintf("mailbox-%d", time.Now().UnixNano()),
+					reason:     "mailbox",
+					wakeDriven: false,
+				}
+			},
+			OnTurnEnd: func(wakeDriven bool) {
+				if wakeDriven {
+					_ = sessionstate.IncrementWake(opts.SessionStatePath)
+					wakesInSession.Add(1)
+				}
+			},
+			TranscriptMaxCount: func() int {
+				if cfg.MindForm.TranscriptsMaxCount > 0 {
+					return cfg.MindForm.TranscriptsMaxCount
+				}
+				return 0
+			},
+			TranscriptMaxBytes: func() int64 {
+				if cfg.MindForm.TranscriptsMaxBytes != "" {
+					if b, err := config.ParseByteSize(cfg.MindForm.TranscriptsMaxBytes); err == nil && b > 0 {
+						return b
+					}
+				}
+				return 0
 			},
 		})
 	}
@@ -177,6 +202,7 @@ func Run(ctx context.Context, opts RunOpts) error {
 		IdentityPrompt:   string(identityBytes),
 		IsDreaming:       dw.Dreaming,
 		AppendToBacklog:  dw.AppendToBacklog,
+		WakeQueue:        wq,
 		FirstWakeFlagGetAndClear: func() bool {
 			return firstWakeFlag.CompareAndSwap(true, false)
 		},
@@ -253,6 +279,9 @@ func Run(ctx context.Context, opts RunOpts) error {
 					firstWakeFlag.Store(true)
 					outstandingWakes.Store(0)
 					resultsSeen.Store(0)
+					// Reset the wake queue so stale wake-ids from the dying
+					// session don't bleed into the new claude instance.
+					wq.reset()
 					// Fresh drainer — old instance's goroutine sees EOF on the
 					// closed stdout of the previous claude and returns; its
 					// stale curHandle/turnStart state never touches the new process.
@@ -306,6 +335,8 @@ func Run(ctx context.Context, opts RunOpts) error {
 				firstWakeFlag.Store(true)
 				outstandingWakes.Store(0)
 				resultsSeen.Store(0)
+				// Reset the wake queue so stale wake-ids don't bleed into the respawned process.
+				wq.reset()
 				nc, sErr := SpawnClaude(SpawnOpts{
 					Binary:         opts.ClaudeBin,
 					Mode:           SessionNew,
