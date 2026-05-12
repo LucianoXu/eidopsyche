@@ -9,7 +9,7 @@
 Today every wake spawns a fresh `claude -p <wake_msg>` process via `agent-runner`, runs one turn, and exits. The mind-form's claude session has no in-process lifetime beyond that single turn. This makes three SPEC-intended capabilities effectively unreachable:
 
 - **Sub-agents that work across wakes.** Claude Code's `Agent` tool dispatches a sub-conversation that lives only as long as its parent process. With per-wake spawn, a sub-agent dispatched in wake N is force-killed at wake N's exit — it cannot deliver results to wake N+1.
-- **Background tasks that complete asynchronously.** `Bash {run_in_background: true}`, `Monitor`, `ScheduleWakeup`, in-process `CronCreate` — all rely on the claude process staying alive to consume the mailbox events that signal completion. Per-wake spawn kills these handles before they can fire.
+- **Background tasks that complete asynchronously.** `Bash {run_in_background: true}`, `Monitor`, `ScheduleWakeup`, in-process `CronCreate` — all rely on the claude process staying alive to consume the mailbox events that signal completion. Per-wake spawn kills these handles before they can fire. (We treat the claude SDK's mailbox-as-synthetic-user-turn behavior — observed in interactive mode and inferred from the tool descriptions captured in `docs/materials/prompt-analysis.txt` — as **empirical**, not a public contract. The first integration test in §8.4 explicitly verifies that this behavior holds under stream-json input mode. If the SDK does not auto-inject in stream-json input mode, the design degrades: bg-tasks become "fire and forget with no notification back to the model" until we add an explicit framework-side event injector.)
 - **A true train of thought between dreams.** Although `--resume <UUID>` carries the conversation history across wakes, the model's runtime (its scratch state, its in-flight tool dispatches, its mailbox) is reborn every time. The mind-form spends every wake re-orienting from disk rather than picking up where it left off.
 
 The fix: keep one claude process alive per mind-form, deliver wake events into its mailbox without restarting it, and rotate the session only at dream boundaries.
@@ -17,7 +17,7 @@ The fix: keep one claude process alive per mind-form, deliver wake events into i
 ## 2. Design intent
 
 - **One persistent claude process per mind-form, for the lifetime of a session.** Session boundaries are dream-end events. Within a session, the same claude PID handles every wake.
-- **Stream-json input mode is the standard SDK transport.** `claude --input-format stream-json --output-format stream-json --verbose --include-partial-messages`. stdin carries JSONL user messages forever; the process exits only at stdin EOF or external signal.
+- **Stream-json input mode is the standard SDK transport.** `claude --input-format stream-json --output-format stream-json --verbose --include-partial-messages`. stdin carries JSONL user messages forever; the process exits only at stdin EOF or external signal. The exact text/format of the user-message JSONL is set by the public Claude Code CLI contract; the prompt-analysis transcript in `docs/materials/prompt-analysis.txt` observed `{"type":"user","message":{"role":"user","content":[...]}}`-shaped lines, which is what we serialize.
 - **Wake protocol is the unchanged producer interface.** Gate daemon, cron heartbeat, planner, operator manual wake — every producer calls `wake.Submit` exactly as today. Coalescing-in-`pending.json` semantics survive.
 - **Wake delivery is fire-and-forget.** supervisor does not block waiting for claude to finish a turn before delivering the next wake. Claude SDK's stdin queue handles ordering. The mind-form sees back-to-back wakes as a sequence of turns and decides at the model level how to respond coherently.
 - **Dream is the only session boundary.** Only the mind-form decides when to dream (per SPEC: "心智体在做梦的时候整理…"). The framework does not threshold, does not force-rotate, does not impose dream cadence.
@@ -136,6 +136,20 @@ agent-loop starts (container boot or supervisor-driven restart)
 
 This is the existing `decideSessionMode` (`agent_runner.go:228-237`) logic, ported into agent-loop's startup.
 
+**Stale dream recovery.** `dreamstate` today has no lease or owner: a crash between `dream.begin` and `dream.end` leaves `CurrentlyDreaming=true` forever, blocking new wakes from reaching claude (the `dreaming` flag would stay set and wakes would pile up in an empty backlog after restart). At agent-loop startup, after the session decision above:
+
+```
+if dreamstate.CurrentlyDreaming == true:
+    log "stale CurrentlyDreaming detected at startup; previous dream did not complete cleanly"
+    dreamstate.End with a synthesized note like "interrupted by crash at <timestamp>" and no prosePath
+    (this increments DreamCount and updates LastDreamFinishedAt; the side
+     effect is that the session-mode decision above already treated the
+     in-progress dream as "needs a fresh session" via the
+     LastDreamFinishedAt > SessionStartedAt branch)
+```
+
+This is a cheap one-line fix and prevents permanent-dreaming wedges.
+
 ### 5.2 Per-wake handling (steady state)
 
 ```
@@ -191,11 +205,22 @@ fsnotify event on dream-state.json fires (typically between
 **agent-loop's rotation goroutine (drains rotation requests)**
 ```
 receive rotation request
+  → wait for the state machine to reach idle (current turn's `result`
+    event has fired). This is the critical "quiescence gate" — closing
+    stdin mid-turn would mean claude reads EOF on its next stdin read
+    while a tool_use is in flight, with undefined session-jsonl state.
+    The wait has an upper bound of mindform.dream_idle_wait (default
+    5 min) — if claude is still busy past that, the model violated the
+    纲领 (didn't reach a clean turn boundary before dream-end);
+    proceed with a forced close and log loud.
   → close claude's stdin (parent's write end)
   → wait for claude to exit, up to mindform.dream_close_grace
     (default 60s, configurable per §7.4)
   ├─ claude exits cleanly → continue
   └─ grace elapsed → SIGTERM → wait 5s → SIGKILL
+  → call transcript.Store.Recover on the transcripts directory to
+    synthesize entries for any in-flight ndjson files that did not see
+    their finalize call (e.g., the dream-end turn's transcript)
   → flush in-flight transcript handles
   → sessionstate.Clear
   → sessionstate.Mint(new UUID)
@@ -207,6 +232,19 @@ receive rotation request
   → atomic dreaming flag set false (release backlog buffering)
   → ready: stdin reader and stdout drainer resume normal operation
 ```
+
+Note on in-flight sub-agents and bg-tasks at the quiescence gate: when
+the state machine reaches idle, synchronous tool_uses are guaranteed to
+be resolved (claude's agent loop never emits `result` while a tool_use
+is outstanding). Background tasks (`Bash{run_in_background}`,
+ScheduleWakeup, `Agent{run_in_background}`) and Monitors may still be
+running — they are claude's internal mailbox handles, invisible from
+outside. The 纲领 (§4.5) requires the mind-form to clean these up
+**before** calling dream-end. If the mind-form forgets, those handles
+die with the claude process at stdin EOF, and the new session has no
+record of them beyond the previous session's transcripts (forensic
+only). This is the deliberate consequence of mind-form责任自清理 from
+the design's dream protocol.
 
 ### 5.4 Claude busy/idle state machine
 
@@ -265,13 +303,7 @@ agent-loop's claude.Wait() returns non-zero
        ↓ resume reading stdin from supervisor and forwarding to new claude
 ```
 
-agent-loop depends on Claude SDK's `--resume` self-healing of orphan
-`tool_use` / `tool_result` pairs (the SDK fabricates an "interrupted"
-tool_result for any orphan when reconstructing the messages array on
-resume). If a future SDK version regresses this, the symptom is
-repeated `--resume` failures — caught by the session-not-found
-fallback above, which mints a fresh session. No eidos-side jsonl
-rewriting today.
+**On session jsonl corruption.** We do not edit the session jsonl. Past empirical observation (Claude Code's interactive `/resume` and `claude --resume` flows recovering from kill-during-tool-use) suggests the SDK fabricates an "interrupted" tool_result for any `tool_use` orphan when reconstructing the messages array, but this is not a published contract. If `--resume` fails for any reason, the path is uniform: session-not-found marker → `sessionstate.Clear` + mint a fresh session + `nextWakeIsFirstOfNewSession=true`. The mind-form re-orients from the ontology files (memory/journal/essence/inbox). Lost: the in-session working memory and any sub-agent transcripts that were not flushed.
 
 ## 6. Crash recovery & lifecycle boundaries
 
@@ -285,12 +317,14 @@ rewriting today.
 
 ### 6.2 supervisor auto-restart for agent-loop
 
-`cmd/eidos/supervisor/children.go` (`processSpawner` / `ChildSpawner`) gains a `restart=always` option. Only agent-loop opts in. Restart policy:
+`cmd/eidos/supervisor/children.go` (`processSpawner` / `ChildSpawner`) requires a behavioral change. Today every child exit calls `s.cancel()` (children.go:43), tearing down supervisor and letting docker's restart-policy bring the container back. For agent-loop we need finer control: certain exits (auth-required) should *not* restart, others should restart in-process, and crond/gate-daemon retain their current "exit cancels supervisor" behavior. The implementation: `Spawn` gains a per-child policy parameter `{name, args, onExit: cancelSupervisor | restartAlways | classifyAndRestart}`. crond and gate-daemon pass `cancelSupervisor` (today's behavior). agent-loop passes `classifyAndRestart` with this policy:
 
-- agent-loop never exits cleanly during normal operation. Dream rotation respawns the claude child in-process; agent-loop itself stays alive. Any agent-loop exit is therefore "abnormal", and the restart policy is uniform:
+- agent-loop never exits cleanly during normal operation. Dream rotation respawns the claude child in-process; agent-loop itself stays alive. Any agent-loop exit is therefore "abnormal", and the restart classification is:
   - **`EXIT_AUTH_REQUIRED` (47)**: do not restart. authstate.json is the source of truth; operator runs `eidos forge login` to clear and then `eidos forge restart <name>`.
   - **Any other exit code (including 0)**: restart after exponential backoff (start 1s, cap 30s).
 - Crash-loop guard: if agent-loop dies more than 5 times within 60s, stop restarting, log loud at supervisor stderr, and write `/eidos/run/agent-loop-crashed.json` with the last exit code and the tail of stderr so `forge status` can surface it.
+
+After each successful agent-loop restart, supervisor must (in order): reconnect the stdin pipe to the new child's stdin, call `recoverStaleActive` on the wake directory (in case the crash left an unprocessed active.json), and resume the fsnotify loop. This is symmetric with the boot-time startup sequence (§6.3) — startup is just "agent-loop's first restart from a zero-state ancestor."
 
 crond and gate daemon retain their current "no auto-restart" behavior; this refactor does not expand that scope.
 
@@ -300,11 +334,16 @@ crond and gate daemon retain their current "no auto-restart" behavior; this refa
 container starts (docker / docker run)
   ↓ PID 1 = eidos supervisor run
   ↓ render and install crontab (via internal/cron)
-  ↓ spawn crond (no-restart)
-  ↓ spawn gate daemon (no-restart)
-  ↓ spawn agent-loop (restart=always)
+  ↓ spawn crond (no-restart, cancel-supervisor-on-exit per §6.2)
+  ↓ spawn gate daemon (no-restart, cancel-supervisor-on-exit per §6.2)
+  ↓ spawn agent-loop (restart=always, classifyAndRestart per §6.2)
      ↓ agent-loop: acquire /eidos/run/agent.lock
      ↓ agent-loop: read session.json + dream-state.json
+     ↓ agent-loop: stale-dream recovery (per §5.1) — if
+       dream-state.CurrentlyDreaming==true, synthesize an End first
+     ↓ agent-loop: transcript.Store.Recover on the transcripts dir
+       (synthesize entries for any in-flight ndjson left by a previous
+       agent-loop instance)
      ↓ agent-loop: spawn claude (--session-id or --resume per §5.1)
      ↓ agent-loop: start stdout drainer goroutine
      ↓ agent-loop: start fsnotify watcher on dream-state.json
@@ -315,6 +354,8 @@ container starts (docker / docker run)
   ↓ supervisor: recoverStaleActive (folds any leftover active.json into pending)
   ↓ supervisor: fsnotify on /eidos/run/wake/, drain on every event
 ```
+
+The agent-loop sub-sequence (lock + stale-dream + transcript recovery + spawn claude + start drainer + start fsnotify watcher + ready) is the **same sequence** that supervisor's restart logic executes on each agent-loop restart in steady state — boot is just the first iteration.
 
 Ordering constraint: supervisor must connect the stdin pipe **before** any wake is forwarded. agent-loop blocks on stdin read; supervisor blocks on its own startup until the pipe is wired. No timing race in practice.
 
@@ -355,9 +396,10 @@ Registered in the daemon method table per the Single Call Path constraint. Host-
 
 | Key | Default | Purpose | Context |
 |---|---|---|---|
-| `mindform.dream_close_grace` | `60s` | How long to wait for claude to exit cleanly after stdin close during dream rotation. SIGTERM then SIGKILL after grace+5s | ContainerCtx only |
+| `mindform.dream_idle_wait` | `5m` | After dream-end fires, max time to wait for claude to reach a clean turn boundary (state machine = idle) before forcing rotation. If the model called dream-end mid-turn or never closed the turn, this is the safety bound. | ContainerCtx only |
+| `mindform.dream_close_grace` | `60s` | After stdin close during rotation, how long to wait for claude to exit cleanly. SIGTERM then SIGKILL after grace+5s | ContainerCtx only |
 
-Registered in `internal/config/keys.go`. Surfaced via `eidos forge config <name> --dream-close-grace ...` (host) and `eidos gate config set mindform.dream_close_grace ...` (container).
+Both registered in `internal/config/keys.go`. Surfaced via `eidos forge config <name> --dream-idle-wait ...` / `--dream-close-grace ...` (host) and `eidos gate config set mindform.dream_idle_wait ...` / `mindform.dream_close_grace ...` (container).
 
 ### 7.5 Container-side reflexivity (`eidos forge` inside container)
 
@@ -386,9 +428,12 @@ Registered in `internal/config/keys.go`. Surfaced via `eidos forge config <name>
 - Asserts the generated claude args (`--session-id` vs `--resume`).
 
 **`internal/agentloop/dream_test.go`** — rotation:
-- Drive dream-state.json transitions, assert agent-loop closes stdin, waits, mints, respawns.
+- Drive dream-state.json transitions, assert agent-loop waits for idle state before closing stdin, then closes, waits for exit, mints, respawns.
+- Quiescence-gate case: fire dream-end while state=busy → assert agent-loop does **not** close stdin until the `result` event arrives; uses fake claude that emits result after a delay.
+- Idle-wait-timeout case: model called dream-end but stream never reaches idle within `mindform.dream_idle_wait` → assert agent-loop logs the violation and proceeds with forced close.
 - Grace-timeout case: fake claude that doesn't exit on stdin close → SIGTERM after grace, SIGKILL after grace+5s.
 - Dream-backlog case: wakes arriving during dreaming flag → buffered → drained to new claude after rotation (first one with `IsFirstWakeOfNewSession=true`).
+- Stale-dream startup case: dream-state.json with `CurrentlyDreaming=true` at agent-loop startup → assert recovery via synthesized End + session-mode decision treats it as needing fresh session.
 
 **`internal/agentloop/crash_test.go`** — claude failure paths:
 - Fake claude exits non-zero (not auth) → agent-loop respawns with `--resume`.
@@ -422,9 +467,14 @@ This stub replaces today's shell-script `claude` test double (which only handled
 
 - Real mind-form container + real claude (subscription auth via `EIDOS_TEST_CLAUDE_TOKEN`, same harness as existing birth integration tests).
 - **Happy path**: spawn container → fire wake → observe agent-state.json transitions through busy → idle → check transcript file written → check session.json unchanged.
-- **Dream rotation**: trigger `dream begin` + `dream end` via in-container `docker exec` → observe new session.json UUID → observe new transcripts directory under the new session.
-- **Crash recovery**: `docker exec ... kill -9 <claude_pid>` → observe agent-loop respawns claude with `--resume`, transcripts continue, session.json unchanged.
+- **Multi-turn one process**: fire wake A → wait for result → fire wake B → assert both turns visible in stream-json output with one `system init` (single process), separate transcripts per wake.
+- **Crash mid-turn**: while claude is busy (mid-turn), `docker exec ... kill -9 <claude_pid>` → assert agent-loop detects, respawns with `--resume`, the in-flight transcript file is recovered via `transcript.Store.Recover` and tagged as interrupted, next wake processed normally.
+- **Dream rotation**: trigger `dream begin` + (some dream-work tool calls) + `dream end` via in-container `docker exec` → observe new session.json UUID → observe new transcripts directory under the new session.
+- **Dream while busy**: fire dream-end IPC while claude is mid-turn on an unrelated wake → assert agent-loop waits for that turn's result before closing stdin (quiescence gate).
+- **Stale dream recovery**: hand-edit dream-state.json to set `CurrentlyDreaming=true` then restart agent-loop → assert startup logs the recovery, dream-state ends, session is minted fresh.
+- **mailbox auto-injection (probe)**: dispatch a 5-second `Bash{run_in_background:true}` from the mind-form via a scripted prompt → wait → assert claude stdout shows a synthetic user-turn carrying the bg-task completion (validates the §2 empirical assumption; if this test fails on a real Anthropic SDK update, all bg-task-related capability claims in the design must be revisited).
 - **Burst wakes**: enqueue 5 wakes in quick succession → observe 5 turns in transcript (claude SDK FIFO ordering), each correctly attributed.
+- **Invocation-flag contract**: assert that the spawned claude command line contains all of `--input-format stream-json`, `--output-format stream-json`, `--verbose`, `--include-partial-messages`, and exactly one of `--session-id` / `--resume`. This is a regression guard against forgetting `--input-format stream-json` (which would silently degrade to one-shot `-p` mode and break always-on).
 
 ### 8.5 Out-of-scope for testing
 
