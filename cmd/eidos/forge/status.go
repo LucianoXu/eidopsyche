@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/agentloop"
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 	"github.com/spf13/cobra"
 )
@@ -70,6 +71,20 @@ func computeStatus(ctx context.Context, c forgectl.Client, name string) (string,
 		fmt.Fprintf(&sb, "state:   %s\n", state)
 	}
 
+	// Best-effort agent-state: thinking + last_active. Omitted when the
+	// agent-loop has not started yet or the exec fails (older images).
+	if as, ok := fetchAgentState(ctx, c, cont); ok {
+		if as.ClaudeBusy {
+			fmt.Fprintf(&sb, "thinking: yes\n")
+		} else {
+			fmt.Fprintf(&sb, "thinking: no\n")
+		}
+		if as.LastEventAt > 0 {
+			age := time.Since(time.Unix(as.LastEventAt, 0)).Round(time.Second)
+			fmt.Fprintf(&sb, "last_active: %s ago\n", age)
+		}
+	}
+
 	// Best-effort whoami via in-container reflection.
 	res, err := c.ContainerExec(ctx, cont, []string{"eidos", "forge", "whoami"})
 	if err != nil || res.ExitCode != 0 {
@@ -99,6 +114,22 @@ func fetchRuntimeState(ctx context.Context, c forgectl.Client, cont string) (Run
 		return RuntimeState{}, false
 	}
 	return rs, true
+}
+
+// fetchAgentState execs `eidos forge agent-state` in the container and
+// parses its JSON. Returns (zero, false) on any exec / parse failure so the
+// caller can silently omit the thinking + last_active lines on older images
+// or when the agent-loop has not started yet.
+func fetchAgentState(ctx context.Context, c forgectl.Client, cont string) (agentloop.AgentState, bool) {
+	res, err := c.ContainerExec(ctx, cont, []string{"eidos", "forge", "agent-state"})
+	if err != nil || res.ExitCode != 0 {
+		return agentloop.AgentState{}, false
+	}
+	var as agentloop.AgentState
+	if err := json.Unmarshal(res.Stdout, &as); err != nil {
+		return agentloop.AgentState{}, false
+	}
+	return as, true
 }
 
 // formatPhase renders the phase line: `awake (mindgate)` /

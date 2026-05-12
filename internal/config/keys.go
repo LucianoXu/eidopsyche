@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Context identifies in which daemon context a config key is valid.
@@ -192,6 +193,38 @@ func init() {
 				return err
 			}
 			c.Heartbeat.Interval = v
+			return nil
+		},
+	})
+	register(Key{
+		Path:        "mindform.dream_idle_wait",
+		Description: "Max wait for claude to reach idle after dream-end before forcing rotation. Examples: 5m, 1m, 30s. Empty uses the 5m default.",
+		Contexts:    ContainerCtx,
+		Get:         func(c *Config) string { return c.MindForm.DreamIdleWait },
+		Set: func(c *Config, v string) error {
+			v = strings.TrimSpace(v)
+			if v != "" {
+				if _, err := time.ParseDuration(v); err != nil {
+					return fmt.Errorf("dream_idle_wait must be a duration like 5m: %w", err)
+				}
+			}
+			c.MindForm.DreamIdleWait = v
+			return nil
+		},
+	})
+	register(Key{
+		Path:        "mindform.dream_close_grace",
+		Description: "Max wait for claude to exit after stdin close during dream rotation. Examples: 60s, 2m. Empty uses the 60s default.",
+		Contexts:    ContainerCtx,
+		Get:         func(c *Config) string { return c.MindForm.DreamCloseGrace },
+		Set: func(c *Config, v string) error {
+			v = strings.TrimSpace(v)
+			if v != "" {
+				if _, err := time.ParseDuration(v); err != nil {
+					return fmt.Errorf("dream_close_grace must be a duration like 60s: %w", err)
+				}
+			}
+			c.MindForm.DreamCloseGrace = v
 			return nil
 		},
 	})

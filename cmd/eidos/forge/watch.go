@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
@@ -46,7 +47,7 @@ script around it.`,
 			}
 			cont := forgectl.ContainerName(name)
 			if listOnly {
-				return runWatchList(cmd, c, cont, limit)
+				return runWatchList(cmd, c, cont, limit, raw)
 			}
 			opts := renderOpts{ShowThinking: showThinking}
 			return runWatchTail(cmd.Context(), cmd.OutOrStdout(), c, cont, wakeArg, !noFollow, raw, opts)
@@ -63,7 +64,7 @@ script around it.`,
 
 // runWatchList shows the table of recent wakes by execing
 // `transcript-list --json` in the container and rendering the index.
-func runWatchList(cmd *cobra.Command, c forgectl.Client, cont string, limit int) error {
+func runWatchList(cmd *cobra.Command, c forgectl.Client, cont string, limit int, raw bool) error {
 	args := []string{"eidos", "forge", "transcript-list", "--json"}
 	res, err := c.ContainerExec(cmd.Context(), cont, args)
 	if err != nil {
@@ -77,11 +78,69 @@ func runWatchList(cmd *cobra.Command, c forgectl.Client, cont string, limit int)
 		return fmt.Errorf("parse index: %w", err)
 	}
 	out := cmd.OutOrStdout()
+	// Best-effort thinking indicator above the table (non-raw mode only).
+	if !raw {
+		if as, ok := fetchAgentState(cmd.Context(), c, cont); ok {
+			indicator := "○ idle"
+			if as.ClaudeBusy {
+				indicator = "● thinking"
+			}
+			fmt.Fprintf(out, "mind-form: %s  [%s]\n", cont, indicator)
+		}
+	}
 	for _, line := range renderListTableForWatch(idx, limit) {
 		fmt.Fprintln(out, line)
 	}
 	return nil
 }
+
+// startThinkingPoller starts a goroutine that polls agent-state every
+// agentPollInterval and writes a separator line to out when claude_busy
+// flips. The goroutine exits when ctx is cancelled. Caller must call the
+// returned cancel func to stop polling (idempotent). If the first poll
+// fails (older image), the goroutine exits silently without printing
+// anything — the thinking indicator is purely best-effort.
+func startThinkingPoller(ctx context.Context, out io.Writer, c forgectl.Client, cont string) (cancel func()) {
+	pollCtx, stop := context.WithCancel(ctx)
+	var mu sync.Mutex
+	var prevBusy *bool // nil = unknown
+
+	go func() {
+		ticker := time.NewTicker(agentPollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-pollCtx.Done():
+				return
+			case <-ticker.C:
+			}
+			as, ok := fetchAgentState(pollCtx, c, cont)
+			if !ok {
+				// older image or agent-loop not started; stop polling silently
+				return
+			}
+			mu.Lock()
+			prev := prevBusy
+			cur := as.ClaudeBusy
+			prevBusy = &cur
+			mu.Unlock()
+			if prev == nil || *prev == cur {
+				continue
+			}
+			ts := time.Now().Format("2006-01-02 15:04:05")
+			if cur {
+				fmt.Fprintf(out, "\n── thinking ── %s\n", ts)
+			} else {
+				fmt.Fprintf(out, "\n── idle ──     %s\n", ts)
+			}
+		}
+	}()
+	return stop
+}
+
+// agentPollInterval is the gap between agent-state polls in follow mode.
+// var so tests can shrink it.
+var agentPollInterval = 500 * time.Millisecond
 
 // runWatchTail streams the transcript (raw or rendered).
 //
@@ -99,6 +158,15 @@ func runWatchTail(ctx context.Context, out io.Writer, c forgectl.Client, cont, w
 			return err
 		}
 		wakeArg = resolved
+	}
+
+	// In follow mode, poll agent-state and emit thinking↔idle event lines.
+	// Gate by !raw so `forge watch --raw --follow` keeps its passthrough-NDJSON
+	// contract — the poller injects non-NDJSON separator lines that break piped
+	// consumers (e.g. jq).
+	if follow && !raw {
+		stopPoller := startThinkingPoller(ctx, out, c, cont)
+		defer stopPoller()
 	}
 
 	dumpedLatest := false

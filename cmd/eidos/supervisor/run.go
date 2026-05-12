@@ -4,13 +4,17 @@ package supervisor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/cron"
@@ -33,21 +37,23 @@ func newRunCmd() *cobra.Command {
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
 			children := newProcessSpawner(cancel)
-			if err := startChildren(ctx, children); err != nil {
+			fwd, err := startChildren(ctx, children)
+			if err != nil {
 				return err
 			}
-			return watchWakes(ctx)
+			return watchWakes(ctx, fwd.forward)
 		},
 	}
 }
 
 // startChildren renders the crontab from config, spawns long-running
-// children (crond + gate daemon), and starts the planner goroutine that
-// fires due plans.
+// children (crond + gate daemon + agent-loop), and starts the planner
+// goroutine that fires due plans.
 //
-// Returns the first non-nil error so the caller can abort before entering
-// the wake loop.
-func startChildren(ctx context.Context, sp ChildSpawner) error {
+// Returns a forwarder whose forward method delivers wake signals to
+// agent-loop's stdin, or the first non-nil error so the caller can abort
+// before entering the wake loop.
+func startChildren(ctx context.Context, sp ChildSpawner) (*forwarder, error) {
 	// Render and install the crontab from per-mindform config. A bad
 	// config falls back to config.DefaultHeartbeatInterval (currently 2h)
 	// with a logged warning rather than leaving the mind-form silent —
@@ -69,7 +75,7 @@ func startChildren(ctx context.Context, sp ChildSpawner) error {
 	// through sudo (internal/cron handles that). Tests substitute
 	// crontabInstaller to skip the real sudo invocation.
 	if err := crontabInstaller(ctx, body); err != nil {
-		return fmt.Errorf("install crontab: %w", err)
+		return nil, fmt.Errorf("install crontab: %w", err)
 	}
 
 	// busybox crond requires its user crontab files to be root-owned
@@ -80,11 +86,77 @@ func startChildren(ctx context.Context, sp ChildSpawner) error {
 	// sudo (NOPASSWD per /etc/sudoers.d/eidos) to spawn crond as root.
 	// The heartbeat command then runs as eidos via crond's setuid
 	// because the crontab file is named "eidos".
-	if err := sp.Spawn(ctx, "sudo", "-n", "crond", "-f", "-c", "/var/spool/cron/crontabs"); err != nil {
-		return err
+	if err := sp.Spawn(ctx, ChildPolicy{OnExit: CancelSupervisor}, "sudo", "-n", "crond", "-f", "-c", "/var/spool/cron/crontabs"); err != nil {
+		return nil, err
 	}
-	if err := sp.Spawn(ctx, "eidos", "gate", "daemon", "--state-dir", gateDir); err != nil {
-		return err
+	if err := sp.Spawn(ctx, ChildPolicy{OnExit: CancelSupervisor}, "eidos", "gate", "daemon", "--state-dir", gateDir); err != nil {
+		return nil, err
+	}
+
+	// Spawn agent-loop as a long-lived child with ClassifyAndRestart policy.
+	// The PreStart hook wires a fresh stdin pipe into fwd on each (re)spawn.
+	fwd := &forwarder{}
+
+	const (
+		crashLoopWindow    = 60 * time.Second
+		crashLoopThreshold = 5
+	)
+	var (
+		crashTimes []time.Time
+		crashMu    sync.Mutex
+	)
+
+	if err := sp.Spawn(ctx, ChildPolicy{
+		OnExit: ClassifyAndRestart,
+		Classify: func(err error, exitCode int) RestartDecision {
+			// EXIT_AUTH_REQUIRED (47) is set by agent-loop's claude exit
+			// classifier when claude needs /login — supervisor must NOT
+			// restart-loop; operator runs `eidos forge login` and then
+			// `eidos forge restart <name>`.
+			if exitCode == 47 {
+				log.Printf("supervisor: agent-loop EXIT_AUTH_REQUIRED; not restarting until login")
+				return RestartDecision{Halt: true}
+			}
+			// Crash-loop guard: halt restarts if agent-loop dies more than
+			// crashLoopThreshold times within crashLoopWindow (spec §6.2).
+			crashMu.Lock()
+			defer crashMu.Unlock()
+			now := time.Now()
+			cutoff := now.Add(-crashLoopWindow)
+			kept := crashTimes[:0]
+			for _, t := range crashTimes {
+				if t.After(cutoff) {
+					kept = append(kept, t)
+				}
+			}
+			crashTimes = append(kept, now)
+			if len(crashTimes) >= crashLoopThreshold {
+				log.Printf("supervisor: agent-loop crashed %d times in %s; halting restart loop", len(crashTimes), crashLoopWindow)
+				writeAgentLoopCrashed(err, exitCode)
+				return RestartDecision{Halt: true}
+			}
+			return RestartDecision{Restart: true, Backoff: time.Second}
+		},
+		PreStart: func(cmd *exec.Cmd) error {
+			// Fold any stranded active.json back into pending before
+			// reconnecting stdin. This covers the case where agent-loop
+			// died mid-forward and supervisor left active.json in place
+			// per drainPending's fire-and-forget contract.
+			if err := recoverStaleActive(wakeDir); err != nil {
+				log.Printf("supervisor: recover stale active on agent-loop restart: %v", err)
+			}
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			stdin, err := cmd.StdinPipe()
+			if err != nil {
+				return err
+			}
+			fwd.setStdin(stdin)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			return nil
+		},
+	}, "eidos", "supervisor", "agent-loop"); err != nil {
+		return nil, err
 	}
 
 	// Start the planner goroutine. Errors are logged inside; cancellation
@@ -94,7 +166,7 @@ func startChildren(ctx context.Context, sp ChildSpawner) error {
 			log.Printf("planner exited: %v", err)
 		}
 	}()
-	return nil
+	return fwd, nil
 }
 
 // crontabInstaller is the function startChildren calls to write the
@@ -104,19 +176,57 @@ var crontabInstaller = func(ctx context.Context, body string) error {
 	return cron.DefaultInstaller().Install(ctx, body)
 }
 
-// SpawnAgent is invoked when the supervisor picks up a pending wake. The
-// signal has already been promoted to active.json.
-type SpawnAgent func(ctx context.Context, sig wake.Signal) error
+// Forward is the fire-and-forget callback used in the always-on model.
+// It writes one wake.Signal JSONL line to agent-loop's stdin and
+// returns immediately. Errors mean the pipe is broken; supervisor's
+// child-restart logic for agent-loop will trigger a respawn, and
+// recoverStaleActive folds the stranded active.json back into pending.
+type Forward func(ctx context.Context, sig wake.Signal) error
+
+// forwarder owns the live stdin pipe to agent-loop. setStdin is called
+// by the PreStart hook on each (re)spawn; forward marshals a Signal
+// to JSONL and writes it under a mutex so concurrent producers don't
+// interleave bytes mid-record.
+type forwarder struct {
+	mu    sync.Mutex
+	stdin io.WriteCloser
+}
+
+func (f *forwarder) setStdin(w io.WriteCloser) {
+	f.mu.Lock()
+	if f.stdin != nil {
+		_ = f.stdin.Close()
+	}
+	f.stdin = w
+	f.mu.Unlock()
+}
+
+func (f *forwarder) forward(_ context.Context, sig wake.Signal) error {
+	body, err := json.Marshal(sig)
+	if err != nil {
+		return fmt.Errorf("marshal wake: %w", err)
+	}
+	body = append(body, '\n')
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.stdin == nil {
+		return fmt.Errorf("agent-loop stdin not connected")
+	}
+	if _, err := f.stdin.Write(body); err != nil {
+		return fmt.Errorf("write to agent-loop stdin: %w", err)
+	}
+	return nil
+}
 
 // watchWakes is the supervisor's main loop in production.
-func watchWakes(ctx context.Context) error {
+func watchWakes(ctx context.Context, forward Forward) error {
 	if err := os.MkdirAll(wakeDir, 0o700); err != nil {
 		return err
 	}
 	if err := recoverStaleActive(wakeDir); err != nil {
 		log.Printf("recover stale active wake: %v", err)
 	}
-	return watchWakesIn(ctx, wakeDir, runAgentForWake)
+	return watchWakesIn(ctx, wakeDir, forward)
 }
 
 // recoverStaleActive handles a leftover active.json from a previous
@@ -154,14 +264,14 @@ func recoverStaleActive(dir string) error {
 }
 
 // watchWakesIn is the testable seam. It serializes wake processing: only
-// one agent runs at a time (single-instance is enforced by agent-runner via
-// flock, but the supervisor also serializes here to avoid spawning into
-// the void).
+// one agent runs at a time (single-instance is enforced by agent-loop via
+// its internal sequencing, but the supervisor also serializes here to avoid
+// forwarding into the void).
 //
 // On every iteration (and once at startup) it also checks for a one-shot
 // birth.json — the First Contact wizard's hand-off — and runs the birth
 // handler before any normal wake. See cmd/eidos/supervisor/birth.go.
-func watchWakesIn(ctx context.Context, dir string, spawn SpawnAgent) error {
+func watchWakesIn(ctx context.Context, dir string, forward Forward) error {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err
@@ -175,7 +285,7 @@ func watchWakesIn(ctx context.Context, dir string, spawn SpawnAgent) error {
 		log.Printf("birth drain (startup): %v", err)
 	}
 	// Drain any pre-existing pending.json.
-	if _, err := drainPending(ctx, dir, spawn); err != nil {
+	if _, err := drainPending(ctx, dir, forward); err != nil {
 		return err
 	}
 	for {
@@ -205,14 +315,13 @@ func watchWakesIn(ctx context.Context, dir string, spawn SpawnAgent) error {
 			if err := drainBirthIfPresent(ctx, dir, ontologyDir, birthHandlerForProduction); err != nil {
 				log.Printf("birth drain (pending event): %v", err)
 			}
-			if _, err := drainPending(ctx, dir, spawn); err != nil {
-				// Spawn errors (claude exit non-zero, OAuth missing,
-				// transient runtime issues) are runtime conditions, not
-				// supervisor-fatal. Log and continue watching — letting
-				// the supervisor crash here would loop with docker's
-				// restart-policy and produce a flapping container.
+			if _, err := drainPending(ctx, dir, forward); err != nil {
+				// Forward errors (pipe broken, agent-loop restarting) are
+				// runtime conditions, not supervisor-fatal. Log and continue
+				// watching — letting the supervisor crash here would loop with
+				// docker's restart-policy and produce a flapping container.
 				// Only inotify / fsnotify errors below are fatal.
-				log.Printf("wake spawn: %v", err)
+				log.Printf("wake forward: %v", err)
 			}
 		case err, ok := <-w.Errors:
 			if !ok {
@@ -223,14 +332,44 @@ func watchWakesIn(ctx context.Context, dir string, spawn SpawnAgent) error {
 	}
 }
 
-// drainPending promotes and spawns all pending wake signals in an iterative
+// writeAgentLoopCrashed writes /eidos/run/agent-loop-crashed.json with
+// the last exit cause so `forge status` can surface it. Best-effort —
+// failures here are logged, not propagated.
+func writeAgentLoopCrashed(err error, exitCode int) {
+	payload := map[string]any{
+		"v":          1,
+		"halted_at":  time.Now().UTC().Format(time.RFC3339),
+		"exit_code":  exitCode,
+		"last_error": "",
+	}
+	if err != nil {
+		payload["last_error"] = err.Error()
+	}
+	body, mErr := json.Marshal(payload)
+	if mErr != nil {
+		log.Printf("supervisor: marshal agent-loop-crashed: %v", mErr)
+		return
+	}
+	path := "/eidos/run/agent-loop-crashed.json"
+	if wErr := os.WriteFile(path, body, 0o600); wErr != nil {
+		log.Printf("supervisor: write %s: %v", path, wErr)
+	}
+}
+
+// drainPending promotes and forwards all pending wake signals in an iterative
 // loop, processing one at a time until no pending.json remains. This replaces
 // the previous recursive promoteAndSpawn to avoid unbounded stack growth under
 // sustained producer pressure.
 //
-// If active.json already exists, this is a no-op (the previous spawn is still
-// in flight; the supervisor will pick up pending after it completes).
-func drainPending(ctx context.Context, dir string, spawn SpawnAgent) (*wake.Signal, error) {
+// In the always-on model, active.json is written to signal that a wake has
+// been forwarded to agent-loop. Because Forward is fire-and-forget, the active
+// marker is cleared immediately after the write succeeds. If the write fails
+// (pipe broken while agent-loop is restarting), active.json is left in place;
+// recoverStaleActive on the next supervisor boot folds it back into pending.
+//
+// If active.json already exists, this is a no-op (a previous forward is still
+// unacknowledged; the supervisor will retry after the next pending event).
+func drainPending(ctx context.Context, dir string, forward Forward) (*wake.Signal, error) {
 	var last *wake.Signal
 	for {
 		if cur, _ := wake.ReadActive(dir); cur != nil {
@@ -240,42 +379,13 @@ func drainPending(ctx context.Context, dir string, spawn SpawnAgent) (*wake.Sign
 		if err != nil || sig == nil {
 			return last, err
 		}
-		if err := spawn(ctx, *sig); err != nil {
-			_ = wake.ClearActive(dir)
+		if err := forward(ctx, *sig); err != nil {
+			// Leave active.json in place; recoverStaleActive on next
+			// iteration / agent-loop restart will fold it back.
 			return sig, err
 		}
 		_ = wake.ClearActive(dir)
 		last = sig
 		// After clearing active, loop to check for more pending signals.
-	}
-}
-
-// runAgentForWake is the production spawner: it runs `eidos supervisor
-// agent-runner --wake-file <active.json>` as a child process and waits.
-// The child is started in its own process group (Setpgid) so that on context
-// cancellation we can SIGTERM the entire group, including any grandchild
-// `claude` process started by agent-runner.
-func runAgentForWake(ctx context.Context, _ wake.Signal) error {
-	cmd := exec.Command("eidos", "supervisor", "agent-runner",
-		"--wake-file", filepath.Join(wakeDir, "active.json"),
-		"--ontology", "/eidos/ontology",
-	)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case err := <-done:
-		return err
-	case <-ctx.Done():
-		if cmd.Process != nil {
-			// Negative pid targets the process group. Best-effort.
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-		}
-		return <-done
 	}
 }

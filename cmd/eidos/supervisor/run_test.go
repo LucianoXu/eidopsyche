@@ -26,7 +26,7 @@ func newFakeChildren() *fakeChildren {
 	return &fakeChildren{}
 }
 
-func (f *fakeChildren) Spawn(_ context.Context, _ string, _ ...string) error {
+func (f *fakeChildren) Spawn(_ context.Context, _ ChildPolicy, _ string, _ ...string) error {
 	f.started++
 	if f.failAfter > 0 && f.started == f.failAfter {
 		return f.errFail
@@ -50,11 +50,16 @@ func TestStartChildrenLaunchesBoth(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tracker := newFakeChildren()
-	if err := startChildren(ctx, tracker); err != nil {
+	fwd, err := startChildren(ctx, tracker)
+	if err != nil {
 		t.Fatalf("startChildren returned unexpected error: %v", err)
 	}
-	if got := tracker.Started(); got != 2 {
-		t.Errorf("started %d children, want 2 (crond + gate daemon)", got)
+	if fwd == nil {
+		t.Fatal("startChildren returned nil forwarder")
+	}
+	// crond + gate-daemon + agent-loop = 3
+	if got := tracker.Started(); got != 3 {
+		t.Errorf("started %d children, want 3 (crond + gate daemon + agent-loop)", got)
 	}
 }
 
@@ -65,7 +70,7 @@ func TestStartChildrenPropagatesFirstError(t *testing.T) {
 
 	// Fail on first spawn (crond).
 	fc := &fakeChildren{failAfter: 1, errFail: sentinel}
-	if err := startChildren(ctx, fc); !errors.Is(err, sentinel) {
+	if _, err := startChildren(ctx, fc); !errors.Is(err, sentinel) {
 		t.Errorf("expected sentinel error, got: %v", err)
 	}
 	if fc.Started() != 1 {
@@ -74,11 +79,20 @@ func TestStartChildrenPropagatesFirstError(t *testing.T) {
 
 	// Fail on second spawn (gate daemon).
 	fc2 := &fakeChildren{failAfter: 2, errFail: sentinel}
-	if err := startChildren(ctx, fc2); !errors.Is(err, sentinel) {
+	if _, err := startChildren(ctx, fc2); !errors.Is(err, sentinel) {
 		t.Errorf("expected sentinel error on second spawn, got: %v", err)
 	}
 	if fc2.Started() != 2 {
 		t.Errorf("expected exactly 2 spawn attempts, got %d", fc2.Started())
+	}
+
+	// Fail on third spawn (agent-loop).
+	fc3 := &fakeChildren{failAfter: 3, errFail: sentinel}
+	if _, err := startChildren(ctx, fc3); !errors.Is(err, sentinel) {
+		t.Errorf("expected sentinel error on third spawn, got: %v", err)
+	}
+	if fc3.Started() != 3 {
+		t.Errorf("expected exactly 3 spawn attempts, got %d", fc3.Started())
 	}
 }
 

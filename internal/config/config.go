@@ -64,6 +64,18 @@ type MindFormConfig struct {
 	// files. Empty = transcript.DefaultMaxBytes (100MB). Accepts plain
 	// bytes ("10485760") or K/M/G suffixes ("100MB", "5G").
 	TranscriptsMaxBytes string `toml:"transcripts_max_bytes"`
+
+	// DreamIdleWait is the max time to wait for claude to reach a
+	// clean turn boundary (state machine = idle) after dream-end fires,
+	// before forcing rotation. Empty falls back to a hardcoded default
+	// (5m today). Stored as a duration string.
+	DreamIdleWait string `toml:"dream_idle_wait"`
+
+	// DreamCloseGrace is the max time to wait for claude to exit
+	// cleanly after stdin close during rotation. After grace+5s the
+	// process is SIGKILLed. Empty falls back to a hardcoded default
+	// (60s today). Stored as a duration string.
+	DreamCloseGrace string `toml:"dream_close_grace"`
 }
 
 // WakeConfig controls the optional wake-signal output used by the in-container
