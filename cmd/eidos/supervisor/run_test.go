@@ -26,7 +26,7 @@ func newFakeChildren() *fakeChildren {
 	return &fakeChildren{}
 }
 
-func (f *fakeChildren) Spawn(_ context.Context, _ string, _ ...string) error {
+func (f *fakeChildren) Spawn(_ context.Context, _ ChildPolicy, _ string, _ ...string) error {
 	f.started++
 	if f.failAfter > 0 && f.started == f.failAfter {
 		return f.errFail
