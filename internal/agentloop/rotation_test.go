@@ -1,3 +1,5 @@
+//go:build !windows
+
 // internal/agentloop/rotation_test.go
 package agentloop
 

@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package agentloop — exit helpers.
 //
 // cliExitErr and matchSessionNotFound are small utilities used by the main

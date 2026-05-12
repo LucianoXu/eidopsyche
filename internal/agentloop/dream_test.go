@@ -1,3 +1,5 @@
+//go:build !windows
+
 // internal/agentloop/dream_test.go
 package agentloop
 

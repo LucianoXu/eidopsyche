@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package agentloop — rotation.go
 //
 // Rotation handles dream-end transitions: wait for the state machine to

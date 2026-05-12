@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package agentloop — Run() orchestrator.
 //
 // Run wires together all components from Stages 1–10 into a single

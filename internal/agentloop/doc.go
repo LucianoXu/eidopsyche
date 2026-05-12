@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package agentloop owns the long-lived per-mind-form claude subprocess
 // that holds a stream-json session open across many wakes. It reads
 // wake.Signal JSONL from its parent's stdin (supervisor's Forward

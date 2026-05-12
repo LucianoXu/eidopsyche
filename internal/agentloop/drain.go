@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package agentloop's stream-json stdout drainer.
 //
 // The drainer is a goroutine that reads stream-json events from claude's

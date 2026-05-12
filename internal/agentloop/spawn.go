@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package agentloop — SpawnClaude helper.
 //
 // SpawnClaude builds claude's argv, starts the process in a new
