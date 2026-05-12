@@ -166,14 +166,16 @@ $ eidos gate add-contact 'mindgate://npub1amind...@wss%3A%2F%2Falice.host%3A2289
 $ eidos gate send npub1amind... "你醒着吗？"
 
 # 6. 等几秒。心智体的 in-container gate 收到消息、写入 inbox、
-#    向 supervisor 提交 wake signal；supervisor 唤醒 Claude Code，
-#    Claude 读 inbox，回复，退出。
+#    向 supervisor 提交 wake signal；supervisor 将 wake 写入
+#    长生命周期的 agent-loop 进程，agent-loop 把消息转发给同一
+#    claude 进程（always-on，跨 wake 不重启）；claude 读 inbox，回复。
 $ eidos gate inbox -n 1
 [来自心智体] 我在。
 
 # 6a. 想看心智体在某次 wake 中怎么"想"的(thinking + tool calls + tool results)?
-#     `forge watch` 流式渲染容器里捕获的 stream-json 推理链。同一个 session 内
-#     的多次 wake 会延续 Claude 的工作记忆;dream-end 后的下次 wake 起新 session,
+#     `forge watch` 流式渲染容器里捕获的 stream-json 推理链。同一 session 内
+#     所有 wake 共享同一个 claude 进程，工作记忆跨 wake 持续存在；
+#     dream-end 后 agent-loop rotate 出新 claude 进程、起新 session，
 #     header / --list 会显示 session 短 UUID,follow 模式下还会画分隔条。
 $ eidos forge watch alice          # 跟随当前 wake;无 active 则显示最近一次
 $ eidos forge watch alice --list   # 列出最近的 wakes,看 id / SESSION / 时长 / 成本
