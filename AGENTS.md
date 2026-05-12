@@ -40,24 +40,20 @@ eidopsyche/
 ├── go.work                   # Go workspace covering cmd/* and internal/*
 ├── cmd/
 │   └── eidos/                # Single binary entry; subcommand tree under cmd/eidos/{forge,gate,supervisor,...}
-├── internal/
-│   ├── ontology/             # Ontology layout, git ops, identity-layer reads
-│   ├── identity/             # secp256k1 keypair handling, NIP-17 gift wrap
-│   ├── nostr/                # Relay client, NIP-17 gift-wrap helpers, multi-relay publish/subscribe pool
-│   ├── ipc/                  # forge ↔ gate unix socket protocol (typed contracts)
-│   ├── wake/                 # Wake signal file format (HeartBeat / MindGate / planning)
-│   ├── contacts/             # Contacts list with identity tiers (master / friend / acquaintance / blocklist)
-│   ├── service/              # OS service-manager wrapper for `eidos gate start/stop/status/purge` — systemd on Linux, launchd on macOS, SCM on Windows
-│   ├── update/               # Update check, cache, prompt, self-update wrapper
-│   └── config/               # Shared configuration loading
+├── internal/                 # Grouped by responsibility — see `ls internal/` for the full set.
+│   #   Ontology & identity:  ontology, identity, contacts, firstcontact, card, invite, invitedb
+│   #   Transport & relay:    nostr, relaycfg, relayd, envelope, ipc
+│   #   Daemon & dispatch:    daemon, dashboard, state, store, sessionstate, authstate, dreamstate
+│   #   Mind-form lifecycle:  wake, scheduler, cron, inbox, transcript, prompts, claudeauth, claudeexec, forgectl
+│   #   Host / platform:      service, update, version, config, fileops
 ├── pkg/                      # Stable public interfaces (empty — promote from internal/ as APIs stabilize)
 ├── template/                 # Canonical clean ontology tree, embedded into the binary
 ├── prefab/                   # Pre-authored mind-form catalogues (one dir per prefab id)
 ├── embed.go                  # Top-level //go:embed bundling template/ + prefab/
-├── utils/                    # Dev-only Go utilities (independent modules, not in go.work, not shipped)
+├── utils/                    # Dev-only Go utilities — see utils/CLAUDE.md (GOWORK=off invocation)
 ├── docker/
-│   └── mindform/             # Mind-form runtime image build context
-│       ├── Dockerfile        # Multi-stage; distroless-static final image
+│   └── mindform/             # Mind-form runtime image — see docker/mindform/CLAUDE.md
+│       ├── Dockerfile        # Multi-stage; alpine:3.19 final image
 │       └── entrypoint.sh
 ├── install.sh                # One-line install / self-update script (hosted at raw.githubusercontent.com)
 ├── .goreleaser.yml           # Release tooling config
@@ -124,24 +120,10 @@ Authoring conventions:
 
 ## `utils/` (dev-only utilities)
 
-Standalone Go utilities used during development — currently one:
-`utils/promptdump/`, which captures Claude Code's Anthropic Messages API
-request body so the verbatim default system prompt can be studied. See
-`utils/promptdump/README.md`.
-
-Policy:
-
-- Each utility is its own Go module. None are listed in the root `go.work`.
-- The eidos build/test surface (`go build ./cmd/eidos`, `go test ./...`)
-  does not touch `utils/`. Utilities are invoked explicitly via
-  `GOWORK=off go run .` from inside the utility's own module (or
-  `GOWORK=off go -C utils/<name> run .` from the repo root). The
-  `GOWORK=off` is required precisely because the module sits outside
-  the workspace — Go would otherwise try to apply the parent workspace
-  and fail.
-- Not built by CI by default; not released. Authors add their own CI
-  job if they want one.
-- No stability contract — utilities may be deleted at any time.
+Standalone Go utilities — each is its own module **outside** the root
+`go.work`, not built by CI, not shipped. Invocation requires
+`GOWORK=off`. Full policy and per-utility usage live in
+[`utils/CLAUDE.md`](utils/CLAUDE.md) and `utils/README.md`.
 
 ## Build, Test, and Development Commands
 
@@ -208,10 +190,10 @@ Every adjustment and every read in the same state schema is reachable through th
 2. *Third-party review*. If you are Claude Code, you should use `codex` and request a code review. If you are GPT model, you request a code review from `claude --dangerously-skip-permissions`.
 3. *Documentation*: After any code implementation, check and update the documentations. Make sure to maintain and keep the documentations up to date.
 4. *CI Check*. After pushing the commit, you should use `gh` to watch the CI result and make sure it passes.
-5. *Fix Copilot Commen* (if exists). If copilot is assigned to review the PR automatically, you should wait for copilot's comments and fix them if necessary.
+5. *Fix Copilot Comments* (if exists). If copilot is assigned to review the PR automatically, you should wait for copilot's comments and fix them if necessary.
 
 **Guidelines:**
-- When required to use `PR` mode, or the development work is heavy, you should work in a `git` worktree in a separate branch in `.claude`, and contribute to the code by making pull requests.
+- When required to use `PR` mode, or the development work is heavy, you should work in a `git` worktree on a separate branch and contribute via pull request. **Prefer the `EnterWorktree` tool** to create the isolated workspace — it places the worktree at `../eidopsyche-worktree/<worktree-name>/`, where `eidopsyche-worktree/` is a sibling path parallel to the main repo.
 - DO NOT use squash merge when you merge a branch or PR.
 - Make sure to run the identical check as CI locally and apply fix before push to GitHub remote.
 - GitHub issues/comments/PR comments: use literal multiline strings or `-F - <<'EOF'` (or $'...') for real newlines; never embed "\\n".
@@ -221,7 +203,6 @@ Every adjustment and every read in the same state schema is reachable through th
 ## Agent-Specific Notes
 
 - We keep identical copies of `AGENTS.md` and `CLAUDE.md`, and use softlink to point `CLAUDE.md` to `AGENTS.md`. When creating new agent instructions in subfolders, always follow the practice: create `AGENTS.md` first, and build the softlink.
-- When working on a GitHub Issue or PR, print the full URL at the end of the task.
 - When answering questions, respond with high-confidence answers only: verify in code; do not guess.
 - **NEVER** bump the version number unless the user explicitly asks to.
 - **NEVER** commit any real ip-address, api-keys or other security related information. Use obviously fake placeholders in the documentations.
