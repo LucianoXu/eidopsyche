@@ -4,11 +4,6 @@
 // entry point: lock acquisition, stale-state recovery, session decision,
 // claude spawn, and a goroutine supervision loop that handles rotation
 // requests, claude crashes, and context cancellation.
-//
-// Stage 11.1 stub: the rotation case in the main loop returns
-// "not implemented yet". Stage 11.2 replaces it with the real glue
-// that swaps the claude handle, drains the dream backlog, and resets
-// per-session counters.
 package agentloop
 
 import (
@@ -66,11 +61,6 @@ type RunOpts struct {
 // stale-state recovery, session decision, claude spawn, and the goroutine
 // supervision loop that handles rotation requests, claude crashes, and
 // context cancellation.
-//
-// Stage 11.1 stub: the rotation case in the main loop returns
-// "not implemented yet". Stage 11.2 replaces it with the real glue
-// that swaps the claude handle, drains the dream backlog, and resets
-// per-session counters.
 func Run(ctx context.Context, opts RunOpts) error {
 	// ── 1. Acquire the single-instance lock ──────────────────────────────
 	lock, err := acquireLock(opts.AgentLockPath)
@@ -198,21 +188,70 @@ func Run(ctx context.Context, opts RunOpts) error {
 
 	// ── 13. Main supervision loop ─────────────────────────────────────────
 	// Handles ctx cancel, rotation requests, forwarder EOF, and claude exit.
-	// Stage 11.2 replaces the rotation case with real glue.
+	claudeP := claude
 	for {
 		select {
 		case <-ctx.Done():
-			_ = claude.Stdin.Close()
-			if claude.Cmd.Process != nil {
-				_ = syscall.Kill(-claude.Cmd.Process.Pid, syscall.SIGTERM)
+			_ = claudeP.Stdin.Close()
+			if claudeP.Cmd.Process != nil {
+				_ = syscall.Kill(-claudeP.Cmd.Process.Pid, syscall.SIGTERM)
 			}
 			return ctx.Err()
 
 		case <-rotateCh:
-			// Stage 11.2 will replace this with the real rotation glue that
-			// quiesces claude, closes stdin, waits for exit, mints a fresh
-			// session, and spawns a new claude process.
-			return fmt.Errorf("rotation: not implemented yet (Stage 11.2)")
+			rc := RotationConfig{
+				SessionStatePath: opts.SessionStatePath,
+				StateMachine:     sm,
+				IdleWait:         opts.IdleWait,
+				CloseGrace:       opts.CloseGrace,
+				CloseStdin:       func() error { return claudeP.Stdin.Close() },
+				WaitForClaudeExit: func(timeout time.Duration) bool {
+					select {
+					case <-claudeP.WaitErr:
+						return true
+					case <-time.After(timeout):
+						return false
+					}
+				},
+				Kill: func() {
+					if claudeP.Cmd.Process != nil {
+						_ = syscall.Kill(-claudeP.Cmd.Process.Pid, syscall.SIGTERM)
+						time.Sleep(5 * time.Second)
+						_ = syscall.Kill(-claudeP.Cmd.Process.Pid, syscall.SIGKILL)
+					}
+				},
+				SpawnNewClaude: func(newUUID string) error {
+					nc, err := SpawnClaude(SpawnOpts{
+						Binary:         opts.ClaudeBin,
+						Mode:           SessionNew,
+						SessionUUID:    newUUID,
+						Model:          cfg.MindForm.Model,
+						IdentityPrompt: string(identityBytes),
+						Cwd:            opts.OntologyDir,
+						ClaudeDir:      opts.ClaudeDir,
+						ExtraArgs:      opts.ExtraClaudeArgs,
+					})
+					if err != nil {
+						return err
+					}
+					claudeP = nc
+					firstWakeFlag.Store(true)
+					outstandingWakes.Store(0)
+					resultsSeen.Store(0)
+					// Restart the drainer goroutine on the new stdout.
+					go func(stdout io.ReadCloser) { _ = d.Run(subCtx, stdout) }(claudeP.Stdout)
+					// Point the forwarder at the new claude stdin and drain the dream backlog.
+					fw.cfg.ClaudeStdin = claudeP.Stdin
+					for _, sig := range dw.DrainBacklog() {
+						_ = fw.deliverToClaude(sig)
+					}
+					dw.SetDreamingFalse()
+					return nil
+				},
+			}
+			if err := NewRotation(rc).Rotate(); err != nil {
+				return fmt.Errorf("rotation: %w", err)
+			}
 
 		case err := <-forwardDone:
 			if err != nil && err != context.Canceled {
@@ -223,7 +262,7 @@ func Run(ctx context.Context, opts RunOpts) error {
 			// we don't busy-loop on the closed receive.
 			forwardDone = nil
 
-		case waitErr := <-claude.WaitErr:
+		case waitErr := <-claudeP.WaitErr:
 			return fmt.Errorf("claude exited: %w", waitErr)
 		}
 	}
