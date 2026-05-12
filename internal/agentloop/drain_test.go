@@ -73,7 +73,7 @@ func TestDrain_OpensAndFinalizesPerTurnTranscript(t *testing.T) {
 		Store:          store,
 		StateMachine:   sm,
 		Clock:          func() time.Time { return time.Unix(1715500100, 0) },
-		NextTurnID:     func() string { return "wake-1" },
+		NextTurnID:     func() string { return "1715500000" },
 		NextTurnReason: func() string { return "heartbeat" },
 	})
 
@@ -83,7 +83,7 @@ func TestDrain_OpensAndFinalizesPerTurnTranscript(t *testing.T) {
 		t.Fatalf("drain: %v", err)
 	}
 
-	wakePath := store.WakePath("wake-1")
+	wakePath := store.WakePath("1715500000")
 	body, err := os.ReadFile(wakePath)
 	if err != nil {
 		t.Fatalf("transcript file missing: %v", err)
@@ -95,7 +95,13 @@ func TestDrain_OpensAndFinalizesPerTurnTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("index: %v", err)
 	}
-	if len(idx.Wakes) != 1 || idx.Wakes[0].ID != "wake-1" {
-		t.Errorf("index entries: got %+v, want one wake-1 entry", idx.Wakes)
+	if len(idx.Wakes) != 1 || idx.Wakes[0].ID != "1715500000" {
+		t.Errorf("index entries: got %+v, want one 1715500000 entry", idx.Wakes)
+	}
+	if got := idx.Wakes[0].Reason; got != "heartbeat" {
+		t.Errorf("index Reason: got %q, want %q", got, "heartbeat")
+	}
+	if idx.Wakes[0].CostUSD == nil || *idx.Wakes[0].CostUSD != 0.01 {
+		t.Errorf("index CostUSD: got %v, want pointer to 0.01", idx.Wakes[0].CostUSD)
 	}
 }

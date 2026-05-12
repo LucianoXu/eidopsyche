@@ -98,6 +98,16 @@ func NewDrainer(cfg DrainerConfig) *Drainer { return &Drainer{cfg: cfg} }
 // Run drains src until EOF or ctx cancellation. Returns the underlying
 // IO error, or nil on clean EOF.
 func (d *Drainer) Run(ctx context.Context, src io.Reader) error {
+	// Close any in-flight transcript FD on shutdown (ctx-cancel, EOF, IO
+	// error). The index entry is intentionally NOT written here — consistent
+	// with "no finalize on crash; let Recover handle it" policy.
+	defer func() {
+		if d.curHandle != nil && d.curHandle.file != nil {
+			_ = d.curHandle.file.Close()
+			d.curHandle = nil
+		}
+	}()
+
 	r := bufio.NewReaderSize(src, 1<<20)
 	heartbeat := time.NewTicker(5 * time.Second)
 	defer heartbeat.Stop()
@@ -149,10 +159,10 @@ func (d *Drainer) handleLine(line []byte) {
 	}
 	now := d.cfg.Clock()
 
-	// Open a new per-turn transcript on the first non-system event
+	// Open a new per-turn transcript on the first assistant or user event
 	// arriving while no handle is open.
 	if d.curHandle == nil && d.cfg.Store != nil && d.cfg.NextTurnID != nil &&
-		ev.Type != transcript.TypeSystem {
+		(ev.Type == transcript.TypeAssistant || ev.Type == transcript.TypeUser) {
 		id := d.cfg.NextTurnID()
 		f, openErr := d.cfg.Store.Open(id)
 		if openErr != nil {
@@ -205,14 +215,17 @@ func (d *Drainer) finalizeCurrentTurn(endedAt int64) {
 		Reason:    reason,
 		StartedAt: d.turnStart,
 		EndedAt:   endedAt,
-		OK:        true,
+		OK:        true, // default; overridden below if a result event carried is_error
 	}
 	if d.counter != nil {
 		entry.ToolUseCount = d.counter.ToolUseCount
 		entry.ThinkingBlocks = d.counter.ThinkingBlocks
-		if d.counter.Result != nil && d.counter.Result.TotalCostUSD != nil {
-			cost := *d.counter.Result.TotalCostUSD
-			entry.CostUSD = &cost
+		if d.counter.Result != nil {
+			entry.OK = d.counter.Result.OK
+			if d.counter.Result.TotalCostUSD != nil {
+				cost := *d.counter.Result.TotalCostUSD
+				entry.CostUSD = &cost
+			}
 		}
 	}
 	_ = d.curHandle.file.Close()
