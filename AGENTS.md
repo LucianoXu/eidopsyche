@@ -192,8 +192,12 @@ Every adjustment and every read in the same state schema is reachable through th
 4. *CI Check*. After pushing the commit, you should use `gh` to watch the CI result and make sure it passes.
 5. *Fix Copilot Comments* (if exists). If copilot is assigned to review the PR automatically, you should wait for copilot's comments and fix them if necessary.
 
+After merging the PR, you should always exit the worktree, delete the worktree, remove the local and remote feature branch, unless specificed otherwise.
+
 **Guidelines:**
-- When required to use `PR` mode, or the development work is heavy, you should work in a `git` worktree on a separate branch and contribute via pull request. **Prefer the `EnterWorktree` tool** to create the isolated workspace — it places the worktree at `../eidopsyche-worktree/<worktree-name>/`, where `eidopsyche-worktree/` is a sibling path parallel to the main repo.
+- When required to use `PR` mode, or the development work is heavy, you should work in a `git` worktree on a separate branch and contribute via pull request. Worktrees should be placed at `../eidopsyche-worktree/<worktree-name>/`, where `eidopsyche-worktree/` is a sibling path parallel to the main repo. Steps to follow:
+  1. First use `git worktree add <path> <branch-name>` to create the worktree.
+  2. Use `EnterWorktree` tool to enter the workspace.
 - DO NOT use squash merge when you merge a branch or PR.
 - Make sure to run the identical check as CI locally and apply fix before push to GitHub remote.
 - GitHub issues/comments/PR comments: use literal multiline strings or `-F - <<'EOF'` (or $'...') for real newlines; never embed "\\n".
