@@ -211,7 +211,7 @@ Every adjustment and every read in the same state schema is reachable through th
 5. *Fix Copilot Commen* (if exists). If copilot is assigned to review the PR automatically, you should wait for copilot's comments and fix them if necessary.
 
 **Guidelines:**
-- When required to use `PR` mode, or the development work is heavy, you should work in a `git` worktree in a separate branch in `.claude`, and contribute to the code by making pull requests.
+- When required to use `PR` mode, or the development work is heavy, you should work in a `git` worktree on a separate branch and contribute via pull request. **Prefer the `EnterWorktree` tool** to create the isolated workspace — it places the worktree at `../eidopsyche-worktree/<worktree-name>/`, where `eidopsyche-worktree/` is a sibling path parallel to the main repo.
 - DO NOT use squash merge when you merge a branch or PR.
 - Make sure to run the identical check as CI locally and apply fix before push to GitHub remote.
 - GitHub issues/comments/PR comments: use literal multiline strings or `-F - <<'EOF'` (or $'...') for real newlines; never embed "\\n".
