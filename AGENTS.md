@@ -18,6 +18,19 @@ This are the guidelines of the project from the perspective as a product.
 - **Usability**. Easy to deploy. Good UI and UX design. Commands for both beginners and advanced users.
 
 
+## Project Stage: Pre-Production — Always Choose the Optimal Design
+
+Eidopsyche has no production deployments, no existing user base, and no operational footprint to maintain. **Always choose the optimal design.** Do not factor in:
+
+- Backward compatibility with previous binary / image / config versions
+- Migration paths for existing data, sessions, or ontologies
+- Opt-in feature flags or behind-flag rollouts for new behavior
+- Deprecation cycles or legacy code kept "for compatibility"
+- Phased delivery driven by rollback fear (phased delivery for *scope management* is still fine)
+
+When a refactor or redesign requires changing on-disk formats, IPC contracts, command surface, or container semantics, **make the change directly**. Delete the old code path. There is no "v1 → v2 migrator" to write because there is no v1 anyone is running. This stance ends when the project ships a `1.0` and accumulates real-world deployments; revisit at that point.
+
+
 ## Project Structure & Module Organization
 
 Single Go workspace producing a single binary `eidos` whose subcommand tree (`forge` / `gate` / `supervisor`) carries the three component roles. MindForge and MindGate are conceptual layers and brand names — they do not correspond to separate executables.
