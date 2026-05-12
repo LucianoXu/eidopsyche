@@ -3,6 +3,8 @@ package promptcapture
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -319,4 +321,54 @@ func formatMediaType(s string) string {
 		return ""
 	}
 	return " " + s
+}
+
+// WriteOutputs writes envelope env to one or two files on disk based on
+// outPath's extension:
+//
+//	ext == ".json"  → write JSON to outPath
+//	ext == ".md"    → write Markdown to outPath
+//	anything else   → write both outPath+".json" and outPath+".md"
+//
+// Returns the list of paths actually written. Callers that want to send
+// the envelope to stdout should not pass an empty outPath — this
+// function always writes files.
+func WriteOutputs(env map[string]any, outPath string) ([]string, error) {
+	if outPath == "" {
+		return nil, fmt.Errorf("WriteOutputs: outPath required (caller handles stdout)")
+	}
+	jsonBytes, err := json.MarshalIndent(env, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	switch filepath.Ext(outPath) {
+	case ".json":
+		if err := os.WriteFile(outPath, jsonBytes, 0o644); err != nil {
+			return nil, err
+		}
+		return []string{outPath}, nil
+	case ".md":
+		md, err := RenderMarkdown(env)
+		if err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(outPath, []byte(md), 0o644); err != nil {
+			return nil, err
+		}
+		return []string{outPath}, nil
+	default:
+		md, err := RenderMarkdown(env)
+		if err != nil {
+			return nil, err
+		}
+		jsonPath := outPath + ".json"
+		mdPath := outPath + ".md"
+		if err := os.WriteFile(jsonPath, jsonBytes, 0o644); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(mdPath, []byte(md), 0o644); err != nil {
+			return nil, err
+		}
+		return []string{jsonPath, mdPath}, nil
+	}
 }
