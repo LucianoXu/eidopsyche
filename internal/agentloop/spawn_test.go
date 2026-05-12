@@ -83,6 +83,62 @@ func TestSessionJsonlPath_EmptyDir(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeArgs_StreamJSONContract(t *testing.T) {
+	cases := []struct {
+		name    string
+		opts    SpawnOpts
+		require []string // substrings that must appear in the joined argv
+		exclude []string // substrings that must NOT appear
+	}{
+		{
+			name: "new session has --session-id",
+			opts: SpawnOpts{Mode: SessionNew, SessionUUID: "uuid-1", IdentityPrompt: "x"},
+			require: []string{
+				"--input-format", "stream-json",
+				"--output-format", "stream-json",
+				"--verbose",
+				"--include-partial-messages",
+				"--session-id", "uuid-1",
+				"--append-system-prompt", "x",
+				"--dangerously-skip-permissions",
+			},
+			exclude: []string{"--resume"},
+		},
+		{
+			name:    "resume session has --resume",
+			opts:    SpawnOpts{Mode: SessionResume, SessionUUID: "uuid-2", IdentityPrompt: "y"},
+			require: []string{"--resume", "uuid-2"},
+			exclude: []string{"--session-id"},
+		},
+		{
+			name:    "model when non-empty",
+			opts:    SpawnOpts{Mode: SessionNew, SessionUUID: "u", Model: "claude-opus-4-7", IdentityPrompt: "x"},
+			require: []string{"--model", "claude-opus-4-7"},
+		},
+		{
+			name:    "extra args appended last",
+			opts:    SpawnOpts{Mode: SessionNew, SessionUUID: "u", IdentityPrompt: "x", ExtraArgs: []string{"--mode", "normal"}},
+			require: []string{"--mode", "normal"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := buildClaudeArgs(tc.opts)
+			joined := strings.Join(args, " ")
+			for _, want := range tc.require {
+				if !strings.Contains(joined, want) {
+					t.Errorf("missing required arg %q in: %s", want, joined)
+				}
+			}
+			for _, no := range tc.exclude {
+				if strings.Contains(joined, no) {
+					t.Errorf("forbidden arg %q present in: %s", no, joined)
+				}
+			}
+		})
+	}
+}
+
 func TestSpawnedClaude_WaitIsIdempotent(t *testing.T) {
 	c, err := SpawnClaude(SpawnOpts{
 		Binary:         stubClaudeBin,

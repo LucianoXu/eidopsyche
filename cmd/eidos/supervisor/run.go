@@ -96,6 +96,16 @@ func startChildren(ctx context.Context, sp ChildSpawner) (*forwarder, error) {
 	// Spawn agent-loop as a long-lived child with ClassifyAndRestart policy.
 	// The PreStart hook wires a fresh stdin pipe into fwd on each (re)spawn.
 	fwd := &forwarder{}
+
+	const (
+		crashLoopWindow    = 60 * time.Second
+		crashLoopThreshold = 5
+	)
+	var (
+		crashTimes []time.Time
+		crashMu    sync.Mutex
+	)
+
 	if err := sp.Spawn(ctx, ChildPolicy{
 		OnExit: ClassifyAndRestart,
 		Classify: func(err error, exitCode int) RestartDecision {
@@ -107,9 +117,34 @@ func startChildren(ctx context.Context, sp ChildSpawner) (*forwarder, error) {
 				log.Printf("supervisor: agent-loop EXIT_AUTH_REQUIRED; not restarting until login")
 				return RestartDecision{Halt: true}
 			}
+			// Crash-loop guard: halt restarts if agent-loop dies more than
+			// crashLoopThreshold times within crashLoopWindow (spec §6.2).
+			crashMu.Lock()
+			defer crashMu.Unlock()
+			now := time.Now()
+			cutoff := now.Add(-crashLoopWindow)
+			kept := crashTimes[:0]
+			for _, t := range crashTimes {
+				if t.After(cutoff) {
+					kept = append(kept, t)
+				}
+			}
+			crashTimes = append(kept, now)
+			if len(crashTimes) > crashLoopThreshold {
+				log.Printf("supervisor: agent-loop crashed %d times in %s; halting restart loop", len(crashTimes), crashLoopWindow)
+				writeAgentLoopCrashed(err, exitCode)
+				return RestartDecision{Halt: true}
+			}
 			return RestartDecision{Restart: true, Backoff: time.Second}
 		},
 		PreStart: func(cmd *exec.Cmd) error {
+			// Fold any stranded active.json back into pending before
+			// reconnecting stdin. This covers the case where agent-loop
+			// died mid-forward and supervisor left active.json in place
+			// per drainPending's fire-and-forget contract.
+			if err := recoverStaleActive(wakeDir); err != nil {
+				log.Printf("supervisor: recover stale active on agent-loop restart: %v", err)
+			}
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			stdin, err := cmd.StdinPipe()
 			if err != nil {
@@ -294,6 +329,30 @@ func watchWakesIn(ctx context.Context, dir string, forward Forward) error {
 			}
 			return fmt.Errorf("watcher error: %w", err)
 		}
+	}
+}
+
+// writeAgentLoopCrashed writes /eidos/run/agent-loop-crashed.json with
+// the last exit cause so `forge status` can surface it. Best-effort —
+// failures here are logged, not propagated.
+func writeAgentLoopCrashed(err error, exitCode int) {
+	payload := map[string]any{
+		"v":          1,
+		"halted_at":  time.Now().UTC().Format(time.RFC3339),
+		"exit_code":  exitCode,
+		"last_error": "",
+	}
+	if err != nil {
+		payload["last_error"] = err.Error()
+	}
+	body, mErr := json.Marshal(payload)
+	if mErr != nil {
+		log.Printf("supervisor: marshal agent-loop-crashed: %v", mErr)
+		return
+	}
+	path := "/eidos/run/agent-loop-crashed.json"
+	if wErr := os.WriteFile(path, body, 0o600); wErr != nil {
+		log.Printf("supervisor: write %s: %v", path, wErr)
 	}
 }
 
