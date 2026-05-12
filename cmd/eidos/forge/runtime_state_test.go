@@ -5,38 +5,44 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/agentloop"
 	"github.com/LucianoXu/eidopsyche/internal/authstate"
+	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 )
 
 // runtimeStateFixture redirects the package-level paths used by
 // computeRuntimeState to test-temp locations and restores them on
 // cleanup. Mirrors statusDetailFixture.
-func runtimeStateFixture(t *testing.T) (authT, procStatT, procBootT, agentStateT string) {
+func runtimeStateFixture(t *testing.T) (authT, procStatT, procBootT, agentStateT, crashedT string) {
 	t.Helper()
 	prevAuth := authStatePath
 	prevProcStat := procStatPath
 	prevProcBoot := procBootTimePath
 	prevAgent := agentStateRuntimePath
+	prevCrashed := agentLoopCrashedPath
 
 	authT = filepath.Join(t.TempDir(), "auth_required.json")
 	procStatT = filepath.Join(t.TempDir(), "proc1stat")
 	procBootT = filepath.Join(t.TempDir(), "procstat")
 	agentStateT = filepath.Join(t.TempDir(), "agent-state.json")
+	crashedT = filepath.Join(t.TempDir(), "agent-loop-crashed.json")
 
 	authStatePath = authT
 	procStatPath = procStatT
 	procBootTimePath = procBootT
 	agentStateRuntimePath = agentStateT
+	agentLoopCrashedPath = crashedT
 
 	t.Cleanup(func() {
 		authStatePath = prevAuth
 		procStatPath = prevProcStat
 		procBootTimePath = prevProcBoot
 		agentStateRuntimePath = prevAgent
+		agentLoopCrashedPath = prevCrashed
 	})
 	return
 }
@@ -60,7 +66,7 @@ func TestRuntimeState_Starting(t *testing.T) {
 }
 
 func TestRuntimeState_Idle(t *testing.T) {
-	_, _, _, agentT := runtimeStateFixture(t)
+	_, _, _, agentT, _ := runtimeStateFixture(t)
 	if err := agentloop.WriteAgentState(agentT, agentloop.AgentState{
 		ClaudeBusy:       false,
 		Dreaming:         false,
@@ -91,7 +97,7 @@ func TestRuntimeState_Idle(t *testing.T) {
 }
 
 func TestRuntimeState_Thinking(t *testing.T) {
-	_, _, _, agentT := runtimeStateFixture(t)
+	_, _, _, agentT, _ := runtimeStateFixture(t)
 	if err := agentloop.WriteAgentState(agentT, agentloop.AgentState{
 		ClaudeBusy:       true,
 		Dreaming:         false,
@@ -112,7 +118,7 @@ func TestRuntimeState_Thinking(t *testing.T) {
 }
 
 func TestRuntimeState_Dreaming(t *testing.T) {
-	_, _, _, agentT := runtimeStateFixture(t)
+	_, _, _, agentT, _ := runtimeStateFixture(t)
 	// Dreaming overrides busy: the consolidation pass is the meaningful
 	// state to surface even if claude is mid-token at the moment.
 	if err := agentloop.WriteAgentState(agentT, agentloop.AgentState{
@@ -129,7 +135,7 @@ func TestRuntimeState_Dreaming(t *testing.T) {
 }
 
 func TestRuntimeState_AuthRequired(t *testing.T) {
-	authT, _, _, agentT := runtimeStateFixture(t)
+	authT, _, _, agentT, _ := runtimeStateFixture(t)
 	if err := authstate.WriteAt(authT, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +160,7 @@ func TestRuntimeState_AuthRequired(t *testing.T) {
 func TestRuntimeState_ContainerStartedAt(t *testing.T) {
 	// Synthesise minimal /proc/1/stat and /proc/stat to exercise the
 	// best-effort start-time parser.
-	_, procStatT, procBootT, _ := runtimeStateFixture(t)
+	_, procStatT, procBootT, _, _ := runtimeStateFixture(t)
 	// /proc/1/stat: pid (comm) state ppid pgrp session tty_nr tpgid flags
 	// minflt cminflt majflt cmajflt utime stime cutime cstime priority nice
 	// num_threads itrealvalue starttime ...
@@ -185,6 +191,70 @@ func TestRuntimeState_ContainerStartedAtFallback(t *testing.T) {
 	}
 }
 
+func TestRuntimeState_Crashed(t *testing.T) {
+	_, _, _, agentT, crashedT := runtimeStateFixture(t)
+	// Crash marker present + a stale agent-state.json claiming "busy":
+	// crashed must win — agent-state is at best a stale snapshot once
+	// the supervisor halts the restart loop.
+	if err := agentloop.WriteAgentState(agentT, agentloop.AgentState{
+		ClaudeBusy: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"v":1,"halted_at":"2026-05-12T15:00:00Z","exit_code":137,"last_error":"context deadline exceeded"}`)
+	if err := os.WriteFile(crashedT, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rs := computeRuntimeState(time.Now())
+	if rs.Phase != "crashed" {
+		t.Errorf("phase=%q, want crashed", rs.Phase)
+	}
+	if rs.CrashedExitCode != 137 {
+		t.Errorf("crashed_exit_code=%d, want 137", rs.CrashedExitCode)
+	}
+	if rs.CrashedLastError != "context deadline exceeded" {
+		t.Errorf("crashed_last_error=%q", rs.CrashedLastError)
+	}
+}
+
+func TestRuntimeState_AuthRequiredOverridesCrashed(t *testing.T) {
+	// auth-required wins over crashed because it points the operator
+	// at the actionable next step (`eidos forge login`); a crash
+	// marker may itself be the downstream consequence of failed auth.
+	authT, _, _, _, crashedT := runtimeStateFixture(t)
+	if err := authstate.WriteAt(authT, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"v":1,"halted_at":"2026-05-12T15:00:00Z","exit_code":1,"last_error":"x"}`)
+	if err := os.WriteFile(crashedT, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rs := computeRuntimeState(time.Now())
+	if rs.Phase != "auth-required" {
+		t.Errorf("phase=%q, want auth-required (precedence over crashed)", rs.Phase)
+	}
+}
+
+func TestRuntimeState_CrashedMarkerCorrupt(t *testing.T) {
+	// A malformed crash marker is treated as "no marker" so a transient
+	// half-written file doesn't pin the operator into a stale crashed
+	// phase forever. computeRuntimeState falls through to agent-state.
+	_, _, _, agentT, crashedT := runtimeStateFixture(t)
+	if err := agentloop.WriteAgentState(agentT, agentloop.AgentState{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(crashedT, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rs := computeRuntimeState(time.Now())
+	if rs.Phase == "crashed" {
+		t.Errorf("malformed crash marker should not stick: phase=%q", rs.Phase)
+	}
+}
+
 func TestRuntimeStateCmd_JSONOutput(t *testing.T) {
 	runtimeStateFixture(t)
 	cmd := newRuntimeStateCmd()
@@ -202,5 +272,52 @@ func TestRuntimeStateCmd_JSONOutput(t *testing.T) {
 	}
 	if rs.V != runtimeStateSchemaVersion {
 		t.Errorf("v=%d, want %d", rs.V, runtimeStateSchemaVersion)
+	}
+}
+
+// TestRuntimeStateCmd_RoundTripThroughStatus guards against tag drift
+// between RuntimeState emission and the host-side parser: marshal a
+// real computeRuntimeState result, feed it through a statusFake exec
+// stub, and assert computeStatus renders the expected phase line. If
+// a struct-tag rename ever desyncs writer and reader, this test
+// catches it — the bare-string fixture tests do not.
+func TestRuntimeStateCmd_RoundTripThroughStatus(t *testing.T) {
+	_, _, _, agentT, _ := runtimeStateFixture(t)
+	if err := agentloop.WriteAgentState(agentT, agentloop.AgentState{
+		ClaudeBusy:       true,
+		SessionID:        "8a6d2f1c-aaaa-bbbb-cccc-ddddeeeeffff",
+		SessionStartedAt: 1700000000,
+		WakesInSession:   42,
+		LastEventAt:      1700009999,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Marshal the in-process RuntimeState the same way the in-container
+	// subcommand would.
+	rs := computeRuntimeState(time.Now())
+	body, err := json.Marshal(rs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f := &statusFake{
+		state: "running",
+		execResponses: map[string]forgectl.ExecResult{
+			"runtime-state": {Stdout: body},
+		},
+	}
+	out, err := computeStatus(t.Context(), f, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "phase:   thinking") {
+		t.Errorf("phase did not survive round-trip: %q", out)
+	}
+	if !strings.Contains(out, "42 turns") {
+		t.Errorf("turns did not survive round-trip: %q", out)
+	}
+	if !strings.Contains(out, "session: 8a6d2f1c") {
+		t.Errorf("session did not survive round-trip: %q", out)
 	}
 }

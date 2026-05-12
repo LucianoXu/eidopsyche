@@ -33,12 +33,15 @@ The in-container `forge runtime-state` subcommand emits exactly one of these:
 | Phase | Meaning | Source |
 |---|---|---|
 | `auth-required` | `claude` OAuth failed; agent-loop self-gated | `authstate.ReadAt(authStatePath)` returns non-nil |
+| `crashed` | Supervisor's crash-loop guard halted restart (5 deaths in 60s) | `/eidos/run/agent-loop-crashed.json` present |
 | `starting` | Container running but agent-loop hasn't written its first state yet (boot, post-restart) | `agent-state.json` missing |
 | `dreaming` | Agent-loop in dream consolidation | `agentState.Dreaming == true` |
 | `thinking` | Claude is actively processing a turn | `agentState.ClaudeBusy == true` |
 | `idle` | Agent-loop is up and waiting for the next event (steady state) | otherwise |
 
 `offline` is host-derived (set in `cmd/eidos/forge/status.go:computeStatus` and `cmd/eidos/forge/list.go:listPhase` when the container is not running) and is **never** emitted by the in-container subcommand.
+
+The `crashed` phase carries two extra fields — `crashed_exit_code` and `crashed_last_error` — copied from `agent-loop-crashed.json`. `forge status` renders them as a `crashed: exit_code=<n> last_error="..."` line so the operator does not need to docker-exec in to learn why the loop is down. The supervisor's crash-loop guard is the only writer (`cmd/eidos/supervisor/run.go:writeAgentLoopCrashed`).
 
 ### 3.2 Derivation order
 
@@ -50,6 +53,13 @@ func computeRuntimeState(now time.Time) RuntimeState {
     if state, _ := authstate.ReadAt(authStatePath); state != nil {
         rs.AuthRequired = true
         rs.Phase = "auth-required"
+        return rs
+    }
+
+    if crashed, ok := readAgentLoopCrashed(agentLoopCrashedPath); ok {
+        rs.Phase = "crashed"
+        rs.CrashedExitCode = crashed.ExitCode
+        rs.CrashedLastError = crashed.LastError
         return rs
     }
 
@@ -76,7 +86,7 @@ func computeRuntimeState(now time.Time) RuntimeState {
 }
 ```
 
-`auth-required` short-circuits because the agent-loop is intentionally gated and the live `agent-state.json` fields would be stale or misleading.
+`auth-required` short-circuits because the agent-loop is intentionally gated and the live `agent-state.json` fields would be stale or misleading. `crashed` short-circuits for the same reason: once the supervisor halts the restart loop, `agent-state.json` is a stale snapshot and surfacing `thinking` / `idle` from it would mislead. `auth-required` wins over `crashed` because it is the more actionable signal — a crash marker may itself be the downstream consequence of failed auth, in which case fixing auth is what unblocks the loop.
 
 ### 3.3 `RuntimeState` JSON shape (v2)
 
@@ -86,6 +96,8 @@ type RuntimeState struct {
     Phase              string `json:"phase"`                        // see §3.1
     AuthRequired       bool   `json:"auth_required"`
     ContainerStartedAt int64  `json:"container_started_at"`
+    CrashedExitCode    int    `json:"crashed_exit_code,omitempty"`  // phase=crashed only
+    CrashedLastError   string `json:"crashed_last_error,omitempty"` // phase=crashed only
     SessionID          string `json:"session_id,omitempty"`
     SessionStartedAt   int64  `json:"session_started_at,omitempty"`
     Turns              int    `json:"turns,omitempty"`
@@ -94,6 +106,10 @@ type RuntimeState struct {
 ```
 
 Dropped from v1: `WakeReason`, `ActiveWakeID`, `SincePhaseChangeSeconds`, `Dreaming`, `WakesInSession`. The wake reason is no longer a phase modifier (a turn isn't a process boundary). `SincePhaseChangeSeconds` was derived from `active.json`'s mtime; with no `active.json`-based phase, the equivalent is `time.Since(LastEventAt)` computed host-side if needed.
+
+### 3.4 Schema-version enforcement
+
+`fetchRuntimeState` (host-side) rejects responses whose `v` does not match `runtimeStateSchemaVersion`. A v1-shaped response from a stale container image would otherwise flow through the v2 struct silently — emitting old phase strings like `sleeping` / `awake` (which v2 callers do not expect) and zeroing out `wakes_in_session` into `Turns=0`. On version mismatch the host falls back to the legacy `state: running` line, the same fallback path used when the in-container subcommand is missing entirely. This keeps the breaking schema bump honest.
 
 ## 4. Status output
 

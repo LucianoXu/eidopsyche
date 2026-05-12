@@ -195,6 +195,55 @@ func TestStatusStarting_NoSessionLineWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestStatusCrashed(t *testing.T) {
+	f := &statusFake{
+		state: "running",
+		execResponses: map[string]forgectl.ExecResult{
+			"runtime-state": {Stdout: []byte(`{"v":2,"phase":"crashed","auth_required":false,"container_started_at":0,"crashed_exit_code":137,"crashed_last_error":"context deadline exceeded"}`)},
+		},
+	}
+	out, err := computeStatus(context.Background(), f, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "phase:   crashed") {
+		t.Errorf("phase line wrong: %q", out)
+	}
+	if !strings.Contains(out, "exit_code=137") {
+		t.Errorf("crash exit code missing: %q", out)
+	}
+	if !strings.Contains(out, `last_error="context deadline exceeded"`) {
+		t.Errorf("crash last_error missing: %q", out)
+	}
+}
+
+func TestStatusRejectsV1Schema(t *testing.T) {
+	// A v1-shaped runtime-state response (older container image) must
+	// not flow through the v2 struct — its phase strings ("sleeping",
+	// "awake") would print verbatim and `wakes_in_session` would
+	// silently zero out. fetchRuntimeState rejects on V mismatch and
+	// the legacy `state: running` line takes over.
+	f := &statusFake{
+		state: "running",
+		execResponses: map[string]forgectl.ExecResult{
+			"runtime-state": {Stdout: []byte(`{"v":1,"phase":"sleeping","dreaming":false,"auth_required":false,"container_started_at":0,"wakes_in_session":47}`)},
+		},
+	}
+	out, err := computeStatus(context.Background(), f, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "phase:") {
+		t.Errorf("v1 response should not produce a phase line: %q", out)
+	}
+	if strings.Contains(out, "sleeping") {
+		t.Errorf("v1 phase string leaked through: %q", out)
+	}
+	if !strings.Contains(out, "state:   running") {
+		t.Errorf("fallback state line missing: %q", out)
+	}
+}
+
 func TestStatusLastActive(t *testing.T) {
 	f := &statusFake{
 		state: "running",

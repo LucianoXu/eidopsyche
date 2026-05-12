@@ -58,6 +58,13 @@ func computeStatus(ctx context.Context, c forgectl.Client, name string) (string,
 	// the legacy `state: running` line so old images stay supported.
 	if rs, ok := fetchRuntimeState(ctx, c, cont); ok {
 		fmt.Fprintf(&sb, "phase:   %s\n", rs.Phase)
+		if rs.Phase == "crashed" {
+			fmt.Fprintf(&sb, "crashed: exit_code=%d", rs.CrashedExitCode)
+			if rs.CrashedLastError != "" {
+				fmt.Fprintf(&sb, " last_error=%q", rs.CrashedLastError)
+			}
+			sb.WriteString("\n")
+		}
 		if rs.SessionID != "" {
 			short := rs.SessionID
 			if len(short) > 8 {
@@ -91,8 +98,12 @@ func computeStatus(ctx context.Context, c forgectl.Client, name string) (string,
 }
 
 // fetchRuntimeState execs `eidos forge runtime-state` in the container and
-// parses its JSON. Returns (zero, false) on any exec / parse failure so the
-// caller can fall back to the legacy `state:` line on older images.
+// parses its JSON. Returns (zero, false) on any exec / parse failure
+// or schema-version mismatch so the caller falls back to the legacy
+// `state:` line for old containers — printing nothing is safer than
+// flowing v1 phase strings ("sleeping"/"awake") through the v2 struct
+// (which would silently zero out v1 fields like wakes_in_session that
+// have moved to "turns" in v2).
 func fetchRuntimeState(ctx context.Context, c forgectl.Client, cont string) (RuntimeState, bool) {
 	res, err := c.ContainerExec(ctx, cont, []string{"eidos", "forge", "runtime-state"})
 	if err != nil || res.ExitCode != 0 {
@@ -100,6 +111,9 @@ func fetchRuntimeState(ctx context.Context, c forgectl.Client, cont string) (Run
 	}
 	var rs RuntimeState
 	if err := json.Unmarshal(res.Stdout, &rs); err != nil {
+		return RuntimeState{}, false
+	}
+	if rs.V != runtimeStateSchemaVersion {
 		return RuntimeState{}, false
 	}
 	return rs, true

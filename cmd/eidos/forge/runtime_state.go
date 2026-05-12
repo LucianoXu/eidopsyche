@@ -17,9 +17,10 @@ import (
 // pattern in dream.go. agentStateRuntimePath is declared in
 // agent_state.go (shared with the agent-state subcommand).
 var (
-	authStatePath    = authstate.Path
-	procStatPath     = "/proc/1/stat"
-	procBootTimePath = "/proc/stat"
+	authStatePath        = authstate.Path
+	procStatPath         = "/proc/1/stat"
+	procBootTimePath     = "/proc/stat"
+	agentLoopCrashedPath = "/eidos/run/agent-loop-crashed.json"
 )
 
 // RuntimeState is the JSON shape emitted by `eidos forge runtime-state`.
@@ -33,6 +34,14 @@ type RuntimeState struct {
 	AuthRequired       bool   `json:"auth_required"`
 	ContainerStartedAt int64  `json:"container_started_at"`
 
+	// CrashedExitCode and CrashedLastError carry the last agent-loop
+	// failure when phase == "crashed". The crash-loop guard in
+	// cmd/eidos/supervisor/run.go writes /eidos/run/agent-loop-crashed.json
+	// after 5 deaths in 60s; surfacing it here gives the operator a
+	// pointer to investigate without docker-execing in.
+	CrashedExitCode  int    `json:"crashed_exit_code,omitempty"`
+	CrashedLastError string `json:"crashed_last_error,omitempty"`
+
 	// Session fields, omitted when agent-state.json is absent.
 	// Turns is the live counter from agent-state.json (every result-event
 	// is one turn; signal-driven and mailbox-driven turns both count).
@@ -40,6 +49,16 @@ type RuntimeState struct {
 	SessionStartedAt int64  `json:"session_started_at,omitempty"`
 	Turns            int    `json:"turns,omitempty"`
 	LastEventAt      int64  `json:"last_event_at,omitempty"`
+}
+
+// agentLoopCrashed mirrors the on-disk
+// /eidos/run/agent-loop-crashed.json schema written by the supervisor's
+// crash-loop guard. Only the fields runtime-state surfaces are decoded.
+type agentLoopCrashed struct {
+	V         int    `json:"v"`
+	HaltedAt  string `json:"halted_at"`
+	ExitCode  int    `json:"exit_code"`
+	LastError string `json:"last_error"`
 }
 
 // runtimeStateSchemaVersion is bumped when RuntimeState's JSON contract
@@ -75,21 +94,30 @@ func newRuntimeStateCmd() *cobra.Command {
 	}
 }
 
-// computeRuntimeState derives the phase from the on-disk authstate and
-// agent-state.json signals. Pure-ish (`now` injected for testability;
-// file paths are package-level vars overridable from tests).
+// computeRuntimeState derives the phase from the on-disk authstate,
+// agent-loop crash marker, and agent-state.json signals. Pure-ish
+// (`now` injected for testability; file paths are package-level vars
+// overridable from tests).
 //
 // Phase derivation (single source of truth: agent-state.json under the
-// always-on agent-loop, with authstate as a short-circuit):
+// always-on agent-loop, with auth and crash short-circuits):
 //
-//	authstate present                 → "auth-required"
-//	agent-state.json missing / empty  → "starting"
-//	agentState.Dreaming               → "dreaming"
-//	agentState.ClaudeBusy             → "thinking"
-//	otherwise                         → "idle"
+//	authstate present                       → "auth-required"
+//	agent-loop-crashed.json present         → "crashed"
+//	agent-state.json missing / empty        → "starting"
+//	agentState.Dreaming                     → "dreaming"
+//	agentState.ClaudeBusy                   → "thinking"
+//	otherwise                               → "idle"
 //
 // "offline" is host-derived (the container itself isn't running) and
-// never emitted by this command.
+// never emitted by this command. The crash short-circuit overrides the
+// agent-state read because once the supervisor halts restart, the
+// agent-state snapshot is stale and surfacing "thinking" / "idle" from
+// it would be misleading. auth-required wins over crashed because it
+// is the more actionable signal (the operator's next step is
+// `eidos forge login`); a crashed marker may itself be the downstream
+// consequence of failed auth, in which case fixing auth is what
+// unblocks the loop.
 //
 // The `now` parameter is currently unused but retained so callers and
 // tests don't need to be reworked when future phases need wall-clock
@@ -101,6 +129,13 @@ func computeRuntimeState(_ time.Time) RuntimeState {
 	if state, _ := authstate.ReadAt(authStatePath); state != nil {
 		rs.AuthRequired = true
 		rs.Phase = "auth-required"
+		return rs
+	}
+
+	if crashed, ok := readAgentLoopCrashed(agentLoopCrashedPath); ok {
+		rs.Phase = "crashed"
+		rs.CrashedExitCode = crashed.ExitCode
+		rs.CrashedLastError = crashed.LastError
 		return rs
 	}
 
@@ -124,6 +159,23 @@ func computeRuntimeState(_ time.Time) RuntimeState {
 	rs.Turns = as.WakesInSession
 	rs.LastEventAt = as.LastEventAt
 	return rs
+}
+
+// readAgentLoopCrashed reads /eidos/run/agent-loop-crashed.json if
+// present. Returns (zero, false) on missing-file or parse failure —
+// the caller treats that as "no crash marker," which is also the
+// correct behaviour when the supervisor binary in the container
+// predates the crash-loop guard.
+func readAgentLoopCrashed(path string) (agentLoopCrashed, bool) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return agentLoopCrashed{}, false
+	}
+	var c agentLoopCrashed
+	if err := json.Unmarshal(body, &c); err != nil {
+		return agentLoopCrashed{}, false
+	}
+	return c, true
 }
 
 // readContainerStartTime parses /proc/1/stat field 22 (start_time, in clock
