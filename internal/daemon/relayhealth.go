@@ -5,16 +5,36 @@ import (
 	"time"
 )
 
-// RelayHealth captures per-URL subscription state. Daemon owns the source
-// of truth; consumers read snapshots via IPC (relays.health) or the
-// dashboard SSE event hub.
+// RelayHealth captures per-URL relay state. Daemon owns the source of
+// truth; consumers read snapshots via state.get relays or the dashboard
+// SSE event hub.
+//
+// Two independent signals share one record:
+//   - Subscription health — State, LastError, LastEventAt — driven by the
+//     Subscribe pump.
+//   - Publish health — LastPublishOk, LastPublishErr, LastPublishAt —
+//     driven by Publish results.
+//
+// They are independent because a relay can hold a sub connection alive
+// while rejecting kind-14 wraps (spam filter, content rules, per-pubkey
+// rate limits — NIP-20 OK false). "Subscribe is happy" does not imply
+// "Publish will be accepted"; only the latter answers "did my message
+// actually leave the host".
 type RelayHealth struct {
 	URL         string `json:"url"`
 	Role        string `json:"role"`  // "home" | "fallback" | "contact" | "extra"
 	State       string `json:"state"` // "pending" | "connecting" | "connected" | "error" | "auth-failed"
 	LastError   string `json:"last_error,omitempty"`
 	LastEventAt int64  `json:"last_event_at,omitempty"` // unix seconds; 0 when never
-	UpdatedAt   int64  `json:"updated_at"`
+
+	// LastPublish* track the most recent Publish outcome for this URL,
+	// orthogonal to State. LastPublishAt == 0 means "no publish attempted
+	// yet"; consumers must check that before drawing inferences.
+	LastPublishOk  bool   `json:"last_publish_ok,omitempty"`
+	LastPublishErr string `json:"last_publish_err,omitempty"`
+	LastPublishAt  int64  `json:"last_publish_at,omitempty"`
+
+	UpdatedAt int64 `json:"updated_at"`
 }
 
 // relayHealthStore is the in-memory map of URL → state. Concurrent-safe.
@@ -67,6 +87,35 @@ func (s *relayHealthStore) markEvent(url string) {
 	if h, ok := s.m[url]; ok {
 		h.LastEventAt = time.Now().Unix()
 	}
+}
+
+// setPublish records the outcome of the most recent Publish for url. ok
+// mirrors PublishResult.OK; reason carries the relay's error string when
+// ok=false. Updates only the LastPublish* fields — subscription state
+// (State / LastError / LastEventAt) is untouched. Returns the resulting
+// RelayHealth so callers can fan it out (mirrors setState's contract).
+func (s *relayHealthStore) setPublish(url string, ok bool, reason string) RelayHealth {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	h, found := s.m[url]
+	if !found {
+		// Match setRole's initial state — "pending" is the
+		// schema-defined neutral value the dashboard's
+		// `state-pill is-{{.State}}` rule has CSS for. Leaving
+		// State empty would render as the invalid class `is-`
+		// when state.get relays exposes this publish-only entry.
+		h = &RelayHealth{URL: url, State: "pending"}
+		s.m[url] = h
+	}
+	h.LastPublishOk = ok
+	if ok {
+		h.LastPublishErr = ""
+	} else {
+		h.LastPublishErr = reason
+	}
+	h.LastPublishAt = time.Now().Unix()
+	h.UpdatedAt = h.LastPublishAt
+	return *h
 }
 
 // snapshot returns a copy of all current entries. Order is unspecified.

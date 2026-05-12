@@ -5,8 +5,9 @@
   </td>
   <td class="relay-url"><code>{{.URL}}</code></td>
   <td class="relay-state">
-    <span class="state-pill is-{{.State}}" title="{{if .LastError}}{{.LastError}}{{else}}{{.State}}{{end}}">
-      <span class="state-dot" aria-hidden="true"></span>{{.State}}
+    <span class="state-pill is-{{.State}}{{if and .PublishKnown (not .PublishOk)}} is-publish-failing{{end}}"
+          title="{{if and .PublishKnown (not .PublishOk)}}publish failing {{.PublishAgo}} ago{{if .PublishErr}}: {{.PublishErr}}{{end}}{{else if .LastError}}{{.LastError}}{{else}}{{.State}}{{end}}">
+      <span class="state-dot" aria-hidden="true"></span>{{.State}}{{if and .PublishKnown (not .PublishOk)}} · publish ✗{{end}}
     </span>
   </td>
   <td class="relay-seen">

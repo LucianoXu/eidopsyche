@@ -64,6 +64,73 @@ func TestSettingsRelays_FragmentForHTMX(t *testing.T) {
 	}
 }
 
+// TestSettingsRelays_PublishFailingPillRendered: when a relay's sub
+// connection is alive but every publish has been rejected, the row's
+// state-pill must carry the `is-publish-failing` modifier class AND
+// the failure reason must appear in the title attribute so an operator
+// hovering the cell sees why publishes aren't landing — without this,
+// the dashboard reports a bare `connected` while real send attempts
+// fail with NO_RELAYS_REACHABLE (the original alice-thinks-the-relay-
+// is-offline incident on 2026-05-12).
+func TestSettingsRelays_PublishFailingPillRendered(t *testing.T) {
+	deps := fakeDeps{
+		ownRelays: []OwnRelay{
+			{URL: "wss://home.example/", Role: "home", AddedAt: 1715000000},
+		},
+		relayHealthRows: []RelayState{
+			{
+				URL: "wss://home.example/", Role: "home", State: "connected",
+				LastEventAt:    1715200000,
+				LastPublishOk:  false,
+				LastPublishErr: "blocked: spam",
+				LastPublishAt:  1715200500,
+			},
+		},
+	}
+	srv := newTestServer(t, deps)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/settings/relays", nil)
+	req.Header.Set("HX-Request", "true")
+	srv.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	for _, want := range []string{
+		`is-publish-failing`,
+		`blocked: spam`,
+		`publish ✗`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("publish-failing relay row missing %q\n--- body ---\n%s", want, body)
+		}
+	}
+}
+
+// TestSettingsRelays_PublishOkOmitsFailingPill: positive case — when the
+// most recent publish succeeded, the failing modifier must NOT appear,
+// otherwise every healthy relay would render with a false alarm.
+func TestSettingsRelays_PublishOkOmitsFailingPill(t *testing.T) {
+	deps := fakeDeps{
+		ownRelays: []OwnRelay{
+			{URL: "wss://home.example/", Role: "home"},
+		},
+		relayHealthRows: []RelayState{
+			{
+				URL: "wss://home.example/", Role: "home", State: "connected",
+				LastPublishOk: true,
+				LastPublishAt: 1715200500,
+			},
+		},
+	}
+	srv := newTestServer(t, deps)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/settings/relays", nil)
+	req.Header.Set("HX-Request", "true")
+	srv.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if strings.Contains(body, "is-publish-failing") {
+		t.Errorf("healthy publish should not render publish-failing modifier\n%s", body)
+	}
+}
+
 func TestSettingsRelays_FullPageOnDirectNav(t *testing.T) {
 	srv := newTestServer(t, newPhase4Deps())
 	rec := httptest.NewRecorder()

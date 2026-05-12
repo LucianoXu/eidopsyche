@@ -1370,6 +1370,12 @@ table.relays-table tbody tr.relay-row.is-home td.relay-url code { border-left: 2
 .state-pill.is-auth-failed   .state-dot { background: var(--warn); }
 .state-pill.is-unknown       { color: var(--fg-mute); }
 .state-pill.is-unknown       .state-dot { background: transparent; border: 1px solid var(--fg-mute); }
+/* is-publish-failing overlays any subscription state: sub may be connected
+   while publishes are rejected (NIP-20 OK false, spam filter, rate limit).
+   Declared after is-connected so the warn palette wins by cascade order
+   on the common "is-connected is-publish-failing" pair. */
+.state-pill.is-publish-failing { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+.state-pill.is-publish-failing .state-dot { background: var(--warn); }
 
 @keyframes state-blink {
   0%,100% { opacity: 1; }

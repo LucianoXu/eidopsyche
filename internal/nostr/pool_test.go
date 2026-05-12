@@ -280,6 +280,42 @@ func (s *fakeSigner) Sign(ev *gnostr.Event) error {
 }
 func (s *fakeSigner) PublicHex() string { return s.pub }
 
+// TestPool_Publish_PropagatesPublisherResult drives the publisher seam
+// to assert that PublishResult.OK and PublishResult.Reason carry exactly
+// what the underlying r.Publish call returned. Callers (daemon) depend on
+// Reason being a faithful copy of the relay's NIP-20 rejection text so
+// they can surface it in the NO_RELAYS_REACHABLE error path; this test
+// pins the contract without a real WebSocket round-trip.
+func TestPool_Publish_PropagatesPublisherResult(t *testing.T) {
+	p := NewPool()
+	p.dialer = func(_ context.Context, url string) (*gnostr.Relay, error) {
+		return &gnostr.Relay{URL: url}, nil
+	}
+	p.alive = func(_ *gnostr.Relay) bool { return true }
+	p.publisher = func(r *gnostr.Relay, _ context.Context, _ gnostr.Event) error {
+		if r.URL == "ws://test/ok" {
+			return nil
+		}
+		return errors.New("blocked: spam")
+	}
+
+	results := p.Publish(context.Background(),
+		[]string{"ws://test/ok", "ws://test/bad"}, &gnostr.Event{})
+	if len(results) != 2 {
+		t.Fatalf("len(results) = %d, want 2", len(results))
+	}
+	byURL := map[string]PublishResult{}
+	for _, r := range results {
+		byURL[r.Relay] = r
+	}
+	if r := byURL["ws://test/ok"]; !r.OK || r.Reason != "" {
+		t.Errorf("ok result = %+v, want OK=true Reason=\"\"", r)
+	}
+	if r := byURL["ws://test/bad"]; r.OK || r.Reason != "blocked: spam" {
+		t.Errorf("bad result = %+v, want OK=false Reason=\"blocked: spam\"", r)
+	}
+}
+
 func TestPool_SignFunc_RefusesURLMismatch(t *testing.T) {
 	signer := &fakeSigner{pub: "abcd"}
 	p := NewPoolWithSigner(signer)

@@ -247,6 +247,10 @@ func (d *Daemon) InviteRedeem(ctx context.Context, token string) (*InviteRedeemR
 	pubCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	res := d.Pool.Publish(pubCtx, urls, wrap)
+	// Invite redemption is user-visible — feed its publish results into
+	// RelayHealth so `whoami` / dashboard reflect reality. The self-wrap
+	// below is a best-effort echo-suppression copy and must not feed it.
+	d.recordPublishHealth(res)
 	if selfWrap != nil {
 		_ = d.Pool.Publish(pubCtx, urls, selfWrap)
 	}
