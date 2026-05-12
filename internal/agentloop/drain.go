@@ -13,6 +13,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"sync/atomic"
 	"time"
 
@@ -57,13 +58,38 @@ type DrainerConfig struct {
 	// Dreaming returns the current dreaming-flag value, included in the
 	// agent-state.json snapshot for observability.
 	Dreaming func() bool
+
+	// Store, when non-nil, enables per-turn transcript file writes.
+	// The drainer opens a fresh wake-<id>.ndjson on the first non-system
+	// event after each `result` and finalizes it on the next `result`.
+	Store *transcript.Store
+
+	// NextTurnID is called by the drainer at turn-open time to assign
+	// the transcript filename. Wake-driven turns return the wake.ID;
+	// mailbox-driven turns return a synthesized "mailbox-<unix_nano>".
+	NextTurnID func() string
+
+	// NextTurnReason is called at turn-open time to stamp the index
+	// Entry's Reason field. Returns the wake.Reason string for
+	// wake-driven turns; "mailbox" for synthetic turns.
+	NextTurnReason func() string
+}
+
+// transcriptHandle holds the open file and ID for the current turn.
+type transcriptHandle struct {
+	id   string
+	file *os.File
 }
 
 // Drainer reads stream-json from src, parses each line into a
-// transcript.Event, drives the state machine, and writes agent-state
-// snapshots. Transcript-handle switching lands in Stage 5.1.
+// transcript.Event, drives the state machine, writes agent-state
+// snapshots, and (when Store is configured) rotates per-turn
+// transcript files at `result` boundaries.
 type Drainer struct {
-	cfg DrainerConfig
+	cfg       DrainerConfig
+	curHandle *transcriptHandle
+	turnStart int64
+	counter   *transcript.Counter
 }
 
 // NewDrainer constructs a drainer; call Run with the reader.
@@ -122,6 +148,29 @@ func (d *Drainer) handleLine(line []byte) {
 		return
 	}
 	now := d.cfg.Clock()
+
+	// Open a new per-turn transcript on the first non-system event
+	// arriving while no handle is open.
+	if d.curHandle == nil && d.cfg.Store != nil && d.cfg.NextTurnID != nil &&
+		ev.Type != transcript.TypeSystem {
+		id := d.cfg.NextTurnID()
+		f, openErr := d.cfg.Store.Open(id)
+		if openErr != nil {
+			fmt.Fprintf(stderr(), "agent-loop: drain: open transcript: %v\n", openErr)
+		} else {
+			d.curHandle = &transcriptHandle{id: id, file: f}
+			d.turnStart = now.Unix()
+			d.counter = &transcript.Counter{}
+		}
+	}
+
+	if d.curHandle != nil && d.curHandle.file != nil {
+		_, _ = d.curHandle.file.Write(line)
+	}
+	if d.counter != nil {
+		d.counter.Observe(ev)
+	}
+
 	prevBusy := d.cfg.StateMachine.Snapshot().ClaudeBusy
 	d.cfg.StateMachine.Observe(ev, now)
 	curBusy := d.cfg.StateMachine.Snapshot().ClaudeBusy
@@ -136,9 +185,43 @@ func (d *Drainer) handleLine(line []byte) {
 		if d.cfg.OnTurnEnd != nil {
 			d.cfg.OnTurnEnd()
 		}
+		d.finalizeCurrentTurn(now.Unix())
 	}
 	d.writeSnapshot()
-	_ = ev // transcript wiring lands in Stage 5.1
+}
+
+// finalizeCurrentTurn closes the active transcript file and writes its
+// index entry. No-op when no handle is open or Store is unconfigured.
+func (d *Drainer) finalizeCurrentTurn(endedAt int64) {
+	if d.curHandle == nil || d.cfg.Store == nil {
+		return
+	}
+	reason := ""
+	if d.cfg.NextTurnReason != nil {
+		reason = d.cfg.NextTurnReason()
+	}
+	entry := transcript.Entry{
+		ID:        d.curHandle.id,
+		Reason:    reason,
+		StartedAt: d.turnStart,
+		EndedAt:   endedAt,
+		OK:        true,
+	}
+	if d.counter != nil {
+		entry.ToolUseCount = d.counter.ToolUseCount
+		entry.ThinkingBlocks = d.counter.ThinkingBlocks
+		if d.counter.Result != nil && d.counter.Result.TotalCostUSD != nil {
+			cost := *d.counter.Result.TotalCostUSD
+			entry.CostUSD = &cost
+		}
+	}
+	_ = d.curHandle.file.Close()
+	if err := d.cfg.Store.Finalize(entry,
+		transcript.DefaultMaxCount, transcript.DefaultMaxBytes); err != nil {
+		fmt.Fprintf(stderr(), "agent-loop: drain: finalize: %v\n", err)
+	}
+	d.curHandle = nil
+	d.counter = nil
 }
 
 // writeSnapshot serializes the current state to agent-state.json if

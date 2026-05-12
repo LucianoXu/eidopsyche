@@ -3,10 +3,13 @@ package agentloop
 import (
 	"context"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/LucianoXu/eidopsyche/internal/transcript"
 )
 
 func TestDrain_FeedsStateMachineAndTranscript(t *testing.T) {
@@ -47,5 +50,52 @@ func TestDrain_FeedsStateMachineAndTranscript(t *testing.T) {
 	}
 	if snap.LastEventType != "result" {
 		t.Errorf("last event type: got %q, want result", snap.LastEventType)
+	}
+}
+
+func TestDrain_OpensAndFinalizesPerTurnTranscript(t *testing.T) {
+	dir := t.TempDir()
+	sm := NewStateMachine(time.Unix(1715500000, 0))
+
+	src := strings.NewReader(strings.Join([]string{
+		`{"type":"system","subtype":"init","session_id":"s1"}`,
+		`{"type":"assistant","session_id":"s1"}`,
+		`{"type":"result","subtype":"success","session_id":"s1","total_cost_usd":0.01}`,
+		``,
+	}, "\n"))
+
+	store, err := transcript.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := NewDrainer(DrainerConfig{
+		TranscriptsDir: dir,
+		Store:          store,
+		StateMachine:   sm,
+		Clock:          func() time.Time { return time.Unix(1715500100, 0) },
+		NextTurnID:     func() string { return "wake-1" },
+		NextTurnReason: func() string { return "heartbeat" },
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := d.Run(ctx, src); err != nil && err != io.EOF {
+		t.Fatalf("drain: %v", err)
+	}
+
+	wakePath := store.WakePath("wake-1")
+	body, err := os.ReadFile(wakePath)
+	if err != nil {
+		t.Fatalf("transcript file missing: %v", err)
+	}
+	if !strings.Contains(string(body), `"type":"assistant"`) {
+		t.Errorf("transcript should contain assistant event, got: %s", body)
+	}
+	idx, err := store.ReadIndex()
+	if err != nil {
+		t.Fatalf("index: %v", err)
+	}
+	if len(idx.Wakes) != 1 || idx.Wakes[0].ID != "wake-1" {
+		t.Errorf("index entries: got %+v, want one wake-1 entry", idx.Wakes)
 	}
 }
