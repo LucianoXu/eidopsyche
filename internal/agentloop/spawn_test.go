@@ -82,3 +82,36 @@ func TestSessionJsonlPath_EmptyDir(t *testing.T) {
 		t.Errorf("SessionJsonlPath with empty dir = %q; want empty", path)
 	}
 }
+
+func TestSpawnedClaude_WaitIsIdempotent(t *testing.T) {
+	c, err := SpawnClaude(SpawnOpts{
+		Binary:         stubClaudeBin,
+		Mode:           SessionNew,
+		SessionUUID:    "test-idempotent",
+		IdentityPrompt: "test",
+		Cwd:            t.TempDir(),
+		ClaudeDir:      t.TempDir(),
+		ExtraArgs:      []string{"--mode", "crash-after", "--at-n", "1"},
+	})
+	if err != nil {
+		t.Fatalf("SpawnClaude: %v", err)
+	}
+	// Send one stdin line so the stub processes a turn, then crashes.
+	_, _ = c.Stdin.Write([]byte(`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"x"}]}}` + "\n"))
+	c.Stdin.Close()
+
+	// Drain stdout so the stub can exit.
+	go func() { _, _ = io.Copy(io.Discard, c.Stdout) }()
+
+	first := c.Wait()
+	if first == nil {
+		t.Fatalf("expected first Wait() to return crash exit error, got nil")
+	}
+	second := c.Wait()
+	if second == nil {
+		t.Errorf("expected second Wait() to return the same error, got nil (idempotency broken)")
+	}
+	if first.Error() != second.Error() {
+		t.Errorf("Wait() not idempotent: first=%v, second=%v", first, second)
+	}
+}

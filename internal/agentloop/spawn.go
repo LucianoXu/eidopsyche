@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"syscall"
 
 	"github.com/LucianoXu/eidopsyche/internal/claudeauth"
@@ -58,11 +59,18 @@ type SpawnedClaude struct {
 	Stderr io.ReadCloser
 	// WaitErr receives the process Wait() error exactly once, then is closed.
 	WaitErr chan error
+
+	waitOnce   sync.Once
+	waitResult error
 }
 
-// Wait blocks until the underlying process exits and returns its exit error.
-// Idempotent: subsequent calls return immediately with the same value.
-func (s *SpawnedClaude) Wait() error { return <-s.WaitErr }
+// Wait blocks until the underlying process exits and returns the
+// Wait() error. Idempotent: subsequent calls return the same value
+// without re-reading the channel.
+func (s *SpawnedClaude) Wait() error {
+	s.waitOnce.Do(func() { s.waitResult = <-s.WaitErr })
+	return s.waitResult
+}
 
 // SpawnClaude starts a claude subprocess in stream-json input/output mode and
 // returns its three pipes plus a WaitErr channel.
