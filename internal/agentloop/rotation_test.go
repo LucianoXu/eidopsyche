@@ -139,8 +139,7 @@ func TestRotation_SpawnsNewSessionAfterGraceTimeoutKillsClaude(t *testing.T) {
 	}
 }
 
-// parsedEvent is defined in state_test.go; here we provide a local copy
-// so rotation_test.go can be self-contained when run alone.
+// parsedEvent panics on parse error so tests can stay terse.
 func parsedEvent(t *testing.T, line string) transcript.Event {
 	t.Helper()
 	ev, err := transcript.ParseEvent([]byte(line))
