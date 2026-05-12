@@ -80,10 +80,10 @@ func startChildren(ctx context.Context, sp ChildSpawner) error {
 	// sudo (NOPASSWD per /etc/sudoers.d/eidos) to spawn crond as root.
 	// The heartbeat command then runs as eidos via crond's setuid
 	// because the crontab file is named "eidos".
-	if err := sp.Spawn(ctx, "sudo", "-n", "crond", "-f", "-c", "/var/spool/cron/crontabs"); err != nil {
+	if err := sp.Spawn(ctx, ChildPolicy{OnExit: CancelSupervisor}, "sudo", "-n", "crond", "-f", "-c", "/var/spool/cron/crontabs"); err != nil {
 		return err
 	}
-	if err := sp.Spawn(ctx, "eidos", "gate", "daemon", "--state-dir", gateDir); err != nil {
+	if err := sp.Spawn(ctx, ChildPolicy{OnExit: CancelSupervisor}, "eidos", "gate", "daemon", "--state-dir", gateDir); err != nil {
 		return err
 	}
 
