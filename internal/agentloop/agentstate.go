@@ -28,8 +28,11 @@ type AgentState struct {
 }
 
 // WriteAgentState atomically replaces the file at path with the
-// serialized state. Uses tmp + rename + fsync-dir (same pattern as
-// internal/sessionstate). Caller must ensure path's parent dir exists.
+// serialized state. Uses tmp + fsync + rename, with cleanup of the
+// tmp file on any error path. Same atomic-write shape as
+// internal/sessionstate, with an added fsync on the tmp file before
+// rename so observers see fully-flushed bytes after a crash.
+// Caller must ensure path's parent dir exists.
 func WriteAgentState(path string, st AgentState) error {
 	if st.V == 0 {
 		st.V = SchemaVersion
