@@ -3,5 +3,5 @@
 package supervisor
 
 func init() {
-	rootCmd.AddCommand(newRunCmd(), newAgentRunnerCmd(), newAgentLoopCmd())
+	rootCmd.AddCommand(newRunCmd(), newAgentLoopCmd())
 }
