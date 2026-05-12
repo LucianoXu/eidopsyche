@@ -50,18 +50,6 @@ func TestRelayHealth_RoleAndStateTransitions(t *testing.T) {
 	}
 }
 
-// TestRelayHealth_SetPublishDoesNotMaskFailureFromSecondCall: codex review
-// on the PR flagged a real risk — sendMessage publishes twice to the same
-// URL (recipient wrap, then best-effort self-copy). If both calls fed
-// setPublish, a self-copy success would overwrite a recipient failure on
-// the same relay and operators/mind-forms would see `publish ok` while
-// the actual user-visible send had failed. The structural fix lives in
-// internal/daemon.(*Daemon).recordPublishHealth (only the primary publish
-// feeds it); this store-level test pins the secondary lemma: setPublish
-// itself does NOT have "remember the worst outcome" magic — last writer
-// wins. The test exists to make the trade-off explicit so a future
-// refactor can't accidentally regress the recordPublishHealth call sites
-// without breaking a test.
 // TestRelayHealth_SetPublishOnFreshURLInitializesState: a publish to a URL
 // the subscription pump has never touched (e.g. a configured fallback or
 // invite-issuer relay) creates a new RelayHealth entry. The State field
@@ -82,6 +70,18 @@ func TestRelayHealth_SetPublishOnFreshURLInitializesState(t *testing.T) {
 	}
 }
 
+// TestRelayHealth_SetPublishDoesNotMaskFailureFromSecondCall: codex review
+// on the PR flagged a real risk — sendMessage publishes twice to the same
+// URL (recipient wrap, then best-effort self-copy). If both calls fed
+// setPublish, a self-copy success would overwrite a recipient failure on
+// the same relay and operators/mind-forms would see `publish ok` while
+// the actual user-visible send had failed. The structural fix lives in
+// internal/daemon.(*Daemon).recordPublishHealth (only the primary publish
+// feeds it); this store-level test pins the secondary lemma: setPublish
+// itself does NOT have "remember the worst outcome" magic — last writer
+// wins. The test exists to make the trade-off explicit so a future
+// refactor can't accidentally regress the recordPublishHealth call sites
+// without breaking a test.
 func TestRelayHealth_SetPublishDoesNotMaskFailureFromSecondCall(t *testing.T) {
 	s := newRelayHealthStore()
 	s.setPublish("ws://a", false, "blocked: spam")
