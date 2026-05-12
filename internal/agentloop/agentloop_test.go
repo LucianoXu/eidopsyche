@@ -139,3 +139,13 @@ func TestAgentLoop_DreamRotationProducesNewSession(t *testing.T) {
 	wakeStdinW.Close()
 	<-done
 }
+
+// TestAgentLoop_AuthRequiredHaltsAgentLoop documents the auth-required
+// coverage gap: Run calls os.Exit(47) on ClaudeAuthRequired, which is not
+// safely unit-testable (it would kill the test process). The stub's
+// auth-required mode exits 47 with the correct stderr marker, and
+// ClassifyClaudeExit is tested independently in internal/claudeexec.
+// Full coverage of the agent-loop wiring requires the integration harness.
+func TestAgentLoop_AuthRequiredHaltsAgentLoop(t *testing.T) {
+	t.Skip("os.Exit on auth-required is not unit-testable; covered by integration scaffold")
+}

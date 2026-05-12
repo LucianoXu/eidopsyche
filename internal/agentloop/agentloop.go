@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/authstate"
+	"github.com/LucianoXu/eidopsyche/internal/claudeexec"
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
 	"github.com/LucianoXu/eidopsyche/internal/sessionstate"
@@ -139,26 +141,32 @@ func Run(ctx context.Context, opts RunOpts) error {
 		return st.SessionStartedAt
 	}
 
-	// ── 9. Drainer ────────────────────────────────────────────────────────
-	d := NewDrainer(DrainerConfig{
-		TranscriptsDir:   opts.TranscriptsDir,
-		Store:            store,
-		StateMachine:     sm,
-		Clock:            time.Now,
-		AgentStatePath:   opts.AgentStatePath,
-		OutstandingWakes: &outstandingWakes,
-		ResultsSeen:      &resultsSeen,
-		SessionID:        currentSessionID,
-		SessionStartedAt: currentSessionStartedAt,
-		WakesInSession:   func() int { return int(wakesInSession.Load()) },
-		Dreaming:         dw.Dreaming,
-		NextTurnID:       func() string { return fmt.Sprintf("turn-%d", time.Now().UnixNano()) },
-		NextTurnReason:   func() string { return "wake" },
-		OnTurnEnd: func() {
-			_ = sessionstate.IncrementWake(opts.SessionStatePath)
-			wakesInSession.Add(1)
-		},
-	})
+	// ── 9. Drainer factory ────────────────────────────────────────────────
+	// makeDrainer returns a fresh *Drainer with zeroed internal state.
+	// A new instance is created for each claude spawn so stale
+	// curHandle/turnStart/counter from the previous process never leak in.
+	makeDrainer := func() *Drainer {
+		return NewDrainer(DrainerConfig{
+			TranscriptsDir:   opts.TranscriptsDir,
+			Store:            store,
+			StateMachine:     sm,
+			Clock:            time.Now,
+			AgentStatePath:   opts.AgentStatePath,
+			OutstandingWakes: &outstandingWakes,
+			ResultsSeen:      &resultsSeen,
+			SessionID:        currentSessionID,
+			SessionStartedAt: currentSessionStartedAt,
+			WakesInSession:   func() int { return int(wakesInSession.Load()) },
+			Dreaming:         dw.Dreaming,
+			NextTurnID:       func() string { return fmt.Sprintf("turn-%d", time.Now().UnixNano()) },
+			NextTurnReason:   func() string { return "wake" },
+			OnTurnEnd: func() {
+				_ = sessionstate.IncrementWake(opts.SessionStatePath)
+				wakesInSession.Add(1)
+			},
+		})
+	}
+	var d *Drainer = makeDrainer()
 
 	// ── 10. Forwarder ─────────────────────────────────────────────────────
 	fw := NewForwarder(ForwarderConfig{
@@ -189,6 +197,13 @@ func Run(ctx context.Context, opts RunOpts) error {
 	// ── 13. Main supervision loop ─────────────────────────────────────────
 	// Handles ctx cancel, rotation requests, forwarder EOF, and claude exit.
 	claudeP := claude
+	// stderrTail captures the last 16 KiB of claude's stderr so
+	// ClassifyClaudeExit can inspect it on exit. A new capture is created
+	// for each claude spawn (rotation + session-not-found respawn).
+	stderrTail := newStderrCapture(16 << 10)
+	go func(sc *stderrCapture, r io.ReadCloser) {
+		_, _ = io.Copy(io.MultiWriter(os.Stderr, sc), r)
+	}(stderrTail, claude.Stderr)
 	for {
 		select {
 		case <-ctx.Done():
@@ -238,8 +253,16 @@ func Run(ctx context.Context, opts RunOpts) error {
 					firstWakeFlag.Store(true)
 					outstandingWakes.Store(0)
 					resultsSeen.Store(0)
-					// Restart the drainer goroutine on the new stdout.
+					// Fresh drainer — old instance's goroutine sees EOF on the
+					// closed stdout of the previous claude and returns; its
+					// stale curHandle/turnStart state never touches the new process.
+					d = makeDrainer()
 					go func(stdout io.ReadCloser) { _ = d.Run(subCtx, stdout) }(claudeP.Stdout)
+					// Fresh stderr capture for the new process.
+					stderrTail = newStderrCapture(16 << 10)
+					go func(sc *stderrCapture, r io.ReadCloser) {
+						_, _ = io.Copy(io.MultiWriter(os.Stderr, sc), r)
+					}(stderrTail, claudeP.Stderr)
 					// Point the forwarder at the new claude stdin and drain the dream backlog.
 					fw.cfg.ClaudeStdin = claudeP.Stdin
 					for _, sig := range dw.DrainBacklog() {
@@ -263,6 +286,49 @@ func Run(ctx context.Context, opts RunOpts) error {
 			forwardDone = nil
 
 		case waitErr := <-claudeP.WaitErr:
+			verdict := claudeexec.ClassifyClaudeExit(waitErr, claudeP.Cmd.ProcessState, []byte(stderrTail.String()))
+			if verdict.Kind == claudeexec.ClaudeAuthRequired {
+				if werr := authstate.Write(time.Now()); werr != nil {
+					fmt.Fprintf(stderr(), "agent-loop: write authstate: %v\n", werr)
+				}
+				// Exit with code 47 so the supervisor's classify policy halts restarts.
+				return cliExitErr(47, fmt.Errorf("claude requires auth: %w", waitErr))
+			}
+			if matchSessionNotFound(stderrTail.String()) {
+				fmt.Fprintf(stderr(), "agent-loop: claude reports session %s not found; minting fresh\n", currentSessionID())
+				if cErr := sessionstate.Clear(opts.SessionStatePath); cErr != nil {
+					return fmt.Errorf("clear session after stderr fallback: %w", cErr)
+				}
+				fresh, mErr := sessionstate.Mint(opts.SessionStatePath, time.Now())
+				if mErr != nil {
+					return fmt.Errorf("mint session after stderr fallback: %w", mErr)
+				}
+				firstWakeFlag.Store(true)
+				outstandingWakes.Store(0)
+				resultsSeen.Store(0)
+				nc, sErr := SpawnClaude(SpawnOpts{
+					Binary:         opts.ClaudeBin,
+					Mode:           SessionNew,
+					SessionUUID:    fresh.SessionID,
+					Model:          cfg.MindForm.Model,
+					IdentityPrompt: string(identityBytes),
+					Cwd:            opts.OntologyDir,
+					ClaudeDir:      opts.ClaudeDir,
+					ExtraArgs:      opts.ExtraClaudeArgs,
+				})
+				if sErr != nil {
+					return fmt.Errorf("respawn claude with fresh session: %w", sErr)
+				}
+				claudeP = nc
+				// Fresh drainer and stderr capture for the respawned process.
+				d = makeDrainer()
+				go func(stdout io.ReadCloser) { _ = d.Run(subCtx, stdout) }(claudeP.Stdout)
+				stderrTail = newStderrCapture(16 << 10)
+				go func(sc *stderrCapture, r io.ReadCloser) {
+					_, _ = io.Copy(io.MultiWriter(os.Stderr, sc), r)
+				}(stderrTail, claudeP.Stderr)
+				continue
+			}
 			return fmt.Errorf("claude exited: %w", waitErr)
 		}
 	}

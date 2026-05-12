@@ -156,6 +156,37 @@ func claudeSpawnEnv(claudeDir string) []string {
 	return env
 }
 
+// stderrCapture is a thread-safe ring buffer that holds the last maxSize bytes
+// of claude's stderr for ClassifyClaudeExit consumption.
+type stderrCapture struct {
+	mu      sync.Mutex
+	buf     []byte
+	maxSize int
+}
+
+func newStderrCapture(maxSize int) *stderrCapture {
+	return &stderrCapture{maxSize: maxSize}
+}
+
+// Write appends p to the buffer, trimming the oldest bytes when the buffer
+// exceeds maxSize. Safe for concurrent use.
+func (c *stderrCapture) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.buf = append(c.buf, p...)
+	if len(c.buf) > c.maxSize {
+		c.buf = c.buf[len(c.buf)-c.maxSize:]
+	}
+	return len(p), nil
+}
+
+// String returns a snapshot of the buffer as a string. Safe for concurrent use.
+func (c *stderrCapture) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return string(c.buf)
+}
+
 // EncodeCWD replicates Claude Code's encoded-CWD scheme for the
 // projects/<encoded>/ session jsonl path. Non-alphanumeric runes are
 // replaced with '-'.
