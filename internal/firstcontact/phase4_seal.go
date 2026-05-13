@@ -26,7 +26,7 @@ type VolumeWriter func(ctx context.Context, slug, relPath string, body []byte) e
 // non-empty content, then reads and returns <volume>/<bodyPath>.
 //
 // gatePath is the supervisor's authoritative birth-completion marker
-// (essence/born_at). The agent's birth boot prompt is explicit that
+// (self/born_at). The agent's birth boot prompt is explicit that
 // born_at is written LAST, after identity / secret / response — so
 // once born_at is non-empty we know the response file is already
 // committed. Gating on born_at closes the race where the wizard
@@ -57,7 +57,7 @@ type Phase4Deps struct {
 }
 
 // RenderSummoningBook produces the markdown preview shown at 封缄. It
-// is also the body baked into journal/0000-summoning.md by
+// is also the body baked into chest/summoning-book.md by
 // ontology.TarStream when the wizard calls forge.Orchestrate.
 func RenderSummoningBook(s *Summoning) string {
 	var sb strings.Builder
@@ -154,7 +154,7 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 		Label:             s.SummonedName,
 		Image:             d.Image,
 		KeyHex:            s.MindFormKeyHex,
-		JournalEntry:      book,
+		SummoningBook:     book,
 		NoLogin:           true,
 		PrefabID:          s.PrefabID,
 		HeartbeatInterval: s.HeartbeatInterval,
@@ -175,7 +175,7 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	// birth-wake handler can actually invoke claude. Without this, the
 	// in-container claude exits "Not logged in · Please run /login", the
 	// birth handler returns an error every iteration, and the wizard
-	// times out waiting for journal/0000-response.md. Equivalent to
+	// times out waiting for chest/first-words.md. Equivalent to
 	// `eidos forge login <slug> --from-host` running between create and
 	// start. Failure is fatal — we tear down the volume so the next
 	// summon starts cleanly.
@@ -185,7 +185,7 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	}
 
 	// Calling-words. Scratch path generates them via claude; prefab
-	// path receives them inside the prefab's own essence/calling-words.md
+	// path receives them inside the prefab's own self/calling-words.md
 	// (already in the tar stream baked by Orchestrate), so we skip
 	// generation + the post-orchestrate write entirely.
 	if s.PrefabID == "" {
@@ -198,7 +198,7 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 		}
 		s.CallingWords = words
 		r.Typewriter(ctx, words)
-		if err := d.WriteVolume(ctx, s.Slug, "ontology/essence/calling-words.md", []byte(words)); err != nil {
+		if err := d.WriteVolume(ctx, s.Slug, "ontology/self/calling-words.md", []byte(words)); err != nil {
 			purge()
 			return nil, fmt.Errorf("write calling-words: %w", err)
 		}
@@ -206,9 +206,9 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	birth := wake.BirthSignal{
 		V:                 wake.BirthSchemaVersion,
 		OperatorNpub:      s.MasterNpub,
-		SummoningBookPath: "/eidos/ontology/journal/0000-summoning.md",
-		CallingWordsPath:  "/eidos/ontology/essence/calling-words.md",
-		ResponsePath:      "/eidos/ontology/journal/0000-response.md",
+		SummoningBookPath: "/eidos/ontology/chest/summoning-book.md",
+		CallingWordsPath:  "/eidos/ontology/self/calling-words.md",
+		ResponsePath:      "/eidos/ontology/chest/first-words.md",
 		TriggeredAt:       time.Now().Unix(),
 	}
 	birthBody, err := json.MarshalIndent(birth, "", "  ")
@@ -249,8 +249,8 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 		}
 	}()
 	body, err := d.ResponseWait(ctx, s.Slug,
-		"ontology/essence/born_at",
-		"ontology/journal/0000-response.md")
+		"ontology/self/born_at",
+		"ontology/chest/first-words.md")
 	cancelTick()
 	st2.Stop()
 	if err != nil {

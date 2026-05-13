@@ -22,6 +22,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/claudeexec"
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/dreamstate"
+	"github.com/LucianoXu/eidopsyche/internal/prompts"
 	"github.com/LucianoXu/eidopsyche/internal/sessionstate"
 	"github.com/LucianoXu/eidopsyche/internal/transcript"
 )
@@ -36,8 +37,6 @@ type RunOpts struct {
 	OntologyDir string
 	// ClaudeDir is passed as CLAUDE_DIR in the claude process environment.
 	ClaudeDir string
-	// IdentityPath is the path to self/identity.md (system prompt source).
-	IdentityPath string
 	// SessionStatePath is the path to session.json.
 	SessionStatePath string
 	// DreamStatePath is the path to dream-state.json.
@@ -99,9 +98,21 @@ func Run(ctx context.Context, opts RunOpts) error {
 	}
 
 	// ── 4. Load config and initial state ─────────────────────────────────
-	identityBytes, _ := os.ReadFile(opts.IdentityPath)
 	cfg, _ := config.Load(opts.ConfigPath)
 	ds, _ := dreamstate.Read(opts.DreamStatePath)
+
+	// ── 4b. Assemble system prompt ───────────────────────────────────────
+	// FromOntology reads self/identity.md frontmatter; Build inlines
+	// CLAUDE.md / soul.md / identity.md plus the framework essentials.
+	// The prompt is rebuilt from disk on every SpawnClaude so the mind-form's
+	// own edits propagate on the next wake.
+	facts, _ := prompts.FromOntology(opts.OntologyDir)
+	facts.Model = cfg.MindForm.Model
+	facts.OntologyDir = opts.OntologyDir
+	systemPrompt, err := prompts.Build(ctx, facts, opts.OntologyDir)
+	if err != nil {
+		return fmt.Errorf("build system prompt: %w", err)
+	}
 
 	// ── 5. Counters and per-session flags ─────────────────────────────────
 	sm := NewStateMachine(time.Now())
@@ -114,14 +125,14 @@ func Run(ctx context.Context, opts RunOpts) error {
 
 	// ── 6. Spawn claude ───────────────────────────────────────────────────
 	claude, err := SpawnClaude(SpawnOpts{
-		Binary:         opts.ClaudeBin,
-		Mode:           mode.Kind,
-		SessionUUID:    mode.UUID,
-		Model:          cfg.MindForm.Model,
-		IdentityPrompt: string(identityBytes),
-		Cwd:            opts.OntologyDir,
-		ClaudeDir:      opts.ClaudeDir,
-		ExtraArgs:      opts.ExtraClaudeArgs,
+		Binary:       opts.ClaudeBin,
+		Mode:         mode.Kind,
+		SessionUUID:  mode.UUID,
+		Model:        cfg.MindForm.Model,
+		SystemPrompt: systemPrompt,
+		Cwd:          opts.OntologyDir,
+		ClaudeDir:    opts.ClaudeDir,
+		ExtraArgs:    opts.ExtraClaudeArgs,
 	})
 	if err != nil {
 		return fmt.Errorf("spawn claude: %w", err)
@@ -201,7 +212,6 @@ func Run(ctx context.Context, opts RunOpts) error {
 		OutstandingWakes: &outstandingWakes,
 		Config:           cfg,
 		DreamState:       ds,
-		IdentityPrompt:   string(identityBytes),
 		IsDreaming:       dw.Dreaming,
 		AppendToBacklog:  dw.AppendToBacklog,
 		WakeQueue:        wq,
@@ -265,14 +275,14 @@ func Run(ctx context.Context, opts RunOpts) error {
 				},
 				SpawnNewClaude: func(newUUID string) error {
 					nc, err := SpawnClaude(SpawnOpts{
-						Binary:         opts.ClaudeBin,
-						Mode:           SessionNew,
-						SessionUUID:    newUUID,
-						Model:          cfg.MindForm.Model,
-						IdentityPrompt: string(identityBytes),
-						Cwd:            opts.OntologyDir,
-						ClaudeDir:      opts.ClaudeDir,
-						ExtraArgs:      opts.ExtraClaudeArgs,
+						Binary:       opts.ClaudeBin,
+						Mode:         SessionNew,
+						SessionUUID:  newUUID,
+						Model:        cfg.MindForm.Model,
+						SystemPrompt: systemPrompt,
+						Cwd:          opts.OntologyDir,
+						ClaudeDir:    opts.ClaudeDir,
+						ExtraArgs:    opts.ExtraClaudeArgs,
 					})
 					if err != nil {
 						return err
@@ -340,14 +350,14 @@ func Run(ctx context.Context, opts RunOpts) error {
 				// Reset the wake queue so stale wake-ids don't bleed into the respawned process.
 				wq.reset()
 				nc, sErr := SpawnClaude(SpawnOpts{
-					Binary:         opts.ClaudeBin,
-					Mode:           SessionNew,
-					SessionUUID:    fresh.SessionID,
-					Model:          cfg.MindForm.Model,
-					IdentityPrompt: string(identityBytes),
-					Cwd:            opts.OntologyDir,
-					ClaudeDir:      opts.ClaudeDir,
-					ExtraArgs:      opts.ExtraClaudeArgs,
+					Binary:       opts.ClaudeBin,
+					Mode:         SessionNew,
+					SessionUUID:  fresh.SessionID,
+					Model:        cfg.MindForm.Model,
+					SystemPrompt: systemPrompt,
+					Cwd:          opts.OntologyDir,
+					ClaudeDir:    opts.ClaudeDir,
+					ExtraArgs:    opts.ExtraClaudeArgs,
 				})
 				if sErr != nil {
 					return fmt.Errorf("respawn claude with fresh session: %w", sErr)

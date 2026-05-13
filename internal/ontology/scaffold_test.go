@@ -24,19 +24,62 @@ func TestScaffoldWritesAllTemplateFiles(t *testing.T) {
 	required := []string{
 		"CLAUDE.md",
 		"self/identity.md",
-		"self/values.md",
-		"memory/mood.md",
+		"self/soul.md",
+		"self/secret.md",
+		"self/mood.md",
+		"memory/notes/MEMORY.md",
 		"memory/semantic/.gitkeep",
 		"memory/procedural/.gitkeep",
 		"memory/episodic/.gitkeep",
-		"desk/README.md",
-		"drawer/README.md",
+		"dreams/DREAMS.md",
+		"chest/README.md",
 		".claude/settings.json",
 		".gitignore",
 	}
 	for _, rel := range required {
 		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
 			t.Errorf("missing %s: %v", rel, err)
+		}
+	}
+}
+
+func TestScaffoldProducesNewTree(t *testing.T) {
+	dir := t.TempDir()
+	params := Params{
+		Label:        "test-bee",
+		OwnerNpub:    "npub1owner",
+		OwnerLabel:   "Bob",
+		MindFormNpub: "npub1self",
+		CreatedDate:  "2026-05-13",
+		Kind:         "f",
+		PrefabID:     "",
+		HomeRelay:    "wss://relay.example.com",
+	}
+	if err := Scaffold(dir, params); err != nil {
+		t.Fatalf("Scaffold failed: %v", err)
+	}
+	mustNotExist := []string{
+		"essence", "journal", "desk", "drawer",
+		"self/values.md", "self/identity.md.tpl", "memory/mood.md",
+	}
+	for _, p := range mustNotExist {
+		if _, err := os.Stat(filepath.Join(dir, p)); err == nil {
+			t.Errorf("expected %s to NOT exist after Scaffold", p)
+		}
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "self/identity.md"))
+	if err != nil {
+		t.Fatalf("read self/identity.md: %v", err)
+	}
+	for _, want := range []string{
+		"label: test-bee",
+		"owner_label: Bob",
+		"kind: f",
+		"created_date: 2026-05-13",
+		"home_relay: wss://relay.example.com",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("self/identity.md missing %q\nfull body:\n%s", want, body)
 		}
 	}
 }
@@ -92,7 +135,7 @@ func TestTarStreamProducesAllEntries(t *testing.T) {
 		}
 		seen[h.Name] = true
 	}
-	for _, want := range []string{"CLAUDE.md", "self/identity.md", "memory/mood.md", ".gitignore"} {
+	for _, want := range []string{"CLAUDE.md", "self/identity.md", "self/mood.md", ".gitignore"} {
 		if !seen[want] {
 			t.Errorf("tar missing %q", want)
 		}
@@ -136,10 +179,10 @@ func TestTarStreamPropagatesWriteError(t *testing.T) {
 	}
 }
 
-// TestTarStream_JournalAndEssenceDirsExist locks in that journal/ and
-// essence/ are carried by the tar stream so the new MindForm volume has
-// the file-as-essence slots the First Contact wizard expects.
-func TestTarStream_JournalAndEssenceDirsExist(t *testing.T) {
+// TestTarStream_DreamsAndChestDirsExist locks in that dreams/ and
+// chest/ are carried by the tar stream so the new MindForm volume has
+// the operator-readable dream digest and the non-essence scratch space.
+func TestTarStream_DreamsAndChestDirsExist(t *testing.T) {
 	params := Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d"}
 	var buf bytes.Buffer
 	if err := TarStream(&buf, params); err != nil {
@@ -147,8 +190,9 @@ func TestTarStream_JournalAndEssenceDirsExist(t *testing.T) {
 	}
 	seen := tarEntryNames(t, buf.Bytes())
 	for _, want := range []string{
-		"journal/", "journal/.gitkeep",
-		"essence/", "essence/.gitkeep",
+		"dreams/DREAMS.md",
+		"chest/README.md",
+		"memory/notes/MEMORY.md",
 	} {
 		if !seen[want] {
 			t.Errorf("tar missing %q (got: %v)", want, seen)
@@ -156,43 +200,53 @@ func TestTarStream_JournalAndEssenceDirsExist(t *testing.T) {
 	}
 }
 
-// TestTarStream_JournalEntryProducesLiteralFile verifies the wizard's
+// TestTarStream_SummoningBookProducesLiteralFile verifies the wizard's
 // summoning book lands in the tar bytes-for-bytes — `{{` literals must
 // survive (they would otherwise be eaten by text/template).
-func TestTarStream_JournalEntryProducesLiteralFile(t *testing.T) {
+func TestTarStream_SummoningBookProducesLiteralFile(t *testing.T) {
 	const body = "# 召唤书\n\n签者：alice\n\nThis has {{.Literal}} that should NOT be expanded.\n"
-	params := Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d", JournalEntry: body}
+	params := Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d", SummoningBook: body}
 	var buf bytes.Buffer
 	if err := TarStream(&buf, params); err != nil {
 		t.Fatal(err)
 	}
-	got := tarEntryBody(t, buf.Bytes(), "journal/0000-summoning.md")
+	got := tarEntryBody(t, buf.Bytes(), "chest/summoning-book.md")
 	if got != body {
 		t.Errorf("entry body = %q, want %q", got, body)
 	}
 }
 
-func TestTarStream_EmptyJournalEntryOmitsFile(t *testing.T) {
+func TestTarStream_EmptySummoningBookOmitsFile(t *testing.T) {
 	params := Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d"}
 	var buf bytes.Buffer
 	if err := TarStream(&buf, params); err != nil {
 		t.Fatal(err)
 	}
 	seen := tarEntryNames(t, buf.Bytes())
-	if seen["journal/0000-summoning.md"] {
-		t.Errorf("empty JournalEntry should not produce 0000-summoning.md")
+	if seen["chest/summoning-book.md"] {
+		t.Errorf("empty SummoningBook should not produce chest/summoning-book.md")
 	}
 }
 
-func TestTarStream_GitignoreCarriesEssenceSecret(t *testing.T) {
+func TestTarStream_GitignoreCarriesSelfSecret(t *testing.T) {
 	params := Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d"}
 	var buf bytes.Buffer
 	if err := TarStream(&buf, params); err != nil {
 		t.Fatal(err)
 	}
 	got := tarEntryBody(t, buf.Bytes(), ".gitignore")
-	if !strings.Contains(got, "essence/secret.md") {
-		t.Errorf(".gitignore missing essence/secret.md; got: %q", got)
+	if !strings.Contains(got, "self/secret.md") {
+		t.Errorf(".gitignore missing self/secret.md; got: %q", got)
+	}
+	if !strings.Contains(got, "chest/") {
+		t.Errorf(".gitignore missing chest/ rule; got: %q", got)
+	}
+}
+
+func TestParamsHasKindAndPrefabID(t *testing.T) {
+	p := Params{Kind: "f", PrefabID: "calcifer"}
+	if p.Kind != "f" || p.PrefabID != "calcifer" {
+		t.Fatalf("Kind/PrefabID fields missing or wrong, got Kind=%q PrefabID=%q", p.Kind, p.PrefabID)
 	}
 }
 

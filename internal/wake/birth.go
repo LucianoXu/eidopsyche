@@ -24,7 +24,7 @@ const BirthFileName = "birth.json"
 // Signal — not a refinement of it — because the inputs and the
 // supervisor's handling are distinct from the heartbeat / mindgate /
 // manual flow. The supervisor consumes this file at most once and is
-// guarded by an essence/born_at marker: once the agent has written
+// guarded by an self/born_at marker: once the agent has written
 // born_at, any stale birth.json is silently cleared without re-running.
 type BirthSignal struct {
 	V                 int    `json:"v"`

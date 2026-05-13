@@ -12,13 +12,13 @@ import (
 
 func TestSpawnClaude_StreamJSONInputProcessesOneTurn(t *testing.T) {
 	c, err := SpawnClaude(SpawnOpts{
-		Binary:         stubClaudeBin,
-		Mode:           SessionNew,
-		SessionUUID:    "test-session",
-		IdentityPrompt: "test mindform",
-		Cwd:            t.TempDir(),
-		ClaudeDir:      t.TempDir(),
-		ExtraArgs:      []string{"--mode", "normal"},
+		Binary:       stubClaudeBin,
+		Mode:         SessionNew,
+		SessionUUID:  "test-session",
+		SystemPrompt: "test mindform",
+		Cwd:          t.TempDir(),
+		ClaudeDir:    t.TempDir(),
+		ExtraArgs:    []string{"--mode", "normal"},
 	})
 	if err != nil {
 		t.Fatalf("SpawnClaude: %v", err)
@@ -94,32 +94,32 @@ func TestBuildClaudeArgs_StreamJSONContract(t *testing.T) {
 	}{
 		{
 			name: "new session has --session-id",
-			opts: SpawnOpts{Mode: SessionNew, SessionUUID: "uuid-1", IdentityPrompt: "x"},
+			opts: SpawnOpts{Mode: SessionNew, SessionUUID: "uuid-1", SystemPrompt: "x"},
 			require: []string{
 				"--input-format", "stream-json",
 				"--output-format", "stream-json",
 				"--verbose",
 				"--include-partial-messages",
 				"--session-id", "uuid-1",
-				"--append-system-prompt", "x",
+				"--system-prompt", "x",
 				"--dangerously-skip-permissions",
 			},
 			exclude: []string{"--resume"},
 		},
 		{
 			name:    "resume session has --resume",
-			opts:    SpawnOpts{Mode: SessionResume, SessionUUID: "uuid-2", IdentityPrompt: "y"},
+			opts:    SpawnOpts{Mode: SessionResume, SessionUUID: "uuid-2", SystemPrompt: "y"},
 			require: []string{"--resume", "uuid-2"},
 			exclude: []string{"--session-id"},
 		},
 		{
 			name:    "model when non-empty",
-			opts:    SpawnOpts{Mode: SessionNew, SessionUUID: "u", Model: "claude-opus-4-7", IdentityPrompt: "x"},
+			opts:    SpawnOpts{Mode: SessionNew, SessionUUID: "u", Model: "claude-opus-4-7", SystemPrompt: "x"},
 			require: []string{"--model", "claude-opus-4-7"},
 		},
 		{
 			name:    "extra args appended last",
-			opts:    SpawnOpts{Mode: SessionNew, SessionUUID: "u", IdentityPrompt: "x", ExtraArgs: []string{"--mode", "normal"}},
+			opts:    SpawnOpts{Mode: SessionNew, SessionUUID: "u", SystemPrompt: "x", ExtraArgs: []string{"--mode", "normal"}},
 			require: []string{"--mode", "normal"},
 		},
 	}
@@ -143,13 +143,13 @@ func TestBuildClaudeArgs_StreamJSONContract(t *testing.T) {
 
 func TestSpawnedClaude_WaitIsIdempotent(t *testing.T) {
 	c, err := SpawnClaude(SpawnOpts{
-		Binary:         stubClaudeBin,
-		Mode:           SessionNew,
-		SessionUUID:    "test-idempotent",
-		IdentityPrompt: "test",
-		Cwd:            t.TempDir(),
-		ClaudeDir:      t.TempDir(),
-		ExtraArgs:      []string{"--mode", "crash-after", "--at-n", "1"},
+		Binary:       stubClaudeBin,
+		Mode:         SessionNew,
+		SessionUUID:  "test-idempotent",
+		SystemPrompt: "test",
+		Cwd:          t.TempDir(),
+		ClaudeDir:    t.TempDir(),
+		ExtraArgs:    []string{"--mode", "crash-after", "--at-n", "1"},
 	})
 	if err != nil {
 		t.Fatalf("SpawnClaude: %v", err)

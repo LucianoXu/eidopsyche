@@ -55,7 +55,7 @@ func (f *fakeClient) ImagePull(_ context.Context, ref string, _ io.Writer) error
 }
 func (f *fakeClient) RunInit(_ context.Context, opts forgectl.RunInitOpts) (forgectl.RunInitResult, error) {
 	// Capture stdin so tests can introspect the tar bytes the orchestrator
-	// streams in (the wizard's JournalEntry-as-tar-entry plumbing relies
+	// streams in (the wizard's SummoningBook-as-tar-entry plumbing relies
 	// on this).
 	if opts.Stdin != nil {
 		var buf bytes.Buffer
@@ -394,15 +394,15 @@ func TestOrchestrate_NoKeyHexOmitsEnv(t *testing.T) {
 	}
 }
 
-// TestOrchestrate_JournalEntryLandsInTar: the wizard's rendered
+// TestOrchestrate_SummoningBookLandsInTar: the wizard's rendered
 // summoning book must reach the volume verbatim, including any `{{`
 // literals in the user-provided text.
-func TestOrchestrate_JournalEntryLandsInTar(t *testing.T) {
+func TestOrchestrate_SummoningBookLandsInTar(t *testing.T) {
 	f := &fakeClient{}
 	const journal = "# 召唤书\n\nThis has {{.Literal}} that must NOT expand.\n"
 	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
 		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice",
-		Image: "img:dev", JournalEntry: journal,
+		Image: "img:dev", SummoningBook: journal,
 	})
 	if err != nil {
 		t.Fatalf("orchestrate: %v", err)
@@ -410,7 +410,7 @@ func TestOrchestrate_JournalEntryLandsInTar(t *testing.T) {
 	if len(f.initStdin) != 1 {
 		t.Fatalf("captured stdin entries = %d, want 1", len(f.initStdin))
 	}
-	got := tarEntryFromBytes(t, f.initStdin[0], "journal/0000-summoning.md")
+	got := tarEntryFromBytes(t, f.initStdin[0], "chest/summoning-book.md")
 	if got != journal {
 		t.Errorf("journal entry in tar = %q, want %q", got, journal)
 	}

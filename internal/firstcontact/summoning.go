@@ -21,7 +21,7 @@ type CharacterProfile struct {
 // (except what Phase 1's identity.Bootstrap already committed to disk).
 //
 // Master vs Operator: the *master* is the new mind-form's owner — what
-// gets burned into journal/0000-summoning.md and forge.CreateOpts.Owner.
+// gets burned into chest/summoning-book.md and forge.CreateOpts.Owner.
 // The *operator* is the local user of the host running this wizard.
 // In the simple path they are the same identity. They differ only when
 // Phase 2 picks a card-as-master path (the local operator hosts a

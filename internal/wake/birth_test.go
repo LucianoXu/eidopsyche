@@ -15,9 +15,9 @@ func TestBirthSignal_RoundTrip(t *testing.T) {
 	in := wake.BirthSignal{
 		V:                 wake.BirthSchemaVersion,
 		OperatorNpub:      "npub1example",
-		SummoningBookPath: "/eidos/ontology/journal/0000-summoning.md",
-		CallingWordsPath:  "/eidos/ontology/essence/calling-words.md",
-		ResponsePath:      "/eidos/ontology/journal/0000-response.md",
+		SummoningBookPath: "/eidos/ontology/chest/summoning-book.md",
+		CallingWordsPath:  "/eidos/ontology/self/calling-words.md",
+		ResponsePath:      "/eidos/ontology/chest/first-words.md",
 		TriggeredAt:       1700000000,
 	}
 	body, err := json.Marshal(in)

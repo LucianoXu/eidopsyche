@@ -20,7 +20,6 @@ const (
 	agentLoopAgentStatePath   = "/eidos/run/agent-state.json"
 	agentLoopTranscriptsDir   = "/eidos/run/transcripts"
 	agentLoopAgentLockPath    = "/eidos/run/agent.lock"
-	agentLoopIdentityPath     = "/eidos/ontology/self/identity.md"
 	agentLoopClaudeDir        = "/eidos/ontology/.claude"
 )
 
@@ -53,7 +52,6 @@ func newAgentLoopCmd() *cobra.Command {
 				ClaudeBin:        "claude",
 				OntologyDir:      agentLoopOntologyDir,
 				ClaudeDir:        agentLoopClaudeDir,
-				IdentityPath:     agentLoopIdentityPath,
 				SessionStatePath: agentLoopSessionStatePath,
 				DreamStatePath:   agentLoopDreamStatePath,
 				AgentStatePath:   agentLoopAgentStatePath,

@@ -31,16 +31,23 @@ type Params struct {
 	MindFormNpub string
 	HomeRelay    string
 
-	// JournalEntry, if non-empty, is appended to the tar stream produced
+	// Kind is the mind-form's categorical tag ("m" / "f" / "spirit"),
+	// pulled from prefab.toml when the wizard takes the prefab branch;
+	// empty for blank summons.
+	Kind string
+
+	// PrefabID is the prefab directory id (e.g., "calcifer") when the
+	// wizard summoned from a prefab; empty for blank summons.
+	PrefabID string
+
+	// SummoningBook, if non-empty, is appended to the tar stream produced
 	// by TarStream and TarStreamPrefab as a literal file at
-	// journal/0000-summoning.md. It is NOT run through text/template —
+	// chest/summoning-book.md. It is NOT run through text/template —
 	// the wizard's pre-rendered markdown can contain `{{` literals that
-	// would otherwise break the template engine. Used by the First
-	// Contact wizard for both the scratch path and the prefab path
-	// (the supervisor's birth handler reads this file to drive the
-	// mind-form's first wake; prefab path was previously missing this
-	// write, which left the birth handler retrying forever).
-	JournalEntry string
+	// would otherwise break the template engine. chest/ is .gitignored
+	// inside the ontology so the seal lives near the mind-form but does
+	// not enter their persistent life-log.
+	SummoningBook string
 }
 
 // Scaffold writes the v0 ontology template into dir, rendering any .tpl
@@ -146,10 +153,10 @@ func TarStream(w io.Writer, params Params) error {
 		tw.Close() //nolint:errcheck // best-effort; return the walk error
 		return walkErr
 	}
-	if params.JournalEntry != "" {
-		body := []byte(params.JournalEntry)
+	if params.SummoningBook != "" {
+		body := []byte(params.SummoningBook)
 		if err := tw.WriteHeader(&tar.Header{
-			Name:     "journal/0000-summoning.md",
+			Name:     "chest/summoning-book.md",
 			Mode:     0o600,
 			Size:     int64(len(body)),
 			Typeflag: tar.TypeReg,
