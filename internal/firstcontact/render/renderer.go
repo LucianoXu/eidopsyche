@@ -51,6 +51,17 @@ type Renderer interface {
 	PromptChoice(question string, options []ChoiceOption) (int, error)
 	Status(message string) StatusHandle
 	Logo(ctx context.Context, d time.Duration)
+
+	// EditMultiline shows the operator a multiline editor pre-filled
+	// with default_. The operator can accept as-is or edit before
+	// submitting. Returns the (possibly empty) edited text, or io.EOF
+	// if the operator cancels.
+	//
+	// Submit gesture and cancel gesture are implementation-specific
+	// (typically Ctrl+D submit / Esc cancel for the TUI). Phase 3.5
+	// calling-words is the only caller today; an empty submission is
+	// a valid result.
+	EditMultiline(prompt, default_ string) (string, error)
 }
 
 // TUIRenderer is implemented by renderers whose lifecycle requires

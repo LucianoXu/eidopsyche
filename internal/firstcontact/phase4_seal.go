@@ -13,7 +13,6 @@ import (
 	"github.com/LucianoXu/eidopsyche/cmd/eidos/forge"
 	"github.com/LucianoXu/eidopsyche/internal/firstcontact/render"
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
-	"github.com/LucianoXu/eidopsyche/internal/prompts"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 )
 
@@ -114,9 +113,16 @@ func PollResponseFile(ctx context.Context, gatePath, bodyPath string, timeout, i
 	}
 }
 
-// Phase4 runs seal → calling-words → response. Returns the rendered
-// response body the caller can hand to Typewriter.
-func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, ready <-chan ReadyState, d Phase4Deps) ([]byte, error) {
+// Phase4 seals the summoning book, orchestrates the volume, starts
+// the container, and waits for the mind-form's birth-wake to produce
+// `chest/first-message.md` + `self/born_at`. Returns the rendered
+// first-message body the caller can hand to Typewriter.
+//
+// As of the 2026-05-13 redesign, Phase 4 no longer drives claude
+// itself (calling-words are collected in Phase3CallingWords; the
+// mind-form authors its own first message during birth-wake), so the
+// Claude runner is not part of the signature.
+func Phase4(ctx context.Context, s *Summoning, r render.Renderer, ready <-chan ReadyState, d Phase4Deps) ([]byte, error) {
 	final, err := awaitReady(ctx, r, s.Lang, ready)
 	if err != nil {
 		return nil, err
@@ -176,7 +182,7 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	// birth-wake handler can actually invoke claude. Without this, the
 	// in-container claude exits "Not logged in · Please run /login", the
 	// birth handler returns an error every iteration, and the wizard
-	// times out waiting for chest/first-words.md. Equivalent to
+	// times out waiting for chest/first-message.md. Equivalent to
 	// `eidos forge login <slug> --from-host` running between create and
 	// start. Failure is fatal — we tear down the volume so the next
 	// summon starts cleanly.
@@ -185,31 +191,23 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 		return nil, fmt.Errorf("install claude credentials: %w", err)
 	}
 
-	// Calling-words. Scratch path generates them via claude; prefab
-	// path receives them inside the prefab's own self/calling-words.md
-	// (already in the tar stream baked by Orchestrate), so we skip
-	// generation + the post-orchestrate write entirely.
-	if s.PrefabID == "" {
-		st := r.Status(stringFor(s.Lang, "phase4_words_status"))
-		words, err := c.CallText(ctx, prompts.CallingWords(book, s.Lang))
-		st.Stop()
-		if err != nil {
-			purge()
-			return nil, fmt.Errorf("calling-words: %w", err)
-		}
-		s.CallingWords = words
-		r.Typewriter(ctx, words)
-		if err := d.WriteVolume(ctx, s.Slug, "ontology/self/calling-words.md", []byte(words)); err != nil {
-			purge()
-			return nil, fmt.Errorf("write calling-words: %w", err)
-		}
+	// Calling-words are now collected in Phase3CallingWords (review/
+	// edit). Both prefab and scratch paths reach this point with
+	// s.CallingWords set (possibly empty). Write unconditionally so
+	// the supervisor's birth-handler existence check on
+	// self/calling-words.md passes. For the prefab path this
+	// overwrites the TarStreamPrefab-rendered default with the
+	// operator-edited version.
+	if err := d.WriteVolume(ctx, s.Slug, "ontology/self/calling-words.md", []byte(s.CallingWords)); err != nil {
+		purge()
+		return nil, fmt.Errorf("write calling-words: %w", err)
 	}
 	birth := wake.BirthSignal{
 		V:                 wake.BirthSchemaVersion,
 		OperatorNpub:      s.MasterNpub,
 		SummoningBookPath: "/eidos/ontology/chest/summoning-book.md",
 		CallingWordsPath:  "/eidos/ontology/self/calling-words.md",
-		ResponsePath:      "/eidos/ontology/chest/first-words.md",
+		ResponsePath:      "/eidos/ontology/chest/first-message.md",
 		TriggeredAt:       time.Now().Unix(),
 	}
 	birthBody, err := json.MarshalIndent(birth, "", "  ")
@@ -251,7 +249,7 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	}()
 	body, err := d.ResponseWait(ctx, s.Slug,
 		"ontology/self/born_at",
-		"ontology/chest/first-words.md")
+		"ontology/chest/first-message.md")
 	cancelTick()
 	st2.Stop()
 	if err != nil {

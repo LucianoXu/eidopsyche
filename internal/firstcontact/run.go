@@ -92,7 +92,7 @@ type Deps struct {
 //	Phase 4 (seal)     — when summoning: book preview + calling-words + birth
 //
 // Returns the rendered Summoning (in-memory state, never persisted)
-// plus the response body the agent wrote at chest/first-words.md.
+// plus the response body the agent wrote at chest/first-message.md.
 // On Phase2Exit, body is nil and err is nil — the wizard ends cleanly.
 func Run(ctx context.Context, d Deps) (*Summoning, []byte, error) {
 	s := &Summoning{}
@@ -181,7 +181,14 @@ func Run(ctx context.Context, d Deps) (*Summoning, []byte, error) {
 		return s, nil, err
 	}
 
-	body, err := Phase4(ctx, s, d.Renderer, d.Claude, ready, Phase4Deps{
+	// Phase 3.6: calling-words review/edit. After cadence (config) and
+	// before sealing (ceremony). Both prefab and scratch paths produce
+	// a default and let the operator accept or edit. Empty allowed.
+	if err := Phase3CallingWords(ctx, s, d.Renderer, d.Claude); err != nil {
+		return s, nil, err
+	}
+
+	body, err := Phase4(ctx, s, d.Renderer, ready, Phase4Deps{
 		DockerClient: d.DockerClient, Image: d.Image,
 		WriteVolume: d.WriteVolume, ContainerStart: d.StartContainer,
 		ResponseWait: d.ResponseWait, AddContact: d.AddContact,

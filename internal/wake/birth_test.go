@@ -17,7 +17,7 @@ func TestBirthSignal_RoundTrip(t *testing.T) {
 		OperatorNpub:      "npub1example",
 		SummoningBookPath: "/eidos/ontology/chest/summoning-book.md",
 		CallingWordsPath:  "/eidos/ontology/self/calling-words.md",
-		ResponsePath:      "/eidos/ontology/chest/first-words.md",
+		ResponsePath:      "/eidos/ontology/chest/first-message.md",
 		TriggeredAt:       1700000000,
 	}
 	body, err := json.Marshal(in)

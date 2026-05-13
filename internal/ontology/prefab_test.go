@@ -199,3 +199,41 @@ func keysOf(m map[string]string) []string {
 	sort.Strings(out)
 	return out
 }
+
+func TestRenderPrefabFile_RendersTplWithParams(t *testing.T) {
+	got, err := RenderPrefabFile("_test_fixture", "self/calling-words.md.tpl", Params{
+		Label:        "Lyra",
+		OwnerLabel:   "alice",
+		OwnerNpub:    "npub1master",
+		MindFormNpub: "npub1mindform",
+		CreatedDate:  "2026-05-13",
+		HomeRelay:    "wss://relay.example",
+	})
+	if err != nil {
+		t.Fatalf("RenderPrefabFile: %v", err)
+	}
+	if !strings.Contains(got, "Lyra") {
+		t.Errorf("rendered output missing label substitution; got %q", got)
+	}
+}
+
+func TestRenderPrefabFile_MissingPrefab(t *testing.T) {
+	_, err := RenderPrefabFile("nonexistent", "self/calling-words.md.tpl", Params{Label: "x"})
+	if err == nil {
+		t.Errorf("expected error for nonexistent prefab")
+	}
+}
+
+func TestRenderPrefabFile_MissingFile(t *testing.T) {
+	_, err := RenderPrefabFile("_test_fixture", "self/no-such-file.md.tpl", Params{Label: "x"})
+	if err == nil {
+		t.Errorf("expected error for missing file inside prefab")
+	}
+}
+
+func TestRenderPrefabFile_RejectsNonTpl(t *testing.T) {
+	_, err := RenderPrefabFile("_test_fixture", "prefab.toml", Params{Label: "x"})
+	if err == nil {
+		t.Errorf("expected error when path does not end in .tpl")
+	}
+}

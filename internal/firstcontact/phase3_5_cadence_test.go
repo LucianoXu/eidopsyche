@@ -35,6 +35,9 @@ func (r *scriptedRenderer) PromptChoice(_ string, _ []render.ChoiceOption) (int,
 }
 func (r *scriptedRenderer) Status(string) render.StatusHandle   { return nopStatus{} }
 func (r *scriptedRenderer) Logo(context.Context, time.Duration) {}
+func (r *scriptedRenderer) EditMultiline(_, defaultText string) (string, error) {
+	return defaultText, nil
+}
 
 type nopStatus struct{}
 
