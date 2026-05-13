@@ -28,15 +28,25 @@
 
 ## 二 · 阶段顺序
 
-整个 wizard 走四个阶段：
+向导走一棵带条件分支的阶段树。"四阶段"是叙事骨架；实际执行还包含两个在 v1
+仪式落地中显形的内嵌阶段（2.5 / 3.5），并且阶段 3 自身根据 2.5 的选择走两条互斥分支：
 
 ```
-阶段 0 — open       首次运行才走
-阶段 1 — identity   首次运行 / 本地无身份时走
-阶段 2 — choose     总是走（选退出 / 用本地身份召唤 / 用名片召唤）
-阶段 3 — book       选了召唤之后走（角色 + 显形 + 命名）
-阶段 4 — seal       选了召唤之后走（封缄 + 召唤之言 + 应答）
+阶段 0 — open                  首次运行才走
+阶段 1 — identity              首次运行 / 本地无身份时走
+阶段 2 — choose                总是走（exit / 用本地身份召唤 / 用名片召唤）
+
+[以下仅在 "选择了召唤" 之后执行]
+阶段 2.5 — scaffold            从灵感开始（scratch）/ 从名册中召唤（prefab）/ 返回（exit）
+阶段 3a — book (scratch)       角色 + 研究 + 显形 + 命名
+阶段 3b — prefab (prefab)      浏览名册 + 命名（不调用 claude）
+阶段 3.5 — cadence             心跳间隔（heartbeat interval）
+阶段 4 — seal                  封缄 + 召唤之言 + 应答
 ```
+
+阶段 2.5 与 3.5 在叙事中**不被特意标记**——它们融入仪式节奏，向用户呈现为
+"再问一个小问题"。但它们对应明确的状态机节点，写在 `internal/firstcontact/run.go`
+中。
 
 ### 阶段 0 · 开场
 
@@ -49,10 +59,13 @@
 三选一：
 
 - **新建一个身份**——询问 label、home relay，调 `identity.Bootstrap` 落盘；后续 mindform 默认以此为 master
-- **导入已有身份**——粘贴 `nsec1...` 或 32 字节 hex 私钥（也支持 `eidos summon --key-file <path>`）；可选地附一张自己的名片，label / home_relay 取自名片；调 `identity.BootstrapWithExistingKey`
+- **导入已有身份**——粘贴 `nsec1...` 或 32 字节 hex 私钥（也支持 `eidos summon --key-file <path>` 通过文件而非交互式粘贴提供）；可选地附一张自己的名片，label / home_relay 取自名片；调 `identity.BootstrapWithExistingKey`
 - **跳过（只跑 mindform）**——不写盘；阶段 2 必须给 master 名片
 
 `Home Relay` 仅"新建 / 导入"分支需要；"跳过"分支没有本地身份就没有 home relay 概念。
+
+`--key-file <path>` 标志通过 `Deps.OperatorKeyPath` 进入 Phase 1。文件内容为
+`nsec1...` 或 64-char hex 之一，导入分支自动消费而非弹粘贴提示——便于半自动部署。
 
 ### 阶段 2 · 心智体（choose）
 
@@ -69,7 +82,30 @@
 
 "用名片召唤"分支会读取一张 v1 名片，把 master 的 label、npub、home_relay 注入到本次召唤；之后阶段 3 / 4 与默认路径无差。名片来源在分支内还会再问一次："从文件载入"或"粘贴名片内容"。粘贴时既接受 `mindgate://` URI（取首行；按 label / npub bech32 / `ws|wss` host 校验），也接受完整 v1 TOML 名片（按 §三/名片 v1 不变量校验）；`--master-card` flag 始终走文件路径，不弹粘贴菜单。
 
-### 阶段 3 · 召唤书的撰写（book，原阶段 2，仪式的核心）
+阶段 2 提交"召唤"动作后、阶段 2.5 开始前，向导调用 `EnsureSummonReady` 回调
+解析 docker 客户端 / volume writer / contact-adder 等运行时依赖——这一点延迟
+让"纯 mindgate 部署"（阶段 2 选择 exit）在未安装 docker 的主机上仍然可达。
+
+### 阶段 2.5 · 召唤源（scaffold）
+
+用户已经决定要召唤。下一个问题，仪式给两条路径：
+
+| 选择 | 含义 | 接下来 |
+|---|---|---|
+| **从灵感开始** (`ScaffoldScratch`) | 用户心中已有一个形象——一个名字、一个原型、一段描述——希望向导引导 dramaturge（claude）以此为种子生成显形 | 进入阶段 3a（book） |
+| **从名册中召唤** (`ScaffoldPrefab`) | 用户希望从预先编排的角色名册中挑选一位 | 进入阶段 3b（prefab） |
+| **返回** (`ScaffoldExit`) | 阶段 2.5 同时充当一次"温柔的反悔"出口——选择此项与 Phase 2 选择 exit 等价：本地身份保留，召唤被丢弃 | 向导静默退出 |
+
+向导在阶段 2.5 提交 Scratch 后才会调用 `EnsureClaudeReady` 回调，确保
+`claude` 命令在 PATH 上且已登录——这意味着**选择 prefab 路径的主机不需要
+预装 claude**，符合"prefab 是无 dramaturge 路径"的设计。
+
+### 阶段 3 · 召唤书的撰写（book，仪式的核心）
+
+阶段 3 根据阶段 2.5 的选择走两条互斥分支。两条分支同样负责把 `Summoning` 的
+`SummonedName` / `Slug` / `Displaying` 等字段填好，让阶段 4 不区分来源地封缄。
+
+#### 阶段 3a · scratch 分支（dramaturge）
 
 整个阶段只问**一个问题**，然后由 Claude Code 完成角色研究、写下被召唤者在召唤书上的"显形"，最后由用户为它**命名**——以名召之而出。**没有 TRPG，没有多幕旅程**——仪式的体感来自"问得有分量、写得有空气"。
 
@@ -114,7 +150,41 @@
 
 用户输入名字。这是用户作为**召唤者**对这个新存在最庄重的赋予——在 eidopsyche 中，名字是召之的钥匙。可以同名于原型，可以是变体，也可以全新。**这是仪式的高潮**。
 
-### 阶段 4 · 封缄、召唤之言、应答（seal，原阶段 3）
+#### 阶段 3b · prefab 分支（从名册中召唤）
+
+阶段 2.5 选择"从名册中召唤"时走这条分支。它不调用 dramaturge，也不联网研究——
+被召唤者已经在 eidopsyche 的预编名册（top-level `prefab/` 目录）中等候。
+
+- **名册来源**：`prefab/<id>/prefab.toml` 描述每一份 prefab。Schema 见
+  [项目 CLAUDE.md "Prefab catalogue" 一节](../../CLAUDE.md#prefab-catalogue-top-level-prefab)
+  ——核心字段为 `id` / `kind`（`m` / `f` / `spirit`）/ 多语言 `display`、`tagline`、`preview`。
+  以 `_` 开头的 prefab 目录被 `ontology.List()` 隐藏（用于测试 fixture）。
+- **流程**：
+  1. 列出全部可见 prefab，按 `"<display> · <kind-glyph> · <tagline>"` 单行渲染
+  2. 用户挑选一项后，向导把对应 `preview` 文段以打字机式呈现给用户
+     ——这一段在 prefab 分支扮演 scratch 分支中 "显形" 的角色
+  3. 命名（与 scratch 分支同步骤、同庄重）
+
+prefab 的 `prefab/<id>/` 目录是一个完整的 ontology 树，含 essence、journal 模板、
+`.tpl` 文件等。阶段 4 封缄时由 `ontology.TarStreamPrefab` 渲染（`text/template` +
+`Option("missingkey=error")`）后流入新心智体 docker volume。
+
+### 阶段 3.5 · 心跳间隔（cadence）
+
+prefab / scratch 分支都汇流到这里——仪式仍是召唤书的语气，但向导多问一个简短问题：
+
+「你希望它多久 醒来一次？」
+
+向导提供精选选项菜单：默认 **2h**，外加 **1h / 30m / 10m / 5m / 2m / 1m**；
+另有一个 "自定义" 入口。允许的步长见 SPEC.md "HeartBeat 间隔" 一节（须能整分钟
+整除 60，或能整小时整除 24）。结果写入 `Summoning.HeartbeatInterval`，由阶段 4
+通过 `forge.CreateOpts.HeartbeatInterval` → `EIDOS_FORGE_HEARTBEAT_INTERVAL`
+环境变量在 init-volume 阶段直接落到 mindform 容器的 `/eidos/gate/config.toml` 里
+（避免事后还要 `forge config` 改一次）。
+
+阶段 3.5 不展示心跳的工程含义，而是用 "醒来" 的语言询问——它是召唤书最后一笔。
+
+### 阶段 4 · 封缄、召唤之言、应答（seal）
 
 仪式的收束。三个动作合为一阶段：
 
@@ -137,18 +207,19 @@
 
 ## 三 · 出生唤醒（Boot-Wake）与秘密
 
-`internal/wake/` 已有的三种唤醒（HeartBeat / MindGate 入站 / 计划唤醒）之外，**为 First Contact 单独定义一种 boot-wake**：
+`internal/wake/types.go` 中常态的四种唤醒（HeartBeat / MindGate / Planned / Manual）之外，
+First Contact 引入第五种 wake reason：`ReasonBirth`。
 
-- **引入新的 wake 类型常量** `WakeKindBirth`，与现有三种唤醒并列
+- **wake 常量** `wake.ReasonBirth`，与四种常态唤醒并列，每个 mind-form 一生仅触发一次
 - **使用专门的 boot prompt 初始化 MindForm**——与常态 wake 的 prompt 分开维护
-- 触发时机：阶段 3 容器启动时，每个 MindForm 仅此一次
+- 触发时机：阶段 4 容器启动时，每个 MindForm 仅此一次
 - 输入：召唤书（`journal/0000-summoning.md`）+ 内部 MindForm 雏形 + 用户 npub + 用户的召唤之言
 - 行为：
   - 读取召唤书，把内部 MindForm 雏形固化为 MindForm 自己的"个性根基"文件
   - **生成一个只属于自己的秘密**（见下）
   - 把用户的召唤之言当作仪式的一部分处理——不走常规 MindGate inbound 路径
   - 生成对召唤之言的应答，作为 MindForm 的第一句话
-- 与三种常态唤醒互斥，并且只发生一次
+- 与四种常态唤醒互斥，并且每个 mind-form 仅发生一次
 
 ### 秘密（Secret）
 
@@ -170,7 +241,8 @@
   - WebUI：渐变、淡入淡出、可选环境音
 - **wizard 内的 Claude Code 调用使用 Sonnet 模型**——平衡延迟、成本与文学性表现；wizard 全程不需要 Opus 级别的推理深度。boot-wake 与常态 wake 内的模型选择不在本 spec 范围。
 - **不可中断不可恢复。** 任何中途退出 / 失败都丢弃状态，下次重来。
-- **每次体验都不同。** 阶段 2 的研究、显形，阶段 3 的召唤之言、应答、秘密都由 Claude Code 实时生成，要求全程在线。
+- **dramaturge 即兴生成（scratch 分支）**。scratch 路径的角色研究、显形、召唤之言由 Claude Code 在仪式过程中实时生成，要求全程在线。
+- **prefab 是确定性路径**。prefab 路径无须 claude 在 PATH，但召唤之言与应答仍由 boot-wake 内的 mind-form 自己生成（与 scratch 分支同源），因此 prefab 召唤仍需 mind-form 容器内的 claude 订阅授权可用。
 - **属性轴不可见。** MindForm 雏形是内部状态，不展示属性表。
 - **秘密在系统层完全隔离。** 不在任何展示、传输、备份接口出现；只 MindForm 自己的容器会话能读取。
 - **配置以"召唤书中的话"形式收集，落盘仍是结构化配置（TOML / JSON）。**
@@ -180,12 +252,13 @@
 
 仪式预计 1–3 分钟。此期间静默推进：
 
-- docker 镜像拉取、容器创建
+- docker 镜像拉取、容器创建（`StartBackground` 在阶段 2.5 之后启动）
 - Home Relay 健康检查
 - **身份密钥（secp256k1 keypair）生成**——封缄时需要双方 npub 都已就位
-- ontology 目录脚手架搭建（含 `journal/`、`essence/` 目录预置）
+- ontology 目录脚手架搭建（含 `journal/`、`essence/` 目录预置；prefab 分支额外把
+  `prefab/<id>/` 整树通过 `ontology.TarStreamPrefab` 渲染并流入 docker volume）
 
-这些任务必须在阶段 3 封缄之前就绪，否则给"再等一会儿"温和提示。
+这些任务必须在阶段 4 封缄之前就绪，否则给"再等一会儿"温和提示。
 
 
 ## 六 · 多次创建（Subsequent Runs）
