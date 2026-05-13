@@ -23,7 +23,7 @@ const (
 	promptDumpGateConfigPath = "/eidos/gate/config.toml"
 	promptDumpClaudeDir      = "/eidos/ontology/.claude"
 	promptDumpClaudeBin      = "/usr/local/bin/claude"
-	promptDumpIdentityRel    = "self/identity.md"
+	promptDumpIdentityRel    = "self/identity.toml"
 )
 
 // promptDumpInContainerInput is the typed input for runPromptDumpInContainer.
@@ -41,7 +41,7 @@ type promptDumpInContainerInput struct {
 	Stderr         io.Writer
 }
 
-// runPromptDumpInContainer reads identity.md + config.toml from the
+// runPromptDumpInContainer reads identity.toml + config.toml from the
 // supplied paths, invokes promptcapture.Run, and writes the envelope
 // JSON to input.Stdout.
 func runPromptDumpInContainer(ctx context.Context, in promptDumpInContainerInput) error {
@@ -75,6 +75,10 @@ func runPromptDumpInContainer(ctx context.Context, in promptDumpInContainerInput
 		facts, _ := prompts.FromOntology(in.OntologyRoot)
 		facts.Model = model
 		facts.OntologyDir = in.OntologyRoot
+		facts.Effort = config.DefaultEffort
+		if cfg, err := config.Load(in.GateConfigPath); err == nil && cfg.MindForm.Effort != "" {
+			facts.Effort = cfg.MindForm.Effort
+		}
 		built, bErr := prompts.Build(ctx, facts, in.OntologyRoot)
 		if bErr != nil {
 			return fmt.Errorf("build system prompt: %w", bErr)

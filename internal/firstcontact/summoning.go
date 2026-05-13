@@ -37,6 +37,7 @@ type Summoning struct {
 	CharacterPrompt string
 	Profile         CharacterProfile
 	Displaying      string
+	RoleResearch    string // rich dramaturge dossier; written to self/role-research.md
 	SummonedName    string
 	Slug            string
 	MindFormNpub    string

@@ -23,7 +23,7 @@ func TestScaffoldWritesAllTemplateFiles(t *testing.T) {
 	}
 	required := []string{
 		"CLAUDE.md",
-		"self/identity.md",
+		"self/identity.toml",
 		"self/soul.md",
 		"self/secret.md",
 		"self/mood.md",
@@ -51,8 +51,6 @@ func TestScaffoldProducesNewTree(t *testing.T) {
 		OwnerLabel:   "Bob",
 		MindFormNpub: "npub1self",
 		CreatedDate:  "2026-05-13",
-		Kind:         "f",
-		PrefabID:     "",
 		HomeRelay:    "wss://relay.example.com",
 	}
 	if err := Scaffold(dir, params); err != nil {
@@ -60,27 +58,34 @@ func TestScaffoldProducesNewTree(t *testing.T) {
 	}
 	mustNotExist := []string{
 		"essence", "journal", "desk", "drawer",
-		"self/values.md", "self/identity.md.tpl", "memory/mood.md",
+		"self/values.md", "self/identity.md", "self/identity.md.tpl",
+		"self/identity.toml.tpl", "memory/mood.md",
 	}
 	for _, p := range mustNotExist {
 		if _, err := os.Stat(filepath.Join(dir, p)); err == nil {
 			t.Errorf("expected %s to NOT exist after Scaffold", p)
 		}
 	}
-	body, err := os.ReadFile(filepath.Join(dir, "self/identity.md"))
+	body, err := os.ReadFile(filepath.Join(dir, "self/identity.toml"))
 	if err != nil {
-		t.Fatalf("read self/identity.md: %v", err)
+		t.Fatalf("read self/identity.toml: %v", err)
 	}
 	for _, want := range []string{
-		"label: test-bee",
-		"owner_label: Bob",
-		"kind: f",
-		"created_date: 2026-05-13",
-		"home_relay: wss://relay.example.com",
+		`label = "test-bee"`,
+		`creator_label = "Bob"`,
+		`creator_npub = "npub1owner"`,
+		`mindgate_npub = "npub1self"`,
+		`created_date = "2026-05-13"`,
 	} {
 		if !strings.Contains(string(body), want) {
-			t.Errorf("self/identity.md missing %q\nfull body:\n%s", want, body)
+			t.Errorf("self/identity.toml missing %q\nfull body:\n%s", want, body)
 		}
+	}
+	if strings.Contains(string(body), "home_relay") {
+		t.Errorf("self/identity.toml should not contain home_relay (dropped)\nfull body:\n%s", body)
+	}
+	if strings.Contains(string(body), "kind") {
+		t.Errorf("self/identity.toml should not contain kind (dropped)\nfull body:\n%s", body)
 	}
 }
 
@@ -94,14 +99,14 @@ func TestScaffoldRendersIdentityTemplate(t *testing.T) {
 	if err := Scaffold(dir, params); err != nil {
 		t.Fatal(err)
 	}
-	body, err := os.ReadFile(filepath.Join(dir, "self/identity.md"))
+	body, err := os.ReadFile(filepath.Join(dir, "self/identity.toml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := string(body)
 	for _, want := range []string{"alice", "npub1ownertest", "2026-05-09"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("identity.md missing %q; got: %s", want, got)
+			t.Errorf("identity.toml missing %q; got: %s", want, got)
 		}
 	}
 }
@@ -135,7 +140,7 @@ func TestTarStreamProducesAllEntries(t *testing.T) {
 		}
 		seen[h.Name] = true
 	}
-	for _, want := range []string{"CLAUDE.md", "self/identity.md", "self/mood.md", ".gitignore"} {
+	for _, want := range []string{"CLAUDE.md", "self/identity.toml", "self/mood.md", ".gitignore"} {
 		if !seen[want] {
 			t.Errorf("tar missing %q", want)
 		}
@@ -240,13 +245,6 @@ func TestTarStream_GitignoreCarriesSelfSecret(t *testing.T) {
 	}
 	if !strings.Contains(got, "chest/") {
 		t.Errorf(".gitignore missing chest/ rule; got: %q", got)
-	}
-}
-
-func TestParamsHasKindAndPrefabID(t *testing.T) {
-	p := Params{Kind: "f", PrefabID: "calcifer"}
-	if p.Kind != "f" || p.PrefabID != "calcifer" {
-		t.Fatalf("Kind/PrefabID fields missing or wrong, got Kind=%q PrefabID=%q", p.Kind, p.PrefabID)
 	}
 }
 

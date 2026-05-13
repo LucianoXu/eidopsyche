@@ -155,6 +155,7 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 		Image:             d.Image,
 		KeyHex:            s.MindFormKeyHex,
 		SummoningBook:     book,
+		RoleResearch:      s.RoleResearch,
 		NoLogin:           true,
 		PrefabID:          s.PrefabID,
 		HeartbeatInterval: s.HeartbeatInterval,

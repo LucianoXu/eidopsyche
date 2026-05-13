@@ -101,7 +101,7 @@ func newPromptDumpHostCmd() *cobra.Command {
 		Short: "Capture the /v1/messages request envelope this mind-form would send right now",
 		Long: `Capture the /v1/messages request envelope this mind-form's claude would
 send right now: the default system prompt, tool catalogue, the layered
-identity.md, the ontology's CLAUDE.md, the configured model, and the
+identity.toml, the ontology's CLAUDE.md, the configured model, and the
 first-message ambient context block.
 
 This is a one-shot snapshot of a fresh session — it does not affect the
@@ -110,7 +110,7 @@ of in-flight turns. For the response side (assistant thinking + tool
 calls), use ` + "`eidos forge watch`" + `.
 
 The capture runs inside the mind-form's container, using the mind-form's
-own identity.md, config.toml, ontology CLAUDE.md, and claude binary.
+own identity.toml, config.toml, ontology CLAUDE.md, and claude binary.
 
 Examples:
   eidos forge prompt-dump alice                # JSON envelope to stdout

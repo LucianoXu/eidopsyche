@@ -31,6 +31,7 @@ type CreateOpts struct {
 
 	KeyHex        string // wizard-only: pre-generated MindForm private hex
 	SummoningBook string // wizard-only: rendered summoning-book markdown
+	RoleResearch  string // wizard-only: rendered self/role-research.md (scratch path)
 
 	// PrefabID, when non-empty, makes Orchestrate stream the
 	// prefab/<id>/ tree into the volume instead of the canonical

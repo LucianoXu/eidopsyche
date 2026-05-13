@@ -15,19 +15,22 @@ import (
 // buildData is the rendering context for assets/system1-instructions.txt.
 // Keep field names stable — the template references them by name.
 type buildData struct {
-	Facts    IdentityFacts
-	CLAUDE   string // contents of <ontology>/CLAUDE.md
-	Soul     string // contents of <ontology>/self/soul.md
-	Identity string // contents of <ontology>/self/identity.md
-	Today    string // current date, YYYY-MM-DD
+	Facts  IdentityFacts
+	CLAUDE string // contents of <ontology>/CLAUDE.md
+	Soul   string // contents of <ontology>/self/soul.md
+	Today  string // current date, YYYY-MM-DD
 }
 
 // Build assembles the full --system-prompt payload for a mind-form's
-// next claude spawn. It reads CLAUDE.md, self/soul.md, and
-// self/identity.md from ontologyDir; missing files render as empty
-// strings (a fresh ontology may have empty soul/identity). Returns
-// the rendered prompt or an error if the template parse / execute
-// fails (which would indicate a bug, not a runtime state issue).
+// next claude spawn. It reads CLAUDE.md and self/soul.md from
+// ontologyDir; missing files render as empty strings (a fresh ontology
+// may have an empty soul). Returns the rendered prompt or an error if
+// the template parse / execute fails (which would indicate a bug, not
+// a runtime state issue).
+//
+// self/identity.toml is consumed by FromOntology (callers populate
+// `facts` ahead of Build); its values surface through the Info block
+// of the rendered template rather than being inlined verbatim.
 //
 // mood.md is intentionally not read here — it is volatile working
 // state the mind-form consults on demand via the Read tool.
@@ -48,10 +51,6 @@ func Build(ctx context.Context, facts IdentityFacts, ontologyDir string) (string
 	data.Soul, err = readOptional(filepath.Join(ontologyDir, "self", "soul.md"))
 	if err != nil {
 		return "", fmt.Errorf("read self/soul.md: %w", err)
-	}
-	data.Identity, err = readOptional(filepath.Join(ontologyDir, "self", "identity.md"))
-	if err != nil {
-		return "", fmt.Errorf("read self/identity.md: %w", err)
 	}
 
 	raw, err := assets.ReadFile("assets/system1-instructions.txt")

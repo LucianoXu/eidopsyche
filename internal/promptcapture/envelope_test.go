@@ -18,7 +18,7 @@ func TestBuildEnvelopeMapAttachesCapturedFrom(t *testing.T) {
 			Mindform:     "alice",
 			OntologyRoot: "/eidos/ontology",
 			Model:        "sonnet",
-			IdentityPath: "self/identity.md",
+			IdentityPath: "self/identity.toml",
 			Bare:         false,
 		},
 	}
@@ -46,7 +46,7 @@ func TestRenderMarkdownIncludesCapturedFromHeader(t *testing.T) {
 		CapturedFrom: CapturedFrom{
 			Mindform:     "alice",
 			Model:        "sonnet",
-			IdentityPath: "self/identity.md",
+			IdentityPath: "self/identity.toml",
 		},
 	}
 	m, err := BuildEnvelopeMap(meta, []byte(`{"system":[]}`))
@@ -57,7 +57,7 @@ func TestRenderMarkdownIncludesCapturedFromHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	for _, want := range []string{"Captured from", "alice", "sonnet", "self/identity.md"} {
+	for _, want := range []string{"Captured from", "alice", "sonnet", "self/identity.toml"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}

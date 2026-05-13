@@ -1,0 +1,5 @@
+label = "{{.Label}}"
+mindgate_npub = "{{.MindFormNpub}}"
+creator_npub = "{{.OwnerNpub}}"
+creator_label = "{{.OwnerLabel}}"
+created_date = "{{.CreatedDate}}"

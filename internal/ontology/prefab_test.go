@@ -83,16 +83,16 @@ func TestTarStreamPrefab_FixtureRoundTrip(t *testing.T) {
 	if _, ok := seen["prefab.toml"]; ok {
 		t.Errorf("prefab.toml leaked into tar")
 	}
-	if _, ok := seen["self/identity.md.tpl"]; ok {
-		t.Errorf("identity.md.tpl should have been rendered to identity.md")
+	if _, ok := seen["self/identity.toml.tpl"]; ok {
+		t.Errorf("identity.toml.tpl should have been rendered to identity.toml")
 	}
-	id, ok := seen["self/identity.md"]
+	id, ok := seen["self/identity.toml"]
 	if !ok {
-		t.Fatalf("missing self/identity.md in tar; got %v", keysOf(seen))
+		t.Fatalf("missing self/identity.toml in tar; got %v", keysOf(seen))
 	}
-	for _, want := range []string{"Lyra", "alice", "npub1master", "npub1mindform", "wss://relay.example", "2026-05-10"} {
+	for _, want := range []string{"Lyra", "alice", "npub1master", "npub1mindform", "2026-05-10"} {
 		if !strings.Contains(id, want) {
-			t.Errorf("identity.md missing %q; got: %s", want, id)
+			t.Errorf("identity.toml missing %q; got: %s", want, id)
 		}
 	}
 	cw, ok := seen["self/calling-words.md"]

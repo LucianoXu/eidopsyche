@@ -35,7 +35,7 @@ func TestRunCapturesEnvelopeViaStub(t *testing.T) {
 			Mindform:     "alice",
 			OntologyRoot: "/eidos/ontology",
 			Model:        "sonnet",
-			IdentityPath: "self/identity.md",
+			IdentityPath: "self/identity.toml",
 		},
 	})
 	if err != nil {

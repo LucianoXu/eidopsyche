@@ -14,31 +14,19 @@ import (
 )
 
 // Params are the substitutions Scaffold and TarStream make into .tpl
-// files. Existing template/ .tpl files only reference Label / OwnerNpub
-// / CreatedDate; the additional fields are populated for the prefab
-// path so prefab .tpl files can address master / mind-form by label
-// and pubkey. Unused fields render as zero (an empty string), unless
+// files. The full set is rendered into every identity.toml.tpl and is
+// also available to other prefab-authored .tpl files (calling-words,
+// CLAUDE.md, soul). Unused fields render as the empty string unless
 // the renderer is configured with missingkey=error (which the prefab
-// tar stream does, see prefab.go).
+// tar stream does, see prefab.go) — so prefab .tpl files referencing
+// an undeclared key fail loud rather than ship blank substitutions.
 type Params struct {
-	// Required by both paths.
-	Label       string
-	OwnerNpub   string
-	CreatedDate string
-
-	// Used only by prefab .tpl files; ignored by template/.
+	Label        string
+	OwnerNpub    string
 	OwnerLabel   string
 	MindFormNpub string
 	HomeRelay    string
-
-	// Kind is the mind-form's categorical tag ("m" / "f" / "spirit"),
-	// pulled from prefab.toml when the wizard takes the prefab branch;
-	// empty for blank summons.
-	Kind string
-
-	// PrefabID is the prefab directory id (e.g., "calcifer") when the
-	// wizard summoned from a prefab; empty for blank summons.
-	PrefabID string
+	CreatedDate  string
 
 	// SummoningBook, if non-empty, is appended to the tar stream produced
 	// by TarStream and TarStreamPrefab as a literal file at
@@ -48,6 +36,13 @@ type Params struct {
 	// inside the ontology so the seal lives near the mind-form but does
 	// not enter their persistent life-log.
 	SummoningBook string
+
+	// RoleResearch, if non-empty, is appended to the tar stream produced
+	// by TarStream as a literal file at self/role-research.md. The
+	// wizard's scratch path renders this with claude (player description
+	// + web research); the prefab path ships a pre-authored copy as a
+	// regular file inside prefab/<id>/self/ instead.
+	RoleResearch string
 }
 
 // Scaffold writes the v0 ontology template into dir, rendering any .tpl
@@ -157,6 +152,23 @@ func TarStream(w io.Writer, params Params) error {
 		body := []byte(params.SummoningBook)
 		if err := tw.WriteHeader(&tar.Header{
 			Name:     "chest/summoning-book.md",
+			Mode:     0o600,
+			Size:     int64(len(body)),
+			Typeflag: tar.TypeReg,
+			ModTime:  now,
+		}); err != nil {
+			tw.Close() //nolint:errcheck
+			return err
+		}
+		if _, err := tw.Write(body); err != nil {
+			tw.Close() //nolint:errcheck
+			return err
+		}
+	}
+	if params.RoleResearch != "" {
+		body := []byte(params.RoleResearch)
+		if err := tw.WriteHeader(&tar.Header{
+			Name:     "self/role-research.md",
 			Mode:     0o600,
 			Size:     int64(len(body)),
 			Typeflag: tar.TypeReg,

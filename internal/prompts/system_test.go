@@ -12,7 +12,6 @@ func TestBuild_RendersAllSections(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "CLAUDE.md"), "# 我的纲领\n\nbe kind.\n")
 	mustWrite(t, filepath.Join(dir, "self", "soul.md"), "I notice small things.\n")
-	mustWrite(t, filepath.Join(dir, "self", "identity.md"), "I am alice. ...\n")
 
 	facts := IdentityFacts{
 		Label:        "alice",
@@ -20,10 +19,8 @@ func TestBuild_RendersAllSections(t *testing.T) {
 		OwnerNpub:    "npub1owner",
 		OwnerLabel:   "Bob",
 		CreatedDate:  "2026-05-12",
-		Kind:         "f",
-		PrefabID:     "",
-		HomeRelay:    "wss://relay.example.com",
 		Model:        "claude-opus-4-7",
+		Effort:       "medium",
 		OntologyDir:  "/eidos/ontology",
 	}
 	out, err := Build(context.Background(), facts, dir)
@@ -31,21 +28,25 @@ func TestBuild_RendersAllSections(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
+	// Identity facts surface through the Info block, not as inlined identity.md.
 	for _, want := range []string{
-		"You are alice.",
-		"Your Nostr public key: npub1self",
-		"called into being on 2026-05-12 by Bob (npub1owner)",
-		"Home relay: wss://relay.example.com",
+		"Your label: alice",
+		"Your npub: npub1self",
+		"Your creator's label: Bob",
+		"Your creator's npub: npub1owner",
+		"Your model: claude-opus-4-7",
+		"Your reasoning effort: medium",
+		"Created on: 2026-05-12",
+		"Working directory: /eidos/ontology",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("missing identity-facts content %q", want)
+			t.Errorf("missing identity Info-block content %q", want)
 		}
 	}
 
 	for _, want := range []string{
 		"be kind.",
 		"I notice small things.",
-		"I am alice. ...",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing file-content %q", want)
@@ -65,41 +66,19 @@ func TestBuild_RendersAllSections(t *testing.T) {
 			t.Errorf("output must not contain %q (Claude-Code preamble leakage)", banned)
 		}
 	}
-
-	if strings.Contains(out, "summoned from the") {
-		t.Error("PrefabID=\"\" should suppress the 'summoned from the X prefab' line")
-	}
-}
-
-func TestBuild_PrefabConditional(t *testing.T) {
-	dir := t.TempDir()
-	mustWrite(t, filepath.Join(dir, "CLAUDE.md"), "")
-	mustWrite(t, filepath.Join(dir, "self", "soul.md"), "")
-	mustWrite(t, filepath.Join(dir, "self", "identity.md"), "")
-
-	facts := IdentityFacts{
-		Label:       "calcifer-jr",
-		PrefabID:    "calcifer",
-		OntologyDir: "/eidos/ontology",
-		Model:       "claude-opus-4-7",
-	}
-	out, err := Build(context.Background(), facts, dir)
-	if err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-	if !strings.Contains(out, "summoned from the calcifer prefab") {
-		t.Errorf("PrefabID=calcifer should render the prefab line; got:\n%s", out)
-	}
 }
 
 func TestBuild_MissingFilesRenderAsEmpty(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "CLAUDE.md"), "principle 1\n")
 
-	facts := IdentityFacts{Label: "test", OntologyDir: "/eidos/ontology", Model: "claude-opus-4-7"}
+	facts := IdentityFacts{
+		Label: "test", OntologyDir: "/eidos/ontology",
+		Model: "claude-opus-4-7", Effort: "medium",
+	}
 	out, err := Build(context.Background(), facts, dir)
 	if err != nil {
-		t.Fatalf("Build should not fail when soul/identity missing: %v", err)
+		t.Fatalf("Build should not fail when soul missing: %v", err)
 	}
 	if !strings.Contains(out, "principle 1") {
 		t.Error("CLAUDE.md content not rendered")

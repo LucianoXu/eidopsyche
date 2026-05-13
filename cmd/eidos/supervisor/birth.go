@@ -92,13 +92,26 @@ func productionBirthHandler(ctx context.Context, sig wake.BirthSignal, ontologyD
 	if _, err := os.Stat(sig.CallingWordsPath); err != nil {
 		return fmt.Errorf("calling-words missing at %s: %w", sig.CallingWordsPath, err)
 	}
+	// role-research.md is the dramaturge dossier the wizard wrote
+	// (scratch path: claude-generated; prefab path: shipped in the
+	// prefab tree). The birth boot prompt instructs the agent to
+	// read it as the first file; refuse to spawn claude if it is
+	// missing rather than burn a session on an empty file.
+	roleResearchPath := filepath.Join(ontologyDir, "self", "role-research.md")
+	if _, err := os.Stat(roleResearchPath); err != nil {
+		return fmt.Errorf("role-research missing at %s: %w", roleResearchPath, err)
+	}
 
-	// Identity facts come from self/identity.md frontmatter; the scaffold
-	// wrote them before birth.json was placed.
+	// Identity facts come from self/identity.toml; the scaffold wrote
+	// them before birth.json was placed.
 	facts, _ := prompts.FromOntology(ontologyDir)
 	facts.OntologyDir = ontologyDir
+	facts.Effort = config.DefaultEffort
 	if cfg, err := config.Load(agentLoopGateConfigPath); err == nil {
 		facts.Model = cfg.MindForm.Model
+		if cfg.MindForm.Effort != "" {
+			facts.Effort = cfg.MindForm.Effort
+		}
 	}
 
 	systemPrompt, err := prompts.Build(ctx, facts, ontologyDir)

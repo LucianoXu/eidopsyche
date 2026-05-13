@@ -102,12 +102,17 @@ func Run(ctx context.Context, opts RunOpts) error {
 	ds, _ := dreamstate.Read(opts.DreamStatePath)
 
 	// ── 4b. Assemble system prompt ───────────────────────────────────────
-	// FromOntology reads self/identity.md frontmatter; Build inlines
-	// CLAUDE.md / soul.md / identity.md plus the framework essentials.
+	// FromOntology reads self/identity.toml; Build inlines CLAUDE.md +
+	// soul.md plus the framework essentials. Identity facts are surfaced
+	// through the rendered template's Info block, not as inlined content.
 	// The prompt is rebuilt from disk on every SpawnClaude so the mind-form's
 	// own edits propagate on the next wake.
 	facts, _ := prompts.FromOntology(opts.OntologyDir)
 	facts.Model = cfg.MindForm.Model
+	facts.Effort = cfg.MindForm.Effort
+	if facts.Effort == "" {
+		facts.Effort = config.DefaultEffort
+	}
 	facts.OntologyDir = opts.OntologyDir
 	systemPrompt, err := prompts.Build(ctx, facts, opts.OntologyDir)
 	if err != nil {

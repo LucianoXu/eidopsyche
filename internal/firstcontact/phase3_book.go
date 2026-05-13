@@ -54,6 +54,30 @@ func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, d P
 	st.Stop()
 	r.Typewriter(ctx, displaying)
 
+	// Step 3.5: role-research. Compose a richer dossier (300-600 words,
+	// markdown) that combines the operator's description, the Profile,
+	// and live web research. The mind-form reads this on birth-wake
+	// before writing its own soul.md. A failure here is fatal —
+	// without role-research the birth handler's precondition check
+	// will refuse to spawn claude. Status indicator stays up so the
+	// operator sees the wait is alive.
+	stRR := r.Status(stringFor(s.Lang, "phase3_role_research_status"))
+	research, err := c.CallText(ctx, prompts.RoleResearch(prompts.RoleResearchInput{
+		Description: s.CharacterPrompt,
+		Archetype:   s.Profile.Archetype,
+		Temperament: s.Profile.Temperament,
+		World:       s.Profile.World,
+		Settings:    s.Profile.Settings,
+		Imagery:     s.Profile.Imagery,
+		Sources:     s.Profile.Sources,
+		Lang:        s.Lang,
+	}))
+	stRR.Stop()
+	if err != nil {
+		return fmt.Errorf("phase3 role-research: %w", err)
+	}
+	s.RoleResearch = research
+
 	// Step 4: naming. Slug is derived silently; we never ask for it.
 	name, err := r.Prompt(stringFor(s.Lang, "phase3_naming_q"), render.PromptOpts{})
 	if err != nil {

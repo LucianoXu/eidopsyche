@@ -36,7 +36,7 @@ func TestRunPromptDumpInContainer_PopulatesCapturedFrom(t *testing.T) {
 	if err := os.MkdirAll(gateDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(ontologyDir, "self", "identity.md"),
+	if err := os.WriteFile(filepath.Join(ontologyDir, "self", "identity.toml"),
 		[]byte("# Alice\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestRunPromptDumpInContainer_PopulatesCapturedFrom(t *testing.T) {
 	if cf["model"] != "sonnet" {
 		t.Errorf("model=%v", cf["model"])
 	}
-	if cf["identity_path"] != "self/identity.md" {
+	if cf["identity_path"] != "self/identity.toml" {
 		t.Errorf("identity_path=%v", cf["identity_path"])
 	}
 	if cf["bare"] != false {
@@ -88,7 +88,7 @@ func TestRunPromptDumpInContainer_BareSkipsIdentity(t *testing.T) {
 	gateDir := filepath.Join(root, "gate")
 	_ = os.MkdirAll(filepath.Join(ontologyDir, "self"), 0o755)
 	_ = os.MkdirAll(gateDir, 0o755)
-	_ = os.WriteFile(filepath.Join(ontologyDir, "self", "identity.md"),
+	_ = os.WriteFile(filepath.Join(ontologyDir, "self", "identity.toml"),
 		[]byte("# Should not appear\n"), 0o644)
 	_ = os.WriteFile(filepath.Join(gateDir, "config.toml"), []byte(""), 0o644)
 

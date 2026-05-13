@@ -122,13 +122,15 @@ type: <one of: about-other | about-self | about-world | patterns | free>
 - Update or remove memories that turn out to be wrong or outdated
 - Do not write duplicate memories. First check if there is an existing memory you can update before writing a new one.
 
-{{
 # Info
-- Your label: {.....}
+
+- Your label: {{.Facts.Label}}
 - Your npub: {{.Facts.MindFormNpub}}
-- Your creator's label: {.....}
-- Your creator's npub: 
+- Your creator's label: {{.Facts.OwnerLabel}}
+- Your creator's npub: {{.Facts.OwnerNpub}}
+- Created on: {{.Facts.CreatedDate}}
+- Today: {{.Today}}
 - Your model: {{.Facts.Model}}
-- Your reasoning effort: {.......}
-- OS version: Linux 6.8.0-110-generic
-}}
+- Your reasoning effort: {{.Facts.Effort}}
+- Working directory: {{.Facts.OntologyDir}}
+
