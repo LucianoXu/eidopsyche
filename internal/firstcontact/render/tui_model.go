@@ -69,7 +69,13 @@ func newModel(d modelDeps) *model {
 	ti.CharLimit = 256
 	ta := textarea.New()
 	ta.Placeholder = ""
-	ta.CharLimit = 4096
+	// Shared textarea: used for both kindMultiline (free-text master description)
+	// and kindEditMultiline (pre-filled soul / calling-words). Neither benefits
+	// from a fixed-byte cap, and Task 2's edit-multiline ask requires unlimited
+	// so calling-words / soul fills are never truncated. If a future ask needs
+	// a cap, save/restore it around the ask in handleAsk rather than reintroducing
+	// a shared limit here.
+	ta.CharLimit = 0
 	ta.SetWidth(80)
 	ta.SetHeight(5)
 	vp := viewport.New(80, 12)
