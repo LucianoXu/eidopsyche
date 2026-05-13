@@ -136,6 +136,9 @@ Standalone Go utilities — each is its own module **outside** the root
 - **Unit Test**: `go test ./...`
 - **Integration Test**: `go test -tags=integration ./...` (requires a running Docker daemon; spins up real containers and at least one local Nostr relay).
 - **Run a local instance end-to-end**: `eidos forge create test && eidos forge start test && eidos forge logs test`
+- **Mind-form introspection family** (pair the two — one is the response side, the other is the request side):
+    - `eidos forge watch <name>` streams the response side (stream-json transcript ndjson: assistant thinking, tool calls, tool results) from the running agent-loop.
+    - `eidos forge prompt-dump <name>` captures the request side (default system prompt, tool catalogue, identity.md, ontology `CLAUDE.md`, model) for a fresh session — does not affect the running agent-loop. Output mirrors `utils/promptdump`'s extension-driven JSON+Markdown shape.
 - **Local release dry-run**: `goreleaser release --snapshot --clean` (validates `.goreleaser.yml` without publishing)
 
 

@@ -26,5 +26,9 @@ time.
 
 ## Current contents
 
-- `promptdump/` — captures Claude Code's Anthropic Messages API request body
-  so the verbatim default system prompt can be studied. See its README.
+- `promptdump/` — host-only dev shim over `internal/promptcapture`. Captures
+  Claude Code's `/v1/messages` request body for arbitrary `claude` flag
+  combinations against the host's claude install (not any specific mind-form).
+  For mind-form-bound captures, use `eidos forge prompt-dump <name>`. Stays
+  outside `go.work` via `replace github.com/LucianoXu/eidopsyche => ../..`
+  in its `go.mod`. See its README.

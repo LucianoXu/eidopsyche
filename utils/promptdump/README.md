@@ -1,8 +1,17 @@
-# promptdump
+# promptdump (host-only dev shim)
 
-Capture Claude Code's Anthropic Messages API request body — the verbatim
-default system prompt, tool definitions, and initial user message — so
-you can study and borrow from it when designing mind-form prompts.
+This is the **dev-only** host-side capture utility. It runs `claude` from
+your host's PATH against an arbitrary prompt / flag combination and dumps
+the verbatim `/v1/messages` request body so you can study Claude Code's
+default system prompt outside of any mind-form context.
+
+For capturing a real mind-form's envelope — using the mind-form's own
+`identity.md`, `config.toml`, ontology `CLAUDE.md`, and in-container
+`claude` binary — use `eidos forge prompt-dump <name>` instead.
+
+The capture core lives in `internal/promptcapture`; this binary is a thin
+wrapper that stays outside `go.work` via a `replace` directive in its
+`go.mod`. The `GOWORK=off` invariant below is unchanged.
 
 ## How it works
 
