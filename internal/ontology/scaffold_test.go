@@ -288,6 +288,38 @@ func TestTarStream_GitignoreCarriesSelfSecret(t *testing.T) {
 	}
 }
 
+func TestScaffold_SoulSkeleton(t *testing.T) {
+	dir := t.TempDir()
+	if err := Scaffold(dir, Params{
+		Label:       "Lyra",
+		OwnerNpub:   "npub1owner",
+		CreatedDate: "2026-05-13",
+	}); err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "self/soul.md.tpl")); err == nil {
+		t.Errorf(".tpl suffix should be stripped by scaffold")
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "self/soul.md"))
+	if err != nil {
+		t.Fatalf("read soul.md: %v", err)
+	}
+	got := string(body)
+	for _, want := range []string{
+		"# Lyra",
+		"## Vibe / 气质",
+		"## Personality / 性格",
+		"## Speech / 表达方式",
+		"## Self-image / 自我形象",
+		"## Treasures and Tensions / 珍视的与介意的",
+		"Short beats long",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("soul.md missing %q\nfull:\n%s", want, got)
+		}
+	}
+}
+
 func tarEntryNames(t *testing.T, body []byte) map[string]bool {
 	t.Helper()
 	tr := tar.NewReader(bytes.NewReader(body))
