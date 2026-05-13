@@ -181,6 +181,13 @@ func Run(ctx context.Context, d Deps) (*Summoning, []byte, error) {
 		return s, nil, err
 	}
 
+	// Phase 3.6: calling-words review/edit. After cadence (config) and
+	// before sealing (ceremony). Both prefab and scratch paths produce
+	// a default and let the operator accept or edit. Empty allowed.
+	if err := Phase3CallingWords(ctx, s, d.Renderer, d.Claude); err != nil {
+		return s, nil, err
+	}
+
 	body, err := Phase4(ctx, s, d.Renderer, d.Claude, ready, Phase4Deps{
 		DockerClient: d.DockerClient, Image: d.Image,
 		WriteVolume: d.WriteVolume, ContainerStart: d.StartContainer,

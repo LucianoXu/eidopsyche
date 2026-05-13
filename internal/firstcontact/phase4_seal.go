@@ -13,7 +13,6 @@ import (
 	"github.com/LucianoXu/eidopsyche/cmd/eidos/forge"
 	"github.com/LucianoXu/eidopsyche/internal/firstcontact/render"
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
-	"github.com/LucianoXu/eidopsyche/internal/prompts"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 )
 
@@ -185,24 +184,16 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 		return nil, fmt.Errorf("install claude credentials: %w", err)
 	}
 
-	// Calling-words. Scratch path generates them via claude; prefab
-	// path receives them inside the prefab's own self/calling-words.md
-	// (already in the tar stream baked by Orchestrate), so we skip
-	// generation + the post-orchestrate write entirely.
-	if s.PrefabID == "" {
-		st := r.Status(stringFor(s.Lang, "phase4_words_status"))
-		words, err := c.CallText(ctx, prompts.CallingWords(book, s.Lang))
-		st.Stop()
-		if err != nil {
-			purge()
-			return nil, fmt.Errorf("calling-words: %w", err)
-		}
-		s.CallingWords = words
-		r.Typewriter(ctx, words)
-		if err := d.WriteVolume(ctx, s.Slug, "ontology/self/calling-words.md", []byte(words)); err != nil {
-			purge()
-			return nil, fmt.Errorf("write calling-words: %w", err)
-		}
+	// Calling-words are now collected in Phase3CallingWords (review/
+	// edit). Both prefab and scratch paths reach this point with
+	// s.CallingWords set (possibly empty). Write unconditionally so
+	// the supervisor's birth-handler existence check on
+	// self/calling-words.md passes. For the prefab path this
+	// overwrites the TarStreamPrefab-rendered default with the
+	// operator-edited version.
+	if err := d.WriteVolume(ctx, s.Slug, "ontology/self/calling-words.md", []byte(s.CallingWords)); err != nil {
+		purge()
+		return nil, fmt.Errorf("write calling-words: %w", err)
 	}
 	birth := wake.BirthSignal{
 		V:                 wake.BirthSchemaVersion,
