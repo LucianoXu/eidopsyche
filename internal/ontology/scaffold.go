@@ -2,6 +2,7 @@ package ontology
 
 import (
 	"archive/tar"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,23 @@ import (
 	"text/template"
 	"time"
 )
+
+// templateFuncs are exposed inside every .tpl rendered by scaffold/tar.
+// `tomlstr` quotes an arbitrary string as a TOML basic string so
+// identity.toml.tpl can safely interpolate labels / npubs / etc. that
+// would otherwise break the file when they contain `"`, `\`, or
+// control bytes. json.Marshal produces a Unicode-escaped, double-
+// quoted string whose syntax overlaps TOML's basic-string syntax for
+// all UTF-8 inputs.
+var templateFuncs = template.FuncMap{
+	"tomlstr": func(s string) (string, error) {
+		b, err := json.Marshal(s)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	},
+}
 
 // Params are the substitutions Scaffold and TarStream make into .tpl
 // files. The full set is rendered into every identity.toml.tpl and is
@@ -200,7 +218,7 @@ func assertEmpty(dir string) error {
 }
 
 func renderTemplate(body string, params Params) (string, error) {
-	t, err := template.New("ontology").Parse(body)
+	t, err := template.New("ontology").Funcs(templateFuncs).Parse(body)
 	if err != nil {
 		return "", err
 	}

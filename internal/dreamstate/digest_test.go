@@ -59,6 +59,44 @@ func TestWriteDigest_AppendsToExistingIndex(t *testing.T) {
 	}
 }
 
+// TestWriteDigest_PreservesMultipleSameDayCycles pins the regression
+// codex flagged: when a mind-form ends more than one dream on the
+// same UTC date, the per-day file must accumulate one section per
+// cycle (not overwrite), and DREAMS.md must hold an entry per cycle
+// that disambiguates by time.
+func TestWriteDigest_PreservesMultipleSameDayCycles(t *testing.T) {
+	dir := t.TempDir()
+	t0 := time.Date(2026, 5, 13, 3, 0, 0, 0, time.UTC)
+	t1 := time.Date(2026, 5, 13, 18, 30, 0, 0, time.UTC)
+	if err := WriteDigest(dir, t0, "morning reflection"); err != nil {
+		t.Fatalf("WriteDigest #1: %v", err)
+	}
+	if err := WriteDigest(dir, t1, "evening reflection"); err != nil {
+		t.Fatalf("WriteDigest #2: %v", err)
+	}
+
+	daily, err := os.ReadFile(filepath.Join(dir, "dreams", "2026-05-13.md"))
+	if err != nil {
+		t.Fatalf("read daily digest: %v", err)
+	}
+	for _, want := range []string{"morning reflection", "evening reflection", "03:00:00", "18:30:00"} {
+		if !strings.Contains(string(daily), want) {
+			t.Errorf("daily digest missing %q after two cycles; got:\n%s", want, daily)
+		}
+	}
+
+	idx, err := os.ReadFile(filepath.Join(dir, "dreams", "DREAMS.md"))
+	if err != nil {
+		t.Fatalf("read DREAMS.md: %v", err)
+	}
+	if !strings.Contains(string(idx), "03:00:00") || !strings.Contains(string(idx), "18:30:00") {
+		t.Errorf("DREAMS.md must disambiguate same-day cycles by time; got:\n%s", idx)
+	}
+	if !strings.Contains(string(idx), "morning reflection") || !strings.Contains(string(idx), "evening reflection") {
+		t.Errorf("DREAMS.md missing one or both same-day cycle hooks; got:\n%s", idx)
+	}
+}
+
 func TestWriteDigest_LongSummaryTruncatedInIndex(t *testing.T) {
 	dir := t.TempDir()
 	long := strings.Repeat("x", 200)

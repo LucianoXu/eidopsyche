@@ -204,7 +204,7 @@ func TarStreamPrefab(w io.Writer, id string, params Params) error {
 // a prefab .tpl should fail loud rather than ship blank substitutions
 // into the new mind-form's volume.
 func renderTemplateStrict(body string, params Params) (string, error) {
-	t, err := template.New("ontology").Option("missingkey=error").Parse(body)
+	t, err := template.New("ontology").Option("missingkey=error").Funcs(templateFuncs).Parse(body)
 	if err != nil {
 		return "", err
 	}

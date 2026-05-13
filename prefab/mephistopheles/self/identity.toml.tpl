@@ -1,5 +1,5 @@
-label = "{{.Label}}"
-mindgate_npub = "{{.MindFormNpub}}"
-creator_npub = "{{.OwnerNpub}}"
-creator_label = "{{.OwnerLabel}}"
-created_date = "{{.CreatedDate}}"
+label = {{tomlstr .Label}}
+mindgate_npub = {{tomlstr .MindFormNpub}}
+creator_npub = {{tomlstr .OwnerNpub}}
+creator_label = {{tomlstr .OwnerLabel}}
+created_date = {{tomlstr .CreatedDate}}

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 func TestScaffoldWritesAllTemplateFiles(t *testing.T) {
@@ -119,6 +121,44 @@ func TestScaffoldRefusesIfTargetNonEmpty(t *testing.T) {
 	err := Scaffold(dir, Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d"})
 	if err == nil {
 		t.Errorf("expected refusal on non-empty target")
+	}
+}
+
+// TestScaffold_IdentityTOMLEscapesSpecialChars pins the regression
+// codex flagged: labels / creator labels with TOML-special characters
+// (", \, control bytes) must not produce a malformed identity.toml.
+// The rendered file must round-trip through prompts.FromOntology.
+func TestScaffold_IdentityTOMLEscapesSpecialChars(t *testing.T) {
+	dir := t.TempDir()
+	params := Params{
+		Label:        `she said "hi"\nthen left`,
+		OwnerNpub:    "npub1owner",
+		OwnerLabel:   `Bo"b\Smith`,
+		MindFormNpub: "npub1self",
+		CreatedDate:  "2026-05-13",
+	}
+	if err := Scaffold(dir, params); err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "self/identity.toml"))
+	if err != nil {
+		t.Fatalf("read identity.toml: %v", err)
+	}
+	// Parse via BurntSushi/toml to confirm validity.
+	var parsed struct {
+		Label        string `toml:"label"`
+		CreatorLabel string `toml:"creator_label"`
+	}
+	if _, err := toml.Decode(string(body), &parsed); err != nil {
+		t.Fatalf("identity.toml is not valid TOML:\n%s\nerror: %v", body, err)
+	}
+	if parsed.Label != params.Label {
+		t.Errorf("label round-trip mismatch: got %q, want %q\nfile:\n%s",
+			parsed.Label, params.Label, body)
+	}
+	if parsed.CreatorLabel != params.OwnerLabel {
+		t.Errorf("creator_label round-trip mismatch: got %q, want %q\nfile:\n%s",
+			parsed.CreatorLabel, params.OwnerLabel, body)
 	}
 }
 
