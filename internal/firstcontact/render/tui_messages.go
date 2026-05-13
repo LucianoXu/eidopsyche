@@ -4,13 +4,14 @@ package render
 type askKind int
 
 const (
-	kindPrompt       askKind = iota // single-line text input
-	kindMultiline                   // textarea (Esc-then-Enter to submit)
-	kindPromptChoice                // arrow-key list
-	kindShow                        // print one-shot text
-	kindFrame                       // print full-screen frame (transcript-style: just inserts content)
-	kindTypewriter                  // body added to the transcript (markdown if opts.HelpText=="markdown")
-	kindLogo                        // logo render
+	kindPrompt        askKind = iota // single-line text input
+	kindMultiline                    // textarea (Esc-then-Enter to submit)
+	kindPromptChoice                 // arrow-key list
+	kindShow                         // print one-shot text
+	kindFrame                        // print full-screen frame (transcript-style: just inserts content)
+	kindTypewriter                   // body added to the transcript (markdown if opts.HelpText=="markdown")
+	kindLogo                         // logo render
+	kindEditMultiline                // textarea pre-filled with body (Ctrl+D submit / Esc cancel)
 )
 
 // askMsg is the worker → TUI message. The Model's Update switches on

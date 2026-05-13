@@ -155,12 +155,21 @@ func (r *tuiRenderer) Logo(_ context.Context, _ time.Duration) {
 	r.fireAndAck(askMsg{kind: kindLogo})
 }
 
-// EditMultiline (stub). Task 2 replaces this with a bubbles/textarea
-// implementation. This intermediate stub returns the default verbatim
-// so the type satisfies the Renderer interface and the build remains
-// green between Task 1 and Task 2.
-func (r *tuiRenderer) EditMultiline(_ string, defaultText string) (string, error) {
-	return defaultText, nil
+// EditMultiline routes through the same ask/reply bridge as Prompt /
+// PromptChoice — the wizard's main bubble-tea program (started by
+// RunWithPhases) owns the only tea.Program, and the model activates a
+// pre-filled textarea on receipt of a kindEditMultiline ask. Ctrl+D
+// submits the textarea contents (possibly empty); Esc cancels and the
+// model replies with io.EOF.
+func (r *tuiRenderer) EditMultiline(prompt, defaultText string) (string, error) {
+	if err := r.sendAsk(askMsg{kind: kindEditMultiline, question: prompt, body: defaultText}); err != nil {
+		return "", err
+	}
+	reply, err := r.awaitReply()
+	if err != nil {
+		return "", err
+	}
+	return reply.text, reply.err
 }
 
 // RenderMarkdown is the MarkdownRenderer implementation: routes the

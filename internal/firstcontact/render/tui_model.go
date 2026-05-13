@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -166,6 +167,19 @@ func (m *model) handleAsk(msg askMsg) (tea.Model, tea.Cmd) {
 		m.escPending = false
 		return m, m.textarea.Cursor.BlinkCmd()
 
+	case kindEditMultiline:
+		// Pre-fill the textarea with the operator's draft. The default
+		// text travels in askMsg.body so we don't have to widen the
+		// message struct just for one field.
+		m.textarea.SetValue(msg.body)
+		m.textarea.Focus()
+		// Move the cursor to the end of the pre-filled draft so the
+		// operator can append rather than landing on (0,0) over their
+		// own text.
+		m.textarea.CursorEnd()
+		m.escPending = false
+		return m, m.textarea.Cursor.BlinkCmd()
+
 	case kindPromptChoice:
 		m.choiceIdx = 0
 		return m, nil
@@ -251,6 +265,31 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.textarea, cmd = m.textarea.Update(msg)
 		return m, cmd
 
+	case kindEditMultiline:
+		// Ctrl+D submits the current textarea contents (possibly empty
+		// — an empty submission is a valid result for the calling-words
+		// phase). Esc cancels and returns io.EOF to the caller.
+		switch msg.Type {
+		case tea.KeyCtrlD:
+			text := strings.TrimRight(m.textarea.Value(), "\n")
+			m.activeAsk = nil
+			m.textarea.Blur()
+			if text != "" {
+				m.transcript = append(m.transcript,
+					StylePastBody.Render(indentBlock(text, "  ")))
+			}
+			m.deps.replies <- replyMsg{text: text}
+			return m, waitForAsk(m.deps.asks)
+		case tea.KeyEsc:
+			m.activeAsk = nil
+			m.textarea.Blur()
+			m.deps.replies <- replyMsg{err: io.EOF}
+			return m, waitForAsk(m.deps.asks)
+		}
+		var cmd tea.Cmd
+		m.textarea, cmd = m.textarea.Update(msg)
+		return m, cmd
+
 	case kindPromptChoice:
 		switch msg.Type {
 		case tea.KeyUp:
@@ -307,6 +346,14 @@ func (m *model) View() string {
 			b.WriteString(StyleBody.Render(m.wrap(m.activeAsk.question)))
 			b.WriteString("\n")
 			b.WriteString(StyleHint.Render("  (Press Esc then Enter to submit)"))
+			b.WriteString("\n")
+			b.WriteString(m.textarea.View())
+
+		case kindEditMultiline:
+			b.WriteString("\n")
+			b.WriteString(StyleBody.Render(m.wrap(m.activeAsk.question)))
+			b.WriteString("\n")
+			b.WriteString(StyleHint.Render("  (Ctrl+D to submit · Esc to cancel)"))
 			b.WriteString("\n")
 			b.WriteString(m.textarea.View())
 
