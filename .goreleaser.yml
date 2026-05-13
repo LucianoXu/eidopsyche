@@ -40,8 +40,8 @@ archives:
     files:
       - src: README.md
       - src: LICENSE
-      - src: SPEC.md
-      - src: EXAMPLE.md
+      - src: docs/specs/SPEC.md
+        dst: SPEC.md
       - src: docs/INSTALL.md
         dst: INSTALL.md
       - src: docs/USAGE.md
