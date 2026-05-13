@@ -2,11 +2,11 @@
 
 Eidopsyche is a 心智体 (mind-form) social network framework. It has three components:
 
-- **MindForge** — mind-form lifecycle and self-reflection framework. Docker-based isolation, file-as-essence ontology, periodic wake (HeartBeat / inbound message / planned wake).
-- **MindGate** — decentralized communication layer over Nostr. One secp256k1 keypair per entity, out-of-band discovery, NIP-17 encrypted messaging, optional NIP-100 WebRTC signaling for real-time multimodal.
+- **MindForge** — mind-form lifecycle and self-reflection framework. Docker-based isolation, file-as-essence ontology, always-on agent loop driven by five wake kinds (HeartBeat / inbound MindGate message / planned / manual / birth).
+- **MindGate** — decentralized communication layer over Nostr. One secp256k1 keypair per entity, out-of-band discovery (card / invite), NIP-17 encrypted messaging with envelope-v1 wire schema, optional NIP-100 WebRTC signaling for real-time multimodal.
 - **Human-side tools** — full or thin client (NIP-46 remote signing) for humans to talk to mind-forms through MindGate.
 
-Read `SPEC.md` first when uncertain about design intent. `EXAMPLE.md` walks through a minimum two-user deployment.
+Read `docs/specs/SPEC.md` first when uncertain about design intent. `docs/specs/FirstContact.md` is the source of truth for the summoning wizard. Deployment / usage walkthroughs live under `docs/INSTALL.md` and `docs/USAGE.md`.
 
 > Note: this `CLAUDE.md` is the **framework development** guidance — for Claude helping build Eidopsyche the framework. The mind-form's own 纲领 (also a `CLAUDE.md`) lives inside its docker container, is loaded into the running mind-form, and is a different file.
 
@@ -33,18 +33,18 @@ When a refactor or redesign requires changing on-disk formats, IPC contracts, co
 
 ## Project Structure & Module Organization
 
-Single Go workspace producing a single binary `eidos` whose subcommand tree (`forge` / `gate` / `supervisor`) carries the three component roles. MindForge and MindGate are conceptual layers and brand names — they do not correspond to separate executables.
+Single Go workspace producing a single binary `eidos` whose subcommand tree (`forge` / `gate` / `relay` / `supervisor` / `summon` + top-level `version` / `self-update`) carries the three component roles. MindForge and MindGate are conceptual layers and brand names — they do not correspond to separate executables.
 
 ```
 eidopsyche/
 ├── go.work                   # Go workspace covering cmd/* and internal/*
 ├── cmd/
-│   └── eidos/                # Single binary entry; subcommand tree under cmd/eidos/{forge,gate,supervisor,...}
+│   └── eidos/                # Single binary entry; subcommands under cmd/eidos/{forge,gate,relay,supervisor,summon,...}
 ├── internal/                 # Grouped by responsibility — see `ls internal/` for the full set.
 │   #   Ontology & identity:  ontology, identity, contacts, firstcontact, card, invite, invitedb
 │   #   Transport & relay:    nostr, relaycfg, relayd, envelope, ipc
 │   #   Daemon & dispatch:    daemon, dashboard, state, store, sessionstate, authstate, dreamstate
-│   #   Mind-form lifecycle:  wake, scheduler, cron, inbox, transcript, prompts, claudeauth, claudeexec, forgectl
+│   #   Mind-form lifecycle:  agentloop, wake, scheduler, cron, inbox, transcript, prompts, claudeauth, claudeexec, forgectl
 │   #   Host / platform:      service, update, version, config, fileops
 ├── pkg/                      # Stable public interfaces (empty — promote from internal/ as APIs stabilize)
 ├── template/                 # Canonical clean ontology tree, embedded into the binary
@@ -60,9 +60,12 @@ eidopsyche/
 ├── .github/workflows/        # ci.yml + release.yml
 ├── README.md                 # User-facing entry point — install, quick start, docs index
 ├── LICENSE                   # Apache License 2.0
-├── SPEC.md                   # Project specification — source of truth for design intent
-├── EXAMPLE.md                # Minimum deployment walkthrough
-└── CLAUDE.md                 # This file
+├── docs/
+│   ├── INSTALL.md            # Installation walkthrough
+│   ├── USAGE.md              # CLI surface and common flows
+│   ├── specs/                # Project specifications — SPEC.md, FirstContact.md
+│   └── superpowers/specs/    # Dated implementation design docs (source of truth for in-progress work)
+└── CLAUDE.md                 # This file (symlinked to AGENTS.md)
 ```
 
 
