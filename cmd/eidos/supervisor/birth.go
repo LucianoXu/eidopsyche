@@ -104,7 +104,10 @@ func productionBirthHandler(ctx context.Context, sig wake.BirthSignal, ontologyD
 
 	// Identity facts come from self/identity.toml; the scaffold wrote
 	// them before birth.json was placed.
-	facts, _ := prompts.FromOntology(ontologyDir)
+	facts, err := prompts.FromOntology(ontologyDir)
+	if err != nil {
+		return fmt.Errorf("read identity facts: %w", err)
+	}
 	facts.OntologyDir = ontologyDir
 	facts.Effort = config.DefaultEffort
 	if cfg, err := config.Load(agentLoopGateConfigPath); err == nil {
