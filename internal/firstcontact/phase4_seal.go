@@ -175,7 +175,7 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	// birth-wake handler can actually invoke claude. Without this, the
 	// in-container claude exits "Not logged in · Please run /login", the
 	// birth handler returns an error every iteration, and the wizard
-	// times out waiting for chest/first-words.md. Equivalent to
+	// times out waiting for chest/first-message.md. Equivalent to
 	// `eidos forge login <slug> --from-host` running between create and
 	// start. Failure is fatal — we tear down the volume so the next
 	// summon starts cleanly.
@@ -200,7 +200,7 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 		OperatorNpub:      s.MasterNpub,
 		SummoningBookPath: "/eidos/ontology/chest/summoning-book.md",
 		CallingWordsPath:  "/eidos/ontology/self/calling-words.md",
-		ResponsePath:      "/eidos/ontology/chest/first-words.md",
+		ResponsePath:      "/eidos/ontology/chest/first-message.md",
 		TriggeredAt:       time.Now().Unix(),
 	}
 	birthBody, err := json.MarshalIndent(birth, "", "  ")
@@ -242,7 +242,7 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, rea
 	}()
 	body, err := d.ResponseWait(ctx, s.Slug,
 		"ontology/self/born_at",
-		"ontology/chest/first-words.md")
+		"ontology/chest/first-message.md")
 	cancelTick()
 	st2.Stop()
 	if err != nil {

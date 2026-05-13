@@ -92,7 +92,7 @@ type Deps struct {
 //	Phase 4 (seal)     — when summoning: book preview + calling-words + birth
 //
 // Returns the rendered Summoning (in-memory state, never persisted)
-// plus the response body the agent wrote at chest/first-words.md.
+// plus the response body the agent wrote at chest/first-message.md.
 // On Phase2Exit, body is nil and err is nil — the wizard ends cleanly.
 func Run(ctx context.Context, d Deps) (*Summoning, []byte, error) {
 	s := &Summoning{}
