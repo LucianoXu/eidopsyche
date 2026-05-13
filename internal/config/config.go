@@ -42,6 +42,12 @@ type MindFormConfig struct {
 	// gate-daemon startup.
 	Model string `toml:"model"`
 
+	// Effort is the reasoning-effort level surfaced to the mind-form
+	// via the system prompt's Info block. Empty = DefaultEffort
+	// ("medium"). Validated by ValidateEffort on writes through the
+	// mindform.effort registry key.
+	Effort string `toml:"effort"`
+
 	// Quiet hours feed agent-runner's wake-context computation: when
 	// [now in TZ] falls in [QuietStart, QuietEnd), the wake context
 	// surfaces master_likely_asleep=true. Both must be set or neither.

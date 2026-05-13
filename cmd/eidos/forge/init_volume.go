@@ -109,6 +109,19 @@ func runInitVolume(stdout, stderr io.Writer, stdin io.Reader) error {
 		return fmt.Errorf("gate init: %w", err)
 	}
 
+	// CLI `eidos forge create` leaves CreateOpts.MindFormNpub empty
+	// because the keypair is generated inside `gate init` above
+	// (only the wizard pre-generates host-side and passes
+	// EIDOS_FORGE_KEY_HEX). The scaffold tar therefore embedded an
+	// empty mindgate_npub into self/identity.toml. Patch it now with
+	// the npub of the key we just persisted so the agent-loop's Info
+	// block — and any tool that reads identity.toml — reports the
+	// real value. Idempotent: the wizard path overwrites with the
+	// same npub it pre-generated.
+	if err := patchIdentityNpub(ontologyDir, gateDir); err != nil {
+		return fmt.Errorf("patch identity.toml npub: %w", err)
+	}
+
 	// Patch the freshly-written gate config so the in-container daemon's
 	// wake hook fires when an inbound NIP-17 message lands. The default
 	// Config.Wake.Dir is empty (host gate has no wake-output behavior);
@@ -188,6 +201,44 @@ func chownTree(root string, uid, gid int) error {
 		}
 		return os.Lchown(p, uid, gid)
 	})
+}
+
+// patchIdentityNpub reads <gateDir>/key, derives the mind-form's
+// npub, and writes it into <ontologyDir>/self/identity.toml's
+// mindgate_npub field. Used to repair the on-disk identity record
+// for the CLI `eidos forge create` path, where the scaffold tar was
+// rendered before `gate init` had a chance to mint the keypair.
+//
+// The rewrite preserves the existing identity.toml contents byte-
+// for-byte except for the mindgate_npub line. We do not round-trip
+// through a TOML encoder here because that would silently reorder
+// keys and strip comments — and a single-line regex-style replace
+// is well-defined when the file shape is the framework's own.
+func patchIdentityNpub(ontologyDir, gateDir string) error {
+	keypair, err := identity.LoadKey(filepath.Join(gateDir, "key"))
+	if err != nil {
+		return fmt.Errorf("load gate key: %w", err)
+	}
+	identityPath := filepath.Join(ontologyDir, "self", "identity.toml")
+	body, err := os.ReadFile(identityPath)
+	if err != nil {
+		return fmt.Errorf("read identity.toml: %w", err)
+	}
+	lines := strings.Split(string(body), "\n")
+	patched := false
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "mindgate_npub") {
+			lines[i] = fmt.Sprintf("mindgate_npub = %q", keypair.Npub)
+			patched = true
+			break
+		}
+	}
+	if !patched {
+		// First-write: append the field if the on-disk file somehow
+		// lacks it (template regression guard).
+		lines = append(lines, fmt.Sprintf("mindgate_npub = %q", keypair.Npub))
+	}
+	return os.WriteFile(identityPath, []byte(strings.Join(lines, "\n")), 0o600)
 }
 
 // applyModelEnv writes mindform.model into the gate config when model

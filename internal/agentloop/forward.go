@@ -28,10 +28,6 @@ type ForwarderConfig struct {
 	// DreamState captured at startup (LastDreamFinishedAt feeds the
 	// "since last dream" hint). Refreshed by the rotation goroutine.
 	DreamState dreamstate.State
-	// IdentityPrompt is the contents of self/identity.md. Not used in
-	// wake rendering today; held here so future BuildWake variants can
-	// reference it without re-loading from disk.
-	IdentityPrompt string
 	// IsDreaming returns the dreaming flag's current value.
 	IsDreaming func() bool
 	// AppendToBacklog buffers a wake during dreaming; rotation drains.

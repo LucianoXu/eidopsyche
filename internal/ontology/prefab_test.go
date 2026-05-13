@@ -83,59 +83,59 @@ func TestTarStreamPrefab_FixtureRoundTrip(t *testing.T) {
 	if _, ok := seen["prefab.toml"]; ok {
 		t.Errorf("prefab.toml leaked into tar")
 	}
-	if _, ok := seen["self/identity.md.tpl"]; ok {
-		t.Errorf("identity.md.tpl should have been rendered to identity.md")
+	if _, ok := seen["self/identity.toml.tpl"]; ok {
+		t.Errorf("identity.toml.tpl should have been rendered to identity.toml")
 	}
-	id, ok := seen["self/identity.md"]
+	id, ok := seen["self/identity.toml"]
 	if !ok {
-		t.Fatalf("missing self/identity.md in tar; got %v", keysOf(seen))
+		t.Fatalf("missing self/identity.toml in tar; got %v", keysOf(seen))
 	}
-	for _, want := range []string{"Lyra", "alice", "npub1master", "npub1mindform", "wss://relay.example", "2026-05-10"} {
+	for _, want := range []string{"Lyra", "alice", "npub1master", "npub1mindform", "2026-05-10"} {
 		if !strings.Contains(id, want) {
-			t.Errorf("identity.md missing %q; got: %s", want, id)
+			t.Errorf("identity.toml missing %q; got: %s", want, id)
 		}
 	}
-	cw, ok := seen["essence/calling-words.md"]
+	cw, ok := seen["self/calling-words.md"]
 	if !ok {
-		t.Fatalf("missing essence/calling-words.md")
+		t.Fatalf("missing self/calling-words.md")
 	}
 	if !strings.Contains(cw, "Lyra") {
 		t.Errorf("calling-words missing label substitution; got %q", cw)
 	}
 }
 
-// TestTarStreamPrefab_JournalEntryProducesLiteralFile pins the
+// TestTarStreamPrefab_SummoningBookProducesLiteralFile pins the
 // contract documented in top-level CLAUDE.md: the wizard's rendered
-// summoning book is delivered via params.JournalEntry as a literal
-// file at journal/0000-summoning.md, regardless of which scaffold
+// summoning book is delivered via params.SummoningBook as a literal
+// file at chest/summoning-book.md, regardless of which scaffold
 // path produced the volume. Prior to this fix the prefab path
-// silently dropped JournalEntry, leaving the supervisor's birth
+// silently dropped SummoningBook, leaving the supervisor's birth
 // handler retrying forever for the missing summoning book.
-func TestTarStreamPrefab_JournalEntryProducesLiteralFile(t *testing.T) {
+func TestTarStreamPrefab_SummoningBookProducesLiteralFile(t *testing.T) {
 	const body = "## seal book {{ literal }}\nfrom prefab fixture\n"
 	var buf bytes.Buffer
 	params := Params{
-		Label:        "x",
-		OwnerNpub:    "n",
-		CreatedDate:  "d",
-		OwnerLabel:   "ol",
-		MindFormNpub: "mf",
-		HomeRelay:    "hr",
-		JournalEntry: body,
+		Label:         "x",
+		OwnerNpub:     "n",
+		CreatedDate:   "d",
+		OwnerLabel:    "ol",
+		MindFormNpub:  "mf",
+		HomeRelay:     "hr",
+		SummoningBook: body,
 	}
 	if err := TarStreamPrefab(&buf, "_test_fixture", params); err != nil {
 		t.Fatalf("TarStreamPrefab: %v", err)
 	}
-	got := tarEntryBody(t, buf.Bytes(), "journal/0000-summoning.md")
+	got := tarEntryBody(t, buf.Bytes(), "chest/summoning-book.md")
 	if got != body {
-		t.Errorf("journal/0000-summoning.md = %q, want %q", got, body)
+		t.Errorf("chest/summoning-book.md = %q, want %q", got, body)
 	}
 }
 
-// TestTarStreamPrefab_EmptyJournalEntryOmitsFile keeps the test
-// fixture's prefab tree clean: when JournalEntry is empty (today's
+// TestTarStreamPrefab_EmptySummoningBookOmitsFile keeps the test
+// fixture's prefab tree clean: when SummoningBook is empty (today's
 // non-wizard paths), TarStreamPrefab should not write the file.
-func TestTarStreamPrefab_EmptyJournalEntryOmitsFile(t *testing.T) {
+func TestTarStreamPrefab_EmptySummoningBookOmitsFile(t *testing.T) {
 	var buf bytes.Buffer
 	if err := TarStreamPrefab(&buf, "_test_fixture", Params{
 		Label: "x", OwnerNpub: "n", CreatedDate: "d",
@@ -155,8 +155,8 @@ func TestTarStreamPrefab_EmptyJournalEntryOmitsFile(t *testing.T) {
 		}
 		seen[h.Name] = true
 	}
-	if seen["journal/0000-summoning.md"] {
-		t.Errorf("empty JournalEntry should not produce journal/0000-summoning.md")
+	if seen["chest/summoning-book.md"] {
+		t.Errorf("empty SummoningBook should not produce chest/summoning-book.md")
 	}
 }
 

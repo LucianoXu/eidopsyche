@@ -183,6 +183,20 @@ func init() {
 		},
 	})
 	register(Key{
+		Path:        "mindform.effort",
+		Description: "Reasoning effort surfaced to the mind-form. One of low|medium|high. Empty defaults to medium.",
+		Contexts:    ContainerCtx,
+		Get:         func(c *Config) string { return c.MindForm.Effort },
+		Set: func(c *Config, v string) error {
+			v = strings.TrimSpace(v)
+			if err := ValidateEffort(v); err != nil {
+				return err
+			}
+			c.MindForm.Effort = v
+			return nil
+		},
+	})
+	register(Key{
 		Path:        "heartbeat.interval",
 		Description: "Mind-form heartbeat cadence. Supported: 1m,2m,3m,4m,5m,6m,10m,12m,15m,20m,30m,1h,2h,3h,4h,6h,8h,12h,24h. Empty uses the 2h default. Hot-reloaded by the apply hook framework — no container restart needed.",
 		Contexts:    ContainerCtx,

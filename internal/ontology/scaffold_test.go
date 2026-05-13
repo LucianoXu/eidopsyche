@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 func TestScaffoldWritesAllTemplateFiles(t *testing.T) {
@@ -23,14 +25,16 @@ func TestScaffoldWritesAllTemplateFiles(t *testing.T) {
 	}
 	required := []string{
 		"CLAUDE.md",
-		"self/identity.md",
-		"self/values.md",
-		"memory/mood.md",
+		"self/identity.toml",
+		"self/soul.md",
+		"self/secret.md",
+		"self/mood.md",
+		"memory/notes/MEMORY.md",
 		"memory/semantic/.gitkeep",
 		"memory/procedural/.gitkeep",
 		"memory/episodic/.gitkeep",
-		"desk/README.md",
-		"drawer/README.md",
+		"dreams/DREAMS.md",
+		"chest/README.md",
 		".claude/settings.json",
 		".gitignore",
 	}
@@ -38,6 +42,52 @@ func TestScaffoldWritesAllTemplateFiles(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
 			t.Errorf("missing %s: %v", rel, err)
 		}
+	}
+}
+
+func TestScaffoldProducesNewTree(t *testing.T) {
+	dir := t.TempDir()
+	params := Params{
+		Label:        "test-bee",
+		OwnerNpub:    "npub1owner",
+		OwnerLabel:   "Bob",
+		MindFormNpub: "npub1self",
+		CreatedDate:  "2026-05-13",
+		HomeRelay:    "wss://relay.example.com",
+	}
+	if err := Scaffold(dir, params); err != nil {
+		t.Fatalf("Scaffold failed: %v", err)
+	}
+	mustNotExist := []string{
+		"essence", "journal", "desk", "drawer",
+		"self/values.md", "self/identity.md", "self/identity.md.tpl",
+		"self/identity.toml.tpl", "memory/mood.md",
+	}
+	for _, p := range mustNotExist {
+		if _, err := os.Stat(filepath.Join(dir, p)); err == nil {
+			t.Errorf("expected %s to NOT exist after Scaffold", p)
+		}
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "self/identity.toml"))
+	if err != nil {
+		t.Fatalf("read self/identity.toml: %v", err)
+	}
+	for _, want := range []string{
+		`label = "test-bee"`,
+		`creator_label = "Bob"`,
+		`creator_npub = "npub1owner"`,
+		`mindgate_npub = "npub1self"`,
+		`created_date = "2026-05-13"`,
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("self/identity.toml missing %q\nfull body:\n%s", want, body)
+		}
+	}
+	if strings.Contains(string(body), "home_relay") {
+		t.Errorf("self/identity.toml should not contain home_relay (dropped)\nfull body:\n%s", body)
+	}
+	if strings.Contains(string(body), "kind") {
+		t.Errorf("self/identity.toml should not contain kind (dropped)\nfull body:\n%s", body)
 	}
 }
 
@@ -51,14 +101,14 @@ func TestScaffoldRendersIdentityTemplate(t *testing.T) {
 	if err := Scaffold(dir, params); err != nil {
 		t.Fatal(err)
 	}
-	body, err := os.ReadFile(filepath.Join(dir, "self/identity.md"))
+	body, err := os.ReadFile(filepath.Join(dir, "self/identity.toml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := string(body)
 	for _, want := range []string{"alice", "npub1ownertest", "2026-05-09"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("identity.md missing %q; got: %s", want, got)
+			t.Errorf("identity.toml missing %q; got: %s", want, got)
 		}
 	}
 }
@@ -71,6 +121,44 @@ func TestScaffoldRefusesIfTargetNonEmpty(t *testing.T) {
 	err := Scaffold(dir, Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d"})
 	if err == nil {
 		t.Errorf("expected refusal on non-empty target")
+	}
+}
+
+// TestScaffold_IdentityTOMLEscapesSpecialChars pins the regression
+// codex flagged: labels / creator labels with TOML-special characters
+// (", \, control bytes) must not produce a malformed identity.toml.
+// The rendered file must round-trip through prompts.FromOntology.
+func TestScaffold_IdentityTOMLEscapesSpecialChars(t *testing.T) {
+	dir := t.TempDir()
+	params := Params{
+		Label:        `she said "hi"\nthen left`,
+		OwnerNpub:    "npub1owner",
+		OwnerLabel:   `Bo"b\Smith`,
+		MindFormNpub: "npub1self",
+		CreatedDate:  "2026-05-13",
+	}
+	if err := Scaffold(dir, params); err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "self/identity.toml"))
+	if err != nil {
+		t.Fatalf("read identity.toml: %v", err)
+	}
+	// Parse via BurntSushi/toml to confirm validity.
+	var parsed struct {
+		Label        string `toml:"label"`
+		CreatorLabel string `toml:"creator_label"`
+	}
+	if _, err := toml.Decode(string(body), &parsed); err != nil {
+		t.Fatalf("identity.toml is not valid TOML:\n%s\nerror: %v", body, err)
+	}
+	if parsed.Label != params.Label {
+		t.Errorf("label round-trip mismatch: got %q, want %q\nfile:\n%s",
+			parsed.Label, params.Label, body)
+	}
+	if parsed.CreatorLabel != params.OwnerLabel {
+		t.Errorf("creator_label round-trip mismatch: got %q, want %q\nfile:\n%s",
+			parsed.CreatorLabel, params.OwnerLabel, body)
 	}
 }
 
@@ -92,7 +180,7 @@ func TestTarStreamProducesAllEntries(t *testing.T) {
 		}
 		seen[h.Name] = true
 	}
-	for _, want := range []string{"CLAUDE.md", "self/identity.md", "memory/mood.md", ".gitignore"} {
+	for _, want := range []string{"CLAUDE.md", "self/identity.toml", "self/mood.md", ".gitignore"} {
 		if !seen[want] {
 			t.Errorf("tar missing %q", want)
 		}
@@ -136,10 +224,10 @@ func TestTarStreamPropagatesWriteError(t *testing.T) {
 	}
 }
 
-// TestTarStream_JournalAndEssenceDirsExist locks in that journal/ and
-// essence/ are carried by the tar stream so the new MindForm volume has
-// the file-as-essence slots the First Contact wizard expects.
-func TestTarStream_JournalAndEssenceDirsExist(t *testing.T) {
+// TestTarStream_DreamsAndChestDirsExist locks in that dreams/ and
+// chest/ are carried by the tar stream so the new MindForm volume has
+// the operator-readable dream digest and the non-essence scratch space.
+func TestTarStream_DreamsAndChestDirsExist(t *testing.T) {
 	params := Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d"}
 	var buf bytes.Buffer
 	if err := TarStream(&buf, params); err != nil {
@@ -147,8 +235,9 @@ func TestTarStream_JournalAndEssenceDirsExist(t *testing.T) {
 	}
 	seen := tarEntryNames(t, buf.Bytes())
 	for _, want := range []string{
-		"journal/", "journal/.gitkeep",
-		"essence/", "essence/.gitkeep",
+		"dreams/DREAMS.md",
+		"chest/README.md",
+		"memory/notes/MEMORY.md",
 	} {
 		if !seen[want] {
 			t.Errorf("tar missing %q (got: %v)", want, seen)
@@ -156,43 +245,46 @@ func TestTarStream_JournalAndEssenceDirsExist(t *testing.T) {
 	}
 }
 
-// TestTarStream_JournalEntryProducesLiteralFile verifies the wizard's
+// TestTarStream_SummoningBookProducesLiteralFile verifies the wizard's
 // summoning book lands in the tar bytes-for-bytes — `{{` literals must
 // survive (they would otherwise be eaten by text/template).
-func TestTarStream_JournalEntryProducesLiteralFile(t *testing.T) {
+func TestTarStream_SummoningBookProducesLiteralFile(t *testing.T) {
 	const body = "# 召唤书\n\n签者：alice\n\nThis has {{.Literal}} that should NOT be expanded.\n"
-	params := Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d", JournalEntry: body}
+	params := Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d", SummoningBook: body}
 	var buf bytes.Buffer
 	if err := TarStream(&buf, params); err != nil {
 		t.Fatal(err)
 	}
-	got := tarEntryBody(t, buf.Bytes(), "journal/0000-summoning.md")
+	got := tarEntryBody(t, buf.Bytes(), "chest/summoning-book.md")
 	if got != body {
 		t.Errorf("entry body = %q, want %q", got, body)
 	}
 }
 
-func TestTarStream_EmptyJournalEntryOmitsFile(t *testing.T) {
+func TestTarStream_EmptySummoningBookOmitsFile(t *testing.T) {
 	params := Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d"}
 	var buf bytes.Buffer
 	if err := TarStream(&buf, params); err != nil {
 		t.Fatal(err)
 	}
 	seen := tarEntryNames(t, buf.Bytes())
-	if seen["journal/0000-summoning.md"] {
-		t.Errorf("empty JournalEntry should not produce 0000-summoning.md")
+	if seen["chest/summoning-book.md"] {
+		t.Errorf("empty SummoningBook should not produce chest/summoning-book.md")
 	}
 }
 
-func TestTarStream_GitignoreCarriesEssenceSecret(t *testing.T) {
+func TestTarStream_GitignoreCarriesSelfSecret(t *testing.T) {
 	params := Params{Label: "alice", OwnerNpub: "n", CreatedDate: "d"}
 	var buf bytes.Buffer
 	if err := TarStream(&buf, params); err != nil {
 		t.Fatal(err)
 	}
 	got := tarEntryBody(t, buf.Bytes(), ".gitignore")
-	if !strings.Contains(got, "essence/secret.md") {
-		t.Errorf(".gitignore missing essence/secret.md; got: %q", got)
+	if !strings.Contains(got, "self/secret.md") {
+		t.Errorf(".gitignore missing self/secret.md; got: %q", got)
+	}
+	if !strings.Contains(got, "chest/") {
+		t.Errorf(".gitignore missing chest/ rule; got: %q", got)
 	}
 }
 

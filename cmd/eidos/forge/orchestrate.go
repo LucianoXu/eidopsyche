@@ -150,13 +150,14 @@ func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOp
 				go func() {
 					defer pipeW.Close()
 					params := ontology.Params{
-						Label:        o.Label,
-						OwnerNpub:    o.Owner,
-						OwnerLabel:   o.OwnerLabel,
-						MindFormNpub: o.MindFormNpub,
-						HomeRelay:    o.Relay,
-						CreatedDate:  time.Now().UTC().Format("2006-01-02"),
-						JournalEntry: o.JournalEntry,
+						Label:         o.Label,
+						OwnerNpub:     o.Owner,
+						OwnerLabel:    o.OwnerLabel,
+						MindFormNpub:  o.MindFormNpub,
+						HomeRelay:     o.Relay,
+						CreatedDate:   time.Now().UTC().Format("2006-01-02"),
+						SummoningBook: o.SummoningBook,
+						RoleResearch:  o.RoleResearch,
 					}
 					var perr error
 					if o.PrefabID != "" {

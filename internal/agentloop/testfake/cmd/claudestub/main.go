@@ -39,7 +39,7 @@ func main() {
 	// argv parsing succeeds. String-valued flags are declared even
 	// though we discard the values.
 	for _, name := range []string{
-		"input-format", "output-format", "append-system-prompt",
+		"input-format", "output-format", "system-prompt",
 		"model", "resume", "p",
 	} {
 		flag.String(name, "", "(accepted but unused by stub; mirrors claude CLI)")

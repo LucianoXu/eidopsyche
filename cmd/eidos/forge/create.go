@@ -12,7 +12,7 @@ import (
 
 // CreateOpts is the inputs to Orchestrate. All flag-bound CLI options
 // land here, and the First Contact wizard fills it in from in-memory
-// summoning state. The wizard-only fields KeyHex and JournalEntry are
+// summoning state. The wizard-only fields KeyHex and SummoningBook are
 // not exposed as CLI flags — they make no sense for scripted use.
 type CreateOpts struct {
 	Owner   string
@@ -29,8 +29,9 @@ type CreateOpts struct {
 	// (validated via config.ValidateHeartbeatInterval).
 	HeartbeatInterval string
 
-	KeyHex       string // wizard-only: pre-generated MindForm private hex
-	JournalEntry string // wizard-only: rendered summoning-book markdown
+	KeyHex        string // wizard-only: pre-generated MindForm private hex
+	SummoningBook string // wizard-only: rendered summoning-book markdown
+	RoleResearch  string // wizard-only: rendered self/role-research.md (scratch path)
 
 	// PrefabID, when non-empty, makes Orchestrate stream the
 	// prefab/<id>/ tree into the volume instead of the canonical

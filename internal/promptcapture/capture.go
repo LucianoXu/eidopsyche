@@ -21,9 +21,10 @@ type Opts struct {
 	// Cwd is the working directory for the spawned claude. When set,
 	// claude picks up any ancestor CLAUDE.md it finds from there.
 	Cwd string
-	// IdentityPrompt is passed via --append-system-prompt. Empty means
-	// omit the flag (equivalent to --bare).
-	IdentityPrompt string
+	// SystemPrompt is passed via --system-prompt (full takeover of
+	// Claude Code's default preamble). Empty means omit the flag
+	// (equivalent to --bare).
+	SystemPrompt string
 	// Model, if non-empty, is passed as --model. Empty → omitted.
 	Model string
 	// Prompt is the -p argument. Default "ping" when empty.
@@ -131,8 +132,8 @@ func Run(ctx context.Context, opts Opts) (map[string]any, error) {
 // buildClaudeArgs constructs the argv slice for the spawned process.
 func buildClaudeArgs(opts Opts) []string {
 	var args []string
-	if opts.IdentityPrompt != "" {
-		args = append(args, "--append-system-prompt", opts.IdentityPrompt)
+	if opts.SystemPrompt != "" {
+		args = append(args, "--system-prompt", opts.SystemPrompt)
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)

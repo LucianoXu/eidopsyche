@@ -7,27 +7,16 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/prompts"
 )
 
-func TestBirthBootEmbedded(t *testing.T) {
-	got := prompts.BirthBoot()
-	for _, want := range []string{
-		"You have just been summoned",
-		"essence/born_at",
-		"identity → secret → response → born_at",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("BirthBoot missing %q", want)
-		}
-	}
-}
-
 func TestBirthUser(t *testing.T) {
-	got := prompts.BirthUser("npub1example", "BOOK", "WORDS")
+	got, err := prompts.BirthUser("Bob")
+	if err != nil {
+		t.Fatalf("BirthUser: %v", err)
+	}
 	for _, want := range []string{
-		"Operator npub: npub1example",
-		"--- summoning book ---",
-		"BOOK",
-		"--- calling-words ---",
-		"WORDS",
+		"summoned by Bob.",
+		"chest/summoning-book.md",
+		"self/calling-words.md",
+		"self/born_at",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("BirthUser missing %q; got:\n%s", want, got)

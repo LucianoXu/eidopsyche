@@ -2,6 +2,7 @@ package ontology
 
 import (
 	"archive/tar"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,34 +14,53 @@ import (
 	"time"
 )
 
-// Params are the substitutions Scaffold and TarStream make into .tpl
-// files. Existing template/ .tpl files only reference Label / OwnerNpub
-// / CreatedDate; the additional fields are populated for the prefab
-// path so prefab .tpl files can address master / mind-form by label
-// and pubkey. Unused fields render as zero (an empty string), unless
-// the renderer is configured with missingkey=error (which the prefab
-// tar stream does, see prefab.go).
-type Params struct {
-	// Required by both paths.
-	Label       string
-	OwnerNpub   string
-	CreatedDate string
+// templateFuncs are exposed inside every .tpl rendered by scaffold/tar.
+// `tomlstr` quotes an arbitrary string as a TOML basic string so
+// identity.toml.tpl can safely interpolate labels / npubs / etc. that
+// would otherwise break the file when they contain `"`, `\`, or
+// control bytes. json.Marshal produces a Unicode-escaped, double-
+// quoted string whose syntax overlaps TOML's basic-string syntax for
+// all UTF-8 inputs.
+var templateFuncs = template.FuncMap{
+	"tomlstr": func(s string) (string, error) {
+		b, err := json.Marshal(s)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	},
+}
 
-	// Used only by prefab .tpl files; ignored by template/.
+// Params are the substitutions Scaffold and TarStream make into .tpl
+// files. The full set is rendered into every identity.toml.tpl and is
+// also available to other prefab-authored .tpl files (calling-words,
+// CLAUDE.md, soul). Unused fields render as the empty string unless
+// the renderer is configured with missingkey=error (which the prefab
+// tar stream does, see prefab.go) — so prefab .tpl files referencing
+// an undeclared key fail loud rather than ship blank substitutions.
+type Params struct {
+	Label        string
+	OwnerNpub    string
 	OwnerLabel   string
 	MindFormNpub string
 	HomeRelay    string
+	CreatedDate  string
 
-	// JournalEntry, if non-empty, is appended to the tar stream produced
+	// SummoningBook, if non-empty, is appended to the tar stream produced
 	// by TarStream and TarStreamPrefab as a literal file at
-	// journal/0000-summoning.md. It is NOT run through text/template —
+	// chest/summoning-book.md. It is NOT run through text/template —
 	// the wizard's pre-rendered markdown can contain `{{` literals that
-	// would otherwise break the template engine. Used by the First
-	// Contact wizard for both the scratch path and the prefab path
-	// (the supervisor's birth handler reads this file to drive the
-	// mind-form's first wake; prefab path was previously missing this
-	// write, which left the birth handler retrying forever).
-	JournalEntry string
+	// would otherwise break the template engine. chest/ is .gitignored
+	// inside the ontology so the seal lives near the mind-form but does
+	// not enter their persistent life-log.
+	SummoningBook string
+
+	// RoleResearch, if non-empty, is appended to the tar stream produced
+	// by TarStream as a literal file at self/role-research.md. The
+	// wizard's scratch path renders this with claude (player description
+	// + web research); the prefab path ships a pre-authored copy as a
+	// regular file inside prefab/<id>/self/ instead.
+	RoleResearch string
 }
 
 // Scaffold writes the v0 ontology template into dir, rendering any .tpl
@@ -146,10 +166,27 @@ func TarStream(w io.Writer, params Params) error {
 		tw.Close() //nolint:errcheck // best-effort; return the walk error
 		return walkErr
 	}
-	if params.JournalEntry != "" {
-		body := []byte(params.JournalEntry)
+	if params.SummoningBook != "" {
+		body := []byte(params.SummoningBook)
 		if err := tw.WriteHeader(&tar.Header{
-			Name:     "journal/0000-summoning.md",
+			Name:     "chest/summoning-book.md",
+			Mode:     0o600,
+			Size:     int64(len(body)),
+			Typeflag: tar.TypeReg,
+			ModTime:  now,
+		}); err != nil {
+			tw.Close() //nolint:errcheck
+			return err
+		}
+		if _, err := tw.Write(body); err != nil {
+			tw.Close() //nolint:errcheck
+			return err
+		}
+	}
+	if params.RoleResearch != "" {
+		body := []byte(params.RoleResearch)
+		if err := tw.WriteHeader(&tar.Header{
+			Name:     "self/role-research.md",
 			Mode:     0o600,
 			Size:     int64(len(body)),
 			Typeflag: tar.TypeReg,
@@ -181,7 +218,7 @@ func assertEmpty(dir string) error {
 }
 
 func renderTemplate(body string, params Params) (string, error) {
-	t, err := template.New("ontology").Parse(body)
+	t, err := template.New("ontology").Funcs(templateFuncs).Parse(body)
 	if err != nil {
 		return "", err
 	}

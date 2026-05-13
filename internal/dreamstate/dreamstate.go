@@ -94,6 +94,67 @@ func End(path string, now time.Time, note, prosePath string) error {
 	})
 }
 
+// WriteDigest persists the digest of a completed dream cycle to the
+// mind-form's ontology at dreams/YYYY-MM-DD.md (appending an HH:MM:SS
+// UTC section for each cycle so multiple same-day dreams don't
+// overwrite each other) and appends a one-line entry to
+// dreams/DREAMS.md keyed by full timestamp. Both writes are
+// best-effort: if the dreams/ directory is missing WriteDigest
+// creates it. Callers should invoke this from `eidos forge dream end`
+// flows so the operator gets a human-readable surface alongside the
+// JSON state file.
+//
+// summary is the consolidation note (typically the dream-end --note
+// plus a sentence about the prose file). The first line is also used
+// as the DREAMS.md index hook (truncated to 120 chars).
+func WriteDigest(ontologyDir string, when time.Time, summary string) error {
+	dir := filepath.Join(ontologyDir, "dreams")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir dreams: %w", err)
+	}
+
+	utc := when.UTC()
+	date := utc.Format("2006-01-02")
+	dailyPath := filepath.Join(dir, date+".md")
+	existingDaily, err := os.ReadFile(dailyPath)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", dailyPath, err)
+	}
+	var dailyBuilder strings.Builder
+	if len(existingDaily) == 0 {
+		fmt.Fprintf(&dailyBuilder, "# %s\n\n", date)
+	} else {
+		dailyBuilder.Write(existingDaily)
+		if !strings.HasSuffix(string(existingDaily), "\n\n") {
+			if strings.HasSuffix(string(existingDaily), "\n") {
+				dailyBuilder.WriteString("\n")
+			} else {
+				dailyBuilder.WriteString("\n\n")
+			}
+		}
+	}
+	fmt.Fprintf(&dailyBuilder, "## %s UTC\n\n%s\n", utc.Format("15:04:05"), summary)
+	if err := os.WriteFile(dailyPath, []byte(dailyBuilder.String()), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", dailyPath, err)
+	}
+
+	indexPath := filepath.Join(dir, "DREAMS.md")
+	existing, err := os.ReadFile(indexPath)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read DREAMS.md: %w", err)
+	}
+	firstLine := strings.SplitN(strings.TrimSpace(summary), "\n", 2)[0]
+	if len(firstLine) > 120 {
+		firstLine = firstLine[:117] + "..."
+	}
+	entry := fmt.Sprintf("- [%s %s UTC](%s.md) — %s\n", date, utc.Format("15:04:05"), date, firstLine)
+	newBody := string(existing) + entry
+	if err := os.WriteFile(indexPath, []byte(newBody), 0o644); err != nil {
+		return fmt.Errorf("write DREAMS.md: %w", err)
+	}
+	return nil
+}
+
 func isUnderEpisodic(p string) bool {
 	clean := filepath.ToSlash(filepath.Clean(p))
 	return strings.HasPrefix(clean, "memory/episodic/")

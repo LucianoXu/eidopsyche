@@ -12,6 +12,7 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/promptcapture"
+	"github.com/LucianoXu/eidopsyche/internal/prompts"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +23,7 @@ const (
 	promptDumpGateConfigPath = "/eidos/gate/config.toml"
 	promptDumpClaudeDir      = "/eidos/ontology/.claude"
 	promptDumpClaudeBin      = "/usr/local/bin/claude"
-	promptDumpIdentityRel    = "self/identity.md"
+	promptDumpIdentityRel    = "self/identity.toml"
 )
 
 // promptDumpInContainerInput is the typed input for runPromptDumpInContainer.
@@ -40,7 +41,7 @@ type promptDumpInContainerInput struct {
 	Stderr         io.Writer
 }
 
-// runPromptDumpInContainer reads identity.md + config.toml from the
+// runPromptDumpInContainer reads identity.toml + config.toml from the
 // supplied paths, invokes promptcapture.Run, and writes the envelope
 // JSON to input.Stdout.
 func runPromptDumpInContainer(ctx context.Context, in promptDumpInContainerInput) error {
@@ -52,14 +53,12 @@ func runPromptDumpInContainer(ctx context.Context, in promptDumpInContainerInput
 	}
 
 	identityPath := filepath.Join(in.OntologyRoot, promptDumpIdentityRel)
-	identityBytes, err := os.ReadFile(identityPath)
 	identityRel := promptDumpIdentityRel
-	if err != nil {
+	if _, err := os.Stat(identityPath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("read identity: %w", err)
+			return fmt.Errorf("stat identity: %w", err)
 		}
 		fmt.Fprintf(in.Stderr, "prompt-dump: identity not found at %s; proceeding bare\n", identityPath)
-		identityBytes = nil
 		identityRel = ""
 	}
 
@@ -68,20 +67,35 @@ func runPromptDumpInContainer(ctx context.Context, in promptDumpInContainerInput
 		model = cfg.MindForm.Model
 	}
 
-	identityPrompt := string(identityBytes)
-	if in.Bare {
-		identityPrompt = ""
+	// Assemble the full system prompt the agent-loop would send, so the
+	// dump mirrors production. --bare omits the flag entirely (claude's
+	// default preamble surfaces).
+	systemPrompt := ""
+	if !in.Bare {
+		facts, _ := prompts.FromOntology(in.OntologyRoot)
+		facts.Model = model
+		facts.OntologyDir = in.OntologyRoot
+		facts.Effort = config.DefaultEffort
+		if cfg, err := config.Load(in.GateConfigPath); err == nil && cfg.MindForm.Effort != "" {
+			facts.Effort = cfg.MindForm.Effort
+		}
+		built, bErr := prompts.Build(ctx, facts, in.OntologyRoot)
+		if bErr != nil {
+			return fmt.Errorf("build system prompt: %w", bErr)
+		}
+		systemPrompt = built
+	} else {
 		identityRel = ""
 	}
 
 	env, err := promptcapture.Run(ctx, promptcapture.Opts{
-		ClaudeBin:      in.ClaudeBin,
-		Cwd:            in.OntologyRoot,
-		IdentityPrompt: identityPrompt,
-		Model:          model,
-		Prompt:         in.Prompt,
-		ClaudeDir:      in.ClaudeDir,
-		Verbose:        in.Verbose,
+		ClaudeBin:    in.ClaudeBin,
+		Cwd:          in.OntologyRoot,
+		SystemPrompt: systemPrompt,
+		Model:        model,
+		Prompt:       in.Prompt,
+		ClaudeDir:    in.ClaudeDir,
+		Verbose:      in.Verbose,
 		CapturedFrom: promptcapture.CapturedFrom{
 			Mindform:     in.MindformName,
 			OntologyRoot: in.OntologyRoot,
@@ -128,7 +142,7 @@ func newPromptDumpInContainerCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&prompt, "prompt", "p", "ping", "stub prompt sent to claude")
-	cmd.Flags().BoolVar(&bare, "bare", false, "omit --append-system-prompt")
+	cmd.Flags().BoolVar(&bare, "bare", false, "omit --system-prompt (use claude's default preamble)")
 	cmd.Flags().StringVar(&mindformName, "mindform-name", "",
 		"recorded in captured_from.mindform; host wrapper supplies this")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "log proxy traffic + claude stderr")

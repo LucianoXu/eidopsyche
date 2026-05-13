@@ -40,8 +40,11 @@ type SpawnOpts struct {
 	SessionUUID string
 	// Model, if non-empty, is passed as --model. Empty → omitted (claude picks default).
 	Model string
-	// IdentityPrompt is the mind-form's system prompt, passed via --append-system-prompt.
-	IdentityPrompt string
+	// SystemPrompt is the full --system-prompt payload assembled by
+	// internal/prompts.Build. Replaces the previous identity-only
+	// --append-system-prompt; the mind-form no longer sees Claude
+	// Code's default preamble.
+	SystemPrompt string
 	// Cwd is the working directory for the claude process (ontology root).
 	Cwd string
 	// ClaudeDir is the value to inject as CLAUDE_DIR in the process env.
@@ -121,7 +124,7 @@ func SpawnClaude(opts SpawnOpts) (*SpawnedClaude, error) {
 // buildClaudeArgs constructs the argv slice for the claude subprocess.
 func buildClaudeArgs(opts SpawnOpts) []string {
 	args := []string{
-		"--append-system-prompt", opts.IdentityPrompt,
+		"--system-prompt", opts.SystemPrompt,
 		"--dangerously-skip-permissions",
 	}
 	switch opts.Mode {

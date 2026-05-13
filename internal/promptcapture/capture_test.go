@@ -26,16 +26,16 @@ func TestRunCapturesEnvelopeViaStub(t *testing.T) {
 	defer cancel()
 
 	env, err := Run(ctx, Opts{
-		ClaudeBin:      stub,
-		Cwd:            t.TempDir(),
-		IdentityPrompt: "test identity",
-		Model:          "sonnet",
-		Prompt:         "ping",
+		ClaudeBin:    stub,
+		Cwd:          t.TempDir(),
+		SystemPrompt: "test identity",
+		Model:        "sonnet",
+		Prompt:       "ping",
 		CapturedFrom: CapturedFrom{
 			Mindform:     "alice",
 			OntologyRoot: "/eidos/ontology",
 			Model:        "sonnet",
-			IdentityPath: "self/identity.md",
+			IdentityPath: "self/identity.toml",
 		},
 	})
 	if err != nil {

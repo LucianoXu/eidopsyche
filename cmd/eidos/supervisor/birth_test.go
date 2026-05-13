@@ -23,10 +23,10 @@ func TestDrainBirth_RunsHandlerThenClearsBirthJSON(t *testing.T) {
 	handler := func(_ context.Context, _ wake.BirthSignal, ont string) error {
 		called = true
 		// Mimic the agent's last action: write born_at.
-		if err := os.MkdirAll(filepath.Join(ont, "essence"), 0o700); err != nil {
+		if err := os.MkdirAll(filepath.Join(ont, "self"), 0o700); err != nil {
 			return err
 		}
-		return os.WriteFile(filepath.Join(ont, "essence/born_at"), []byte("1\n"), 0o600)
+		return os.WriteFile(filepath.Join(ont, "self/born_at"), []byte("1\n"), 0o600)
 	}
 	if err := drainBirthIfPresent(context.Background(), wakeD, ontD, handler); err != nil {
 		t.Fatalf("drainBirthIfPresent: %v", err)
@@ -61,10 +61,10 @@ func TestDrainBirth_RefusesWhenBornAtExists(t *testing.T) {
 	if err := wake.WriteBirth(wakeD, wake.BirthSignal{V: 1, OperatorNpub: "npub1op"}); err != nil {
 		t.Fatalf("seed birth: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(ontD, "essence"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(ontD, "self"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(ontD, "essence/born_at"), []byte("999\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(ontD, "self/born_at"), []byte("999\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	called := false
@@ -76,7 +76,7 @@ func TestDrainBirth_RefusesWhenBornAtExists(t *testing.T) {
 		t.Fatalf("drainBirthIfPresent: %v", err)
 	}
 	if called {
-		t.Errorf("handler should NOT run when essence/born_at already exists")
+		t.Errorf("handler should NOT run when self/born_at already exists")
 	}
 	if _, err := os.Stat(filepath.Join(wakeD, wake.BirthFileName)); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("stale birth.json should be cleared even when refused")

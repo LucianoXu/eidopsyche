@@ -26,11 +26,11 @@ import (
 // at the end of a successful birth. Its presence is the supervisor's
 // authoritative signal that birth has happened — once it exists, any
 // stale birth.json is silently cleared.
-const bornAtRel = "essence/born_at"
+const bornAtRel = "self/born_at"
 
 // BirthHandler runs the agent for a birth-wake. The handler is
 // responsible for invoking claude with the right context and verifying
-// the agent wrote essence/born_at. drainBirthIfPresent uses born_at as
+// the agent wrote self/born_at. drainBirthIfPresent uses born_at as
 // the sole authoritative idempotency signal.
 type BirthHandler func(ctx context.Context, sig wake.BirthSignal, ontologyDir string) error
 
@@ -40,7 +40,7 @@ type BirthHandler func(ctx context.Context, sig wake.BirthSignal, ontologyDir st
 var birthHandlerForProduction BirthHandler = productionBirthHandler
 
 // drainBirthIfPresent is the integration point: if <wakeDir>/birth.json
-// exists AND <ontologyDir>/essence/born_at is absent, run the handler.
+// exists AND <ontologyDir>/self/born_at is absent, run the handler.
 // On success, delete birth.json. On stale-found-born_at, delete birth.json
 // without invoking the handler. On handler error, leave birth.json so
 // the next supervisor iteration retries.
@@ -68,7 +68,7 @@ func drainBirthIfPresent(ctx context.Context, wakeDir, ontologyDir string, handl
 // from the paths in birth.json, builds the agent's prompt
 // (constitution-augmented identity + birth boot prompt as the system
 // message; book + calling-words as the user prompt), and runs claude.
-// Verifies the agent set essence/born_at — if not, returns an error so
+// Verifies the agent set self/born_at — if not, returns an error so
 // the supervisor's next iteration retries.
 //
 // Self-gates on /eidos/run/auth_required.json: if claude auth has
@@ -83,25 +83,54 @@ func productionBirthHandler(ctx context.Context, sig wake.BirthSignal, ontologyD
 			time.Unix(state.Since, 0).UTC().Format(time.RFC3339), authstate.Path)
 	}
 
-	bookBody, err := os.ReadFile(sig.SummoningBookPath)
-	if err != nil {
-		return fmt.Errorf("read summoning book: %w", err)
+	// Verify the on-disk summoning book and calling-words exist; the
+	// birth.txt user-prompt instructs the agent to Read them via tool
+	// rather than inlining them, so we only need a precondition check.
+	if _, err := os.Stat(sig.SummoningBookPath); err != nil {
+		return fmt.Errorf("summoning book missing at %s: %w", sig.SummoningBookPath, err)
 	}
-	wordsBody, err := os.ReadFile(sig.CallingWordsPath)
-	if err != nil {
-		return fmt.Errorf("read calling-words: %w", err)
+	if _, err := os.Stat(sig.CallingWordsPath); err != nil {
+		return fmt.Errorf("calling-words missing at %s: %w", sig.CallingWordsPath, err)
 	}
-	identity, _ := os.ReadFile(filepath.Join(ontologyDir, "self/identity.md"))
-	systemPrompt := string(identity) + "\n\n" + prompts.BirthBoot()
-	userPrompt := prompts.BirthUser(sig.OperatorNpub, string(bookBody), string(wordsBody))
+	// role-research.md is the dramaturge dossier the wizard wrote
+	// (scratch path: claude-generated; prefab path: shipped in the
+	// prefab tree). The birth boot prompt instructs the agent to
+	// read it as the first file; refuse to spawn claude if it is
+	// missing rather than burn a session on an empty file.
+	roleResearchPath := filepath.Join(ontologyDir, "self", "role-research.md")
+	if _, err := os.Stat(roleResearchPath); err != nil {
+		return fmt.Errorf("role-research missing at %s: %w", roleResearchPath, err)
+	}
+
+	// Identity facts come from self/identity.toml; the scaffold wrote
+	// them before birth.json was placed.
+	facts, err := prompts.FromOntology(ontologyDir)
+	if err != nil {
+		return fmt.Errorf("read identity facts: %w", err)
+	}
+	facts.OntologyDir = ontologyDir
+	facts.Effort = config.DefaultEffort
+	if cfg, err := config.Load(agentLoopGateConfigPath); err == nil {
+		facts.Model = cfg.MindForm.Model
+		if cfg.MindForm.Effort != "" {
+			facts.Effort = cfg.MindForm.Effort
+		}
+	}
+
+	systemPrompt, err := prompts.Build(ctx, facts, ontologyDir)
+	if err != nil {
+		return fmt.Errorf("build system prompt: %w", err)
+	}
+	userPrompt, err := prompts.BirthUser(facts.OwnerLabel)
+	if err != nil {
+		return fmt.Errorf("build birth user prompt: %w", err)
+	}
 	args := []string{
-		"--append-system-prompt", systemPrompt,
+		"--system-prompt", systemPrompt,
 		"--dangerously-skip-permissions",
 	}
-	if cfg, err := config.Load(agentLoopGateConfigPath); err == nil {
-		if model := cfg.MindForm.Model; model != "" {
-			args = append(args, "--model", model)
-		}
+	if facts.Model != "" {
+		args = append(args, "--model", facts.Model)
 	}
 	args = append(args, "-p", userPrompt)
 

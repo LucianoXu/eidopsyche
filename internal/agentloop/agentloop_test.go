@@ -27,7 +27,6 @@ func TestAgentLoop_EndToEnd_OneWakeOneTurn(t *testing.T) {
 		ExtraClaudeArgs:  []string{"--mode", "normal"},
 		OntologyDir:      tmp,
 		ClaudeDir:        filepath.Join(tmp, ".claude"),
-		IdentityPath:     filepath.Join(tmp, "identity.md"),
 		SessionStatePath: filepath.Join(tmp, "session.json"),
 		DreamStatePath:   filepath.Join(tmp, "dream-state.json"),
 		AgentStatePath:   filepath.Join(tmp, "agent-state.json"),
@@ -37,9 +36,6 @@ func TestAgentLoop_EndToEnd_OneWakeOneTurn(t *testing.T) {
 		WakeStdin:        wakeStdinR,
 		IdleWait:         time.Second,
 		CloseGrace:       500 * time.Millisecond,
-	}
-	if err := os.WriteFile(opts.IdentityPath, []byte("test mindform"), 0o600); err != nil {
-		t.Fatal(err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -92,7 +88,6 @@ func TestAgentLoop_DreamRotationProducesNewSession(t *testing.T) {
 		ExtraClaudeArgs:  []string{"--mode", "dream-then-exit"},
 		OntologyDir:      tmp,
 		ClaudeDir:        filepath.Join(tmp, ".claude"),
-		IdentityPath:     filepath.Join(tmp, "identity.md"),
 		SessionStatePath: filepath.Join(tmp, "session.json"),
 		DreamStatePath:   filepath.Join(tmp, "dream-state.json"),
 		AgentStatePath:   filepath.Join(tmp, "agent-state.json"),
@@ -103,7 +98,6 @@ func TestAgentLoop_DreamRotationProducesNewSession(t *testing.T) {
 		IdleWait:         time.Second,
 		CloseGrace:       500 * time.Millisecond,
 	}
-	_ = os.WriteFile(opts.IdentityPath, []byte("test"), 0o600)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

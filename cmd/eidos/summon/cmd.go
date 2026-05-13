@@ -289,8 +289,8 @@ func addContactDirect(stateDir string) func(context.Context, string, string, str
 }
 
 // volumeTailer is the production ResponseWaiter: it polls the volume
-// via a one-shot helper container that gates on essence/born_at and
-// emits journal/0000-response.md once both are committed (per the
+// via a one-shot helper container that gates on self/born_at and
+// emits chest/first-words.md once both are committed (per the
 // agent's birth boot prompt: born_at is written LAST, after response).
 type volumeTailer struct {
 	client forgectl.Client
