@@ -188,7 +188,7 @@ func Run(ctx context.Context, d Deps) (*Summoning, []byte, error) {
 		return s, nil, err
 	}
 
-	body, err := Phase4(ctx, s, d.Renderer, d.Claude, ready, Phase4Deps{
+	body, err := Phase4(ctx, s, d.Renderer, ready, Phase4Deps{
 		DockerClient: d.DockerClient, Image: d.Image,
 		WriteVolume: d.WriteVolume, ContainerStart: d.StartContainer,
 		ResponseWait: d.ResponseWait, AddContact: d.AddContact,

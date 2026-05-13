@@ -113,9 +113,16 @@ func PollResponseFile(ctx context.Context, gatePath, bodyPath string, timeout, i
 	}
 }
 
-// Phase4 runs seal → calling-words → response. Returns the rendered
-// response body the caller can hand to Typewriter.
-func Phase4(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, ready <-chan ReadyState, d Phase4Deps) ([]byte, error) {
+// Phase4 seals the summoning book, orchestrates the volume, starts
+// the container, and waits for the mind-form's birth-wake to produce
+// `chest/first-message.md` + `self/born_at`. Returns the rendered
+// first-message body the caller can hand to Typewriter.
+//
+// As of the 2026-05-13 redesign, Phase 4 no longer drives claude
+// itself (calling-words are collected in Phase3CallingWords; the
+// mind-form authors its own first message during birth-wake), so the
+// Claude runner is not part of the signature.
+func Phase4(ctx context.Context, s *Summoning, r render.Renderer, ready <-chan ReadyState, d Phase4Deps) ([]byte, error) {
 	final, err := awaitReady(ctx, r, s.Lang, ready)
 	if err != nil {
 		return nil, err
