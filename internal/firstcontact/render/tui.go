@@ -155,6 +155,14 @@ func (r *tuiRenderer) Logo(_ context.Context, _ time.Duration) {
 	r.fireAndAck(askMsg{kind: kindLogo})
 }
 
+// EditMultiline (stub). Task 2 replaces this with a bubbles/textarea
+// implementation. This intermediate stub returns the default verbatim
+// so the type satisfies the Renderer interface and the build remains
+// green between Task 1 and Task 2.
+func (r *tuiRenderer) EditMultiline(_ string, defaultText string) (string, error) {
+	return defaultText, nil
+}
+
 // RenderMarkdown is the MarkdownRenderer implementation: routes the
 // body through glamour for blockquote / heading / emphasis styling.
 func (r *tuiRenderer) RenderMarkdown(_ context.Context, body string) {

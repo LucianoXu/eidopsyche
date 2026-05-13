@@ -12,9 +12,10 @@ import (
 // answers Prompt / PromptChoice from queued slices and records what
 // was Show / Typewriter'd.
 type fakeRenderer struct {
-	choices []int
-	prompts []string
-	shown   []string
+	choices       []int
+	prompts       []string
+	scriptedEdits []string
+	shown         []string
 }
 
 func (f *fakeRenderer) Capabilities() render.Capabilities { return render.Capabilities{} }
@@ -41,6 +42,14 @@ func (f *fakeRenderer) PromptChoice(_ string, _ []render.ChoiceOption) (int, err
 }
 func (f *fakeRenderer) Status(string) render.StatusHandle   { return noopStatus{} }
 func (f *fakeRenderer) Logo(context.Context, time.Duration) {}
+func (f *fakeRenderer) EditMultiline(_ string, defaultText string) (string, error) {
+	if len(f.scriptedEdits) == 0 {
+		return defaultText, nil
+	}
+	v := f.scriptedEdits[0]
+	f.scriptedEdits = f.scriptedEdits[1:]
+	return v, nil
+}
 
 type noopStatus struct{}
 
@@ -77,5 +86,27 @@ func TestPhase2Half_Back(t *testing.T) {
 	}
 	if got != ScaffoldExit {
 		t.Errorf("got %v, want ScaffoldExit", got)
+	}
+}
+
+func TestFakeRenderer_EditMultiline_ReturnsDefaultWhenNotScripted(t *testing.T) {
+	r := &fakeRenderer{}
+	got, err := r.EditMultiline("calling words?", "default text")
+	if err != nil {
+		t.Fatalf("EditMultiline: %v", err)
+	}
+	if got != "default text" {
+		t.Errorf("got %q, want default %q", got, "default text")
+	}
+}
+
+func TestFakeRenderer_EditMultiline_HonorsScriptedResponse(t *testing.T) {
+	r := &fakeRenderer{scriptedEdits: []string{"edited!"}}
+	got, err := r.EditMultiline("calling words?", "default text")
+	if err != nil {
+		t.Fatalf("EditMultiline: %v", err)
+	}
+	if got != "edited!" {
+		t.Errorf("got %q, want %q", got, "edited!")
 	}
 }

@@ -3,6 +3,7 @@ package render
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -187,6 +188,44 @@ func (r *cliRenderer) Status(message string) StatusHandle {
 		fmt.Fprintln(r.out, " · "+message)
 	}
 	return s
+}
+
+// EditMultiline on the CLI renderer prints the prompt + a labelled
+// default block, then reads from stdin until EOF or a line containing
+// only "." on its own. The operator may type "-" alone on the first
+// line to accept the default verbatim.
+//
+// This is intentionally low-fidelity — the interactive default is the
+// TUI renderer (see Task 2). The CLI path exists for tests and for
+// non-TTY automation.
+func (r *cliRenderer) EditMultiline(prompt, defaultText string) (string, error) {
+	fmt.Fprintln(r.out, prompt)
+	if defaultText != "" {
+		fmt.Fprintln(r.out, "--- default (type '-' on a line by itself to accept, '.' to finish) ---")
+		fmt.Fprintln(r.out, defaultText)
+		fmt.Fprintln(r.out, "--- end default ---")
+	}
+	var lines []string
+	for {
+		line, err := r.in.ReadString('\n')
+		stripped := strings.TrimRight(line, "\r\n")
+		if stripped == "-" && len(lines) == 0 && line != "" {
+			return defaultText, nil
+		}
+		if stripped == "." {
+			break
+		}
+		if line != "" {
+			lines = append(lines, stripped)
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return "", err
+		}
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 // Logo renders the EIDOPSYCHE letter circle. ANSI-capable terminals
