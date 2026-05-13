@@ -7,7 +7,7 @@ func TestValidateEffort(t *testing.T) {
 		in   string
 		want bool // true = should be accepted
 	}{
-		{"", true},      // empty = use DefaultEffort
+		{"", true}, // empty = use DefaultEffort
 		{"low", true},
 		{"medium", true},
 		{"high", true},
