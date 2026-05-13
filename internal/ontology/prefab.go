@@ -198,6 +198,26 @@ func TarStreamPrefab(w io.Writer, id string, params Params) error {
 	return tw.Close()
 }
 
+// RenderPrefabFile reads prefab/<id>/<relPath> from the embed FS and
+// renders it with params using the same strict template renderer
+// TarStreamPrefab uses (Option("missingkey=error")). relPath must end
+// in ".tpl" — RenderPrefabFile is the host-side hook for the wizard
+// to render a prefab's templated file (e.g. self/calling-words.md.tpl)
+// before the volume exists. Returns the rendered string or an error.
+//
+// Used by the wizard's Phase 3.5 to compute the default calling-words
+// for the prefab path; not used at TarStreamPrefab time.
+func RenderPrefabFile(id, relPath string, params Params) (string, error) {
+	if !strings.HasSuffix(relPath, ".tpl") {
+		return "", fmt.Errorf("prefab %q: RenderPrefabFile path %q must end in .tpl", id, relPath)
+	}
+	body, err := fs.ReadFile(prefabFS(), "prefab/"+id+"/"+relPath)
+	if err != nil {
+		return "", fmt.Errorf("read prefab/%s/%s: %w", id, relPath, err)
+	}
+	return renderTemplateStrict(string(body), params)
+}
+
 // renderTemplateStrict is renderTemplate with missingkey=error. The
 // scratch path tolerates missing keys (Params struct evolves freely);
 // prefab .tpl files reference the full Params surface, so a typo in
