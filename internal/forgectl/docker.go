@@ -46,6 +46,12 @@ type Client interface {
 	// where the registry tag may not exist yet).
 	ImageExists(ctx context.Context, ref string) (bool, error)
 
+	// ImageInspectLabels returns the OCI Config.Labels map of the image
+	// at ref. forge upgrade preflight and forge status use it to read
+	// the org.eidopsyche.* version labels without starting a container.
+	// Returns an empty (non-nil) map when the image has no labels.
+	ImageInspectLabels(ctx context.Context, ref string) (map[string]string, error)
+
 	ImagePull(ctx context.Context, ref string, w io.Writer) error
 
 	// VolumeList returns the names of all volumes whose names start with
