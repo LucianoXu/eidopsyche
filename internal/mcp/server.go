@@ -45,6 +45,7 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) registerTools() {
 	s.registerStateTools()
 	s.registerIdentityTools()
+	s.registerContactTools()
 }
 
 // Close releases the IPC connection. Called by the cobra cmd on exit.
