@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -36,7 +37,7 @@ func TestForgeWorkspacesContrib_PathAndEmpty(t *testing.T) {
 	// Snapshot is a thin wrapper that reads /proc/self/mounts; on
 	// runners where /proc exists but no /workspace/* mounts are
 	// configured, the result is the empty slice — never an error.
-	got, err := c.Snapshot(nil)
+	got, err := c.Snapshot(context.TODO())
 	if err != nil {
 		t.Fatal(err)
 	}
