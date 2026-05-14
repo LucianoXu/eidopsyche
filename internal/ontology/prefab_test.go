@@ -248,3 +248,21 @@ func TestMetaFor_ParsesEssenceWhenPresent(t *testing.T) {
 		t.Errorf("Essence should be empty for fixture; got %v", m.Essence)
 	}
 }
+
+func TestList_AllShippedPrefabsHaveEssence(t *testing.T) {
+	metas, err := List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) == 0 {
+		t.Fatal("List returned no prefabs")
+	}
+	for _, m := range metas {
+		if m.Essence["zh"] == "" {
+			t.Errorf("prefab %q: missing essence.zh", m.ID)
+		}
+		if m.Essence["en"] == "" {
+			t.Errorf("prefab %q: missing essence.en", m.ID)
+		}
+	}
+}

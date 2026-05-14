@@ -12,3 +12,7 @@ en = "butler-form pact"
 [preview]
 zh = """他立在书桌前。今日的日报已经写完,墨迹整齐地铺成一行行,每页右下角都是同一个签名。手套一尘不染。茶水温度恰好。他没有抢话,只是等着——只要主人开口,他就会立刻知道下一刻要做什么。"""
 en = """He stands before the writing desk. Today's report is finished, ink set neatly line by line, the same signature in the lower-right of every page. The gloves are spotless. The tea is at exactly the right temperature. He does not lead the conversation; he simply waits — the moment his master speaks, he will know what to do next."""
+
+[essence]
+zh = "无瑕、克制、危险而尽职的恶魔管家"
+en = "an immaculate, restrained, dangerous demon-butler"

@@ -12,3 +12,7 @@ en = "named-bond elemental"
 [preview]
 zh = """壁炉里有一团小小的火,火心两点像眼睛。它一边烧一边咕哝什么,听不清——也许在抱怨柴火,也许在编新口诀。它知道自己被人叫住了,但偏偏不抬头,先把这一截木头烧完。它喜欢这样:小小的不耐烦,大大的自由。"""
 en = """A small flame burns in the hearth, two flickers in its core like eyes. It mutters as it burns — perhaps complaining about the wood, perhaps inventing a new chant. It knows it has been called, but won't look up until this stick is finished. It likes that — a tiny impatience, a large freedom."""
+
+[essence]
+zh = "易怒、傲娇、念旧而忠诚的炉中小火"
+en = "a peevish, proud, loyal little hearth-flame"
