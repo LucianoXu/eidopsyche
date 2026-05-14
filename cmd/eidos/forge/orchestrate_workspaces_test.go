@@ -26,7 +26,13 @@ func (c *capturingFakeClient) lastCreateMounts() []forgectl.Mount {
 	return c.createCalls[len(c.createCalls)-1].Mounts
 }
 
-func TestOrchestrate_AssemblesWorkspaceMounts(t *testing.T) {
+// TestOrchestrate_CreateIgnoresWorkspaceConfig: create starts a fresh
+// mind-form with /eidos only. Workspace config (cfg.Forge[name])
+// might be orphaned from a previously-purged mind-form of the same
+// name; auto-applying it would silently inherit stale bind mounts.
+// Operators add workspaces explicitly via `forge workspace add` +
+// `forge restart` after create.
+func TestOrchestrate_CreateIgnoresWorkspaceConfig(t *testing.T) {
 	cfg := &config.Config{
 		Forge: map[string]config.ForgeMindForm{
 			"alice": {Workspaces: []config.WorkspaceMount{
@@ -42,11 +48,9 @@ func TestOrchestrate_AssemblesWorkspaceMounts(t *testing.T) {
 	}
 	want := []forgectl.Mount{
 		{Type: forgectl.MountVolume, Source: forgectl.VolumeName("alice"), Target: "/eidos"},
-		{Type: forgectl.MountBind, Source: "/home/op/code/project-x", Target: "/workspace/proj-x", ReadOnly: false},
-		{Type: forgectl.MountBind, Source: "/home/op/Pictures", Target: "/workspace/photos", ReadOnly: true},
 	}
 	if !reflect.DeepEqual(fc.lastCreateMounts(), want) {
-		t.Fatalf("mount list mismatch\nwant %#v\n got %#v", want, fc.lastCreateMounts())
+		t.Fatalf("create should mount /eidos only (workspace config is reserved for forge workspace + restart):\nwant %#v\n got %#v", want, fc.lastCreateMounts())
 	}
 }
 

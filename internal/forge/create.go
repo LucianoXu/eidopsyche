@@ -191,24 +191,26 @@ func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOp
 			// `forge start` is then a thin docker-start. Using the
 			// image's default entrypoint (tini → entrypoint.sh →
 			// eidos supervisor run); no Cmd / Entrypoint override.
+			//
+			// Mounts list is volume-only at create time. forge purge
+			// removes the container + volume but leaves the host gate
+			// config's [forge.<name>].workspaces block intact, so a
+			// recycled name could silently inherit stale bind mounts
+			// from a previous (now-deleted) mind-form. The safe
+			// default is "fresh mind-forms start with /eidos only";
+			// operators add workspaces explicitly via
+			// `eidos forge workspace add` + `eidos forge restart`.
+			// The cfg parameter is preserved on the signature for
+			// future use (e.g., once forge purge cleans the config it
+			// would be safe to honour cfg.Forge[name] here).
 			Do: func(ctx context.Context) error {
-				mounts := []forgectl.Mount{
-					{Type: forgectl.MountVolume, Source: vol, Target: "/eidos"},
-				}
-				if cfg != nil {
-					for _, w := range cfg.Forge[name].Workspaces {
-						mounts = append(mounts, forgectl.Mount{
-							Type:     forgectl.MountBind,
-							Source:   w.HostPath,
-							Target:   "/workspace/" + w.Name,
-							ReadOnly: w.EffectiveMode() == "ro",
-						})
-					}
-				}
+				_ = cfg // reserved for a future safe create-time use; see comment above.
 				if err := c.ContainerCreate(ctx, forgectl.CreateOpts{
-					Name:   cont,
-					Image:  image,
-					Mounts: mounts,
+					Name:  cont,
+					Image: image,
+					Mounts: []forgectl.Mount{
+						{Type: forgectl.MountVolume, Source: vol, Target: "/eidos"},
+					},
 				}); err != nil {
 					return fmt.Errorf("create container: %w", err)
 				}

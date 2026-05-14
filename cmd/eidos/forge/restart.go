@@ -58,8 +58,19 @@ func Restart(ctx context.Context, c forgectl.Client, name string, cfg *config.Co
 		return fmt.Errorf("inspect image %s: container has no image ref (does it exist?)", cont)
 	}
 
-	if err := c.ContainerStop(ctx, cont, graceSeconds); err != nil {
-		return fmt.Errorf("stop %s: %w", cont, err)
+	// Only stop if the container is actually running. Operators may
+	// legitimately run `forge stop alice && forge workspace add … &&
+	// forge restart alice` — without the state check, docker returns
+	// an "already stopped" error and the restart aborts mid-flow.
+	// Matches the upgrade flow's pre-stop state check.
+	state, err := c.ContainerInspectState(ctx, cont)
+	if err != nil {
+		return fmt.Errorf("inspect state %s: %w", cont, err)
+	}
+	if state == "running" {
+		if err := c.ContainerStop(ctx, cont, graceSeconds); err != nil {
+			return fmt.Errorf("stop %s: %w", cont, err)
+		}
 	}
 
 	if err := c.ContainerRemove(ctx, cont); err != nil {

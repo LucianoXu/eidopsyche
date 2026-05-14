@@ -22,6 +22,7 @@ type restartFakeClient struct {
 	inspectImageID     string // image ID (sha256:...) returned by ContainerInspectImage
 	inspectImageReturn string // image ref (tag) returned by ContainerInspectImage
 	inspectImageErr    error
+	inspectStateReturn string // empty defaults to "running" — see newRestartFakeClient
 }
 
 func (f *restartFakeClient) ContainerStop(_ context.Context, name string, _ int) error {
@@ -59,8 +60,9 @@ func (f *restartFakeClient) VolumeList(_ context.Context, _ string) ([]string, e
 func (f *restartFakeClient) ContainerExists(_ context.Context, _ string) (bool, error) {
 	return true, nil
 }
-func (f *restartFakeClient) ContainerInspectState(_ context.Context, _ string) (string, error) {
-	return "", nil
+func (f *restartFakeClient) ContainerInspectState(_ context.Context, name string) (string, error) {
+	f.ops = append(f.ops, "inspect-state:"+name)
+	return f.inspectStateReturn, nil
 }
 func (f *restartFakeClient) ContainerInspectMounts(_ context.Context, _ string) ([]forgectl.Mount, error) {
 	return nil, nil
@@ -88,7 +90,7 @@ func (f *restartFakeClient) ContainerLogs(_ context.Context, _ string, _ bool, _
 
 func newRestartFakeClient(t *testing.T) *restartFakeClient {
 	t.Helper()
-	return &restartFakeClient{}
+	return &restartFakeClient{inspectStateReturn: "running"}
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +118,7 @@ func TestRestart_PreservesImage_AppliesNewMounts(t *testing.T) {
 	}
 	wantOps := []string{
 		"inspect-image:" + forgectl.ContainerName("alice"),
+		"inspect-state:" + forgectl.ContainerName("alice"),
 		"stop:" + forgectl.ContainerName("alice"),
 		"remove:" + forgectl.ContainerName("alice"),
 		"create:" + forgectl.ContainerName("alice"),
@@ -218,6 +221,42 @@ func TestRestart_PreflightMissingHostPath(t *testing.T) {
 			"create:" + forgectl.ContainerName("alice"),
 			"start:" + forgectl.ContainerName("alice"):
 			t.Errorf("preflight failure must not run %q; ops=%v", op, fc.ops)
+		}
+	}
+}
+
+// TestRestart_SkipsStopWhenAlreadyStopped: operators may legitimately
+// run `forge stop alice && forge workspace add … && forge restart
+// alice`. Docker's stop API rejects an already-stopped container, so
+// restart must check state first and skip stop in that case.
+func TestRestart_SkipsStopWhenAlreadyStopped(t *testing.T) {
+	fc := newRestartFakeClient(t)
+	fc.inspectStateReturn = "exited"
+	fc.inspectImageReturn = "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"
+
+	if err := Restart(context.Background(), fc, "alice", &config.Config{}, 10); err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range fc.ops {
+		if op == "stop:"+forgectl.ContainerName("alice") {
+			t.Errorf("must not call ContainerStop on already-stopped container; ops=%v", fc.ops)
+		}
+	}
+	// remove → create → start must still run.
+	for _, want := range []string{
+		"remove:" + forgectl.ContainerName("alice"),
+		"create:" + forgectl.ContainerName("alice"),
+		"start:" + forgectl.ContainerName("alice"),
+	} {
+		found := false
+		for _, op := range fc.ops {
+			if op == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing op %q in ops=%v", want, fc.ops)
 		}
 	}
 }
