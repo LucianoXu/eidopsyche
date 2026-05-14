@@ -44,6 +44,7 @@ func (s *Server) Run(ctx context.Context) error {
 // files can add registrations without each touching server.go.
 func (s *Server) registerTools() {
 	s.registerStateTools()
+	s.registerIdentityTools()
 }
 
 // Close releases the IPC connection. Called by the cobra cmd on exit.
