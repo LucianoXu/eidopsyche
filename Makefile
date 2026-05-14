@@ -69,10 +69,14 @@ uninstall:
 	@echo "removed:   $(BINDIR)/eidos"
 
 IMAGE_TAG ?= dev
+EIDOS_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 .PHONY: image
 image:
-	docker build -t ghcr.io/lucianoxu/eidopsyche-mindform:$(IMAGE_TAG) -f docker/mindform/Dockerfile .
+	docker build \
+		--build-arg EIDOS_VERSION=$(EIDOS_VERSION) \
+		-t ghcr.io/lucianoxu/eidopsyche-mindform:$(IMAGE_TAG) \
+		-f docker/mindform/Dockerfile .
 
 .PHONY: image-push
 image-push: image

@@ -425,3 +425,84 @@ $ eidos relay config set relay.mode public
 `config.toml` directly; the daemon / relay must be restarted to pick up
 changes. Adding/removing relay entries in the SQLite `own_relays` table goes
 through `eidos gate relay-add` / `relay-remove` instead.
+
+## Mind-form management (`eidos forge`)
+
+`eidos forge` manages mind-form containers from the host. Subcommands:
+`create`, `start`, `stop`, `status`, `list`, `logs`, `exec`, `wake`,
+`login`, `ontology`, `config`, `plan`, `watch`, `prompt-dump`,
+`upgrade`, `purge`.
+
+### `eidos forge create`
+
+Summons a new mind-form. Run `eidos forge create --help` or use the
+interactive wizard (`eidos summon`) for the full option set.
+
+### `eidos forge start / stop / status / list`
+
+Lifecycle commands. `status <name>` prints container state, agentloop
+mode, and — for images built with version labels — the bundled `eidos`
+and `claude-code` versions:
+
+```
+$ eidos forge status alice
+name:    alice
+phase:   idle
+session: abc12345 (age 3m20s, 42 turns)
+last_active: 1m ago
+image:       ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2
+eidos:       v0.11.2
+claude-code: 2.1.138
+whoami:  …
+```
+
+### `eidos forge upgrade <name>`
+
+Swap a mind-form's container image to a newer version while preserving
+its volume. Identity, contacts, ontology, Claude auth state, and
+agentloop state all survive — only the container's image switches.
+
+```
+eidos forge upgrade <name> [--image <tag>] [--wait-idle [--idle-timeout 10m]]
+                           [--grace <seconds>] [--dry-run]
+```
+
+The command always prints a version diff first (eidos + claude-code
+versions, read from the image's `org.eidopsyche.*` labels), then on
+TTY prompts for confirmation, then stops the mind-form, recreates the
+container on the new image with the same volume, and starts it back
+up. Non-TTY invocations auto-confirm so the command is scripting-safe.
+
+```
+$ eidos forge upgrade alice
+upgrading alice:
+  image      : ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2
+             → ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3
+  eidos      : v0.11.2 → v0.11.3
+  claude-code: 2.1.138 → 2.1.140
+proceed? [Y/n] y
+✓ alice upgraded to v0.11.3
+```
+
+Flags:
+- `--image <tag>` — override the target image. Default is the image
+  tag paired with the host eidos binary
+  (`ghcr.io/lucianoxu/eidopsyche-mindform:<host-version>`).
+- `--wait-idle` — poll the mind-form's agentloop until it reports idle
+  before stopping; `--idle-timeout` (default `10m`) caps the wait. On
+  timeout the command aborts without touching the container.
+- `--grace <seconds>` — seconds to wait before SIGKILL when stopping
+  (default 10, matching `forge stop`).
+- `--dry-run` — print the version diff and exit; no container
+  mutation. Useful for confirming what an upgrade would change before
+  committing.
+
+The volume is never modified by upgrade. If a future eidos version
+ships a volume migration requirement, that migration runs from the
+mind-form's own entrypoint on next start; upgrade itself is purely
+the image swap.
+
+### `eidos forge purge <name>`
+
+Stop, remove the container, and delete the volume. Irreversible; prompts
+for confirmation unless `--yes` is passed.

@@ -10,6 +10,11 @@ ARG CLAUDE_CODE_VERSION=2.1.138
 # ---- Stage 1: build eidos binary ----
 FROM golang:1.25-alpine AS build
 WORKDIR /src
+# Inject the host-binary version (from --build-arg, default "dev") into
+# the in-container eidos binary's internal/version.Version. Keeps the
+# image's binary in sync with the org.eidopsyche.eidos-version LABEL
+# declared in Stage 4. Mirrors goreleaser's host build (.goreleaser.yml).
+ARG EIDOS_VERSION=dev
 RUN apk add --no-cache git ca-certificates
 # Layered cache: dep manifest → mod download → full source → build.
 # Editing source doesn't invalidate `go mod download`. Cache mounts
@@ -21,7 +26,9 @@ RUN --mount=type=cache,target=/root/go/pkg/mod,sharing=locked \
 COPY . .
 RUN --mount=type=cache,target=/root/go/pkg/mod,sharing=locked \
     --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/eidos ./cmd/eidos
+    CGO_ENABLED=0 go build -trimpath \
+        -ldflags="-s -w -X github.com/LucianoXu/eidopsyche/internal/version.Version=${EIDOS_VERSION}" \
+        -o /out/eidos ./cmd/eidos
 
 # ---- Stage 2: produce eidopsyche bare-repo bundle ----
 # Note: the bare repo is cloned to /opt/eidopsyche-bundle (no .git suffix) here
@@ -103,6 +110,21 @@ RUN chmod +x /usr/local/bin/entrypoint.sh \
 # leaves the upper apk/adduser/claude/config layers cached.
 COPY --from=repobundle /opt/eidopsyche-bundle /opt/eidopsyche-bundle.git
 COPY --from=build /out/eidos /usr/local/bin/eidos
+
+# Version metadata. CLAUDE_CODE_VERSION is the same arg used by Stage 3
+# (re-declared here so Stage 4 can reference it). EIDOS_VERSION is
+# passed from Makefile / release.yml so the image self-identifies the
+# host binary version it shipped with.
+ARG CLAUDE_CODE_VERSION
+ARG EIDOS_VERSION=dev
+
+LABEL org.eidopsyche.claude-code-version="${CLAUDE_CODE_VERSION}"
+LABEL org.eidopsyche.eidos-version="${EIDOS_VERSION}"
+
+RUN mkdir -p /etc/eidos \
+ && echo "${CLAUDE_CODE_VERSION}" > /etc/eidos/claude-code.version \
+ && echo "${EIDOS_VERSION}"       > /etc/eidos/eidos.version \
+ && chmod 0644 /etc/eidos/*.version
 
 ENV EIDOS_IN_CONTAINER=1
 ENV EIDOS_GATE_HOME=/eidos/gate

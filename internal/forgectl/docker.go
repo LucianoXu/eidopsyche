@@ -46,6 +46,26 @@ type Client interface {
 	// where the registry tag may not exist yet).
 	ImageExists(ctx context.Context, ref string) (bool, error)
 
+	// ImageInspectLabels returns the OCI Config.Labels map of the image
+	// at ref. forge upgrade preflight and forge status use it to read
+	// the org.eidopsyche.* version labels without starting a container.
+	// Returns an empty (non-nil) map when the image has no labels.
+	ImageInspectLabels(ctx context.Context, ref string) (map[string]string, error)
+
+	// ContainerInspectImage returns the content-addressable image ID
+	// (sha256:...) and the image ref (the tag the container was created
+	// with, e.g. "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2") for
+	// the container at name. Returns "", "", nil when the container does
+	// not exist — callers should call ContainerExists first if the
+	// presence check matters.
+	ContainerInspectImage(ctx context.Context, name string) (id string, ref string, err error)
+
+	// ImageInspectID returns the content-addressable image ID
+	// (sha256:...) for ref. Returns an error if the image is not present
+	// locally; callers must ensure the image exists (via ImageExists or
+	// ImagePull) before calling.
+	ImageInspectID(ctx context.Context, ref string) (string, error)
+
 	ImagePull(ctx context.Context, ref string, w io.Writer) error
 
 	// VolumeList returns the names of all volumes whose names start with
@@ -203,6 +223,26 @@ func (r *realClient) ImageExists(ctx context.Context, ref string) (bool, error) 
 		return false, err
 	}
 	return true, nil
+}
+
+func (r *realClient) ContainerInspectImage(ctx context.Context, name string) (string, string, error) {
+	insp, err := r.c.ContainerInspect(ctx, name)
+	if err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return "", "", nil
+		}
+		return "", "", err
+	}
+	// insp.Image is the content-addressable ID, insp.Config.Image is the ref.
+	return insp.Image, insp.Config.Image, nil
+}
+
+func (r *realClient) ImageInspectID(ctx context.Context, ref string) (string, error) {
+	resp, err := r.c.ImageInspect(ctx, ref)
+	if err != nil {
+		return "", err
+	}
+	return resp.ID, nil
 }
 
 func (r *realClient) ImagePull(ctx context.Context, ref string, w io.Writer) error {

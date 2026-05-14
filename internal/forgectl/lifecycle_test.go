@@ -48,7 +48,16 @@ func (f *minimalFake) ContainerRemove(_ context.Context, _ string) error {
 	f.hasContainer = false
 	return nil
 }
-func (f *minimalFake) ImageExists(_ context.Context, _ string) (bool, error)    { return true, nil }
+func (f *minimalFake) ImageExists(_ context.Context, _ string) (bool, error) { return true, nil }
+func (f *minimalFake) ImageInspectLabels(_ context.Context, _ string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+func (f *minimalFake) ContainerInspectImage(_ context.Context, _ string) (string, string, error) {
+	return "", "", nil
+}
+func (f *minimalFake) ImageInspectID(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
 func (f *minimalFake) ImagePull(_ context.Context, _ string, _ io.Writer) error { return nil }
 func (f *minimalFake) RunInit(_ context.Context, _ RunInitOpts) (RunInitResult, error) {
 	return RunInitResult{}, nil
