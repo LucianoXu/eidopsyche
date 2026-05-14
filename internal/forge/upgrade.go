@@ -8,6 +8,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 )
 
@@ -21,6 +22,16 @@ type UpgradeOpts struct {
 	IdleTimeout time.Duration // zero → 10 minutes
 	Grace       int           // zero → 10 seconds
 	DryRun      bool
+
+	// Workspaces is the list of bind mounts to re-apply when the new
+	// container is created in step 6. Without this, upgrade would silently
+	// drop any workspaces the operator had configured, forcing them to
+	// run `forge restart` afterwards just to recover state that
+	// conceptually never changed. The daemon handler populates this
+	// from the host gate config; CLI tests / direct callers can leave it
+	// nil to get the /eidos-only mount list (matching the pre-workspaces
+	// behaviour).
+	Workspaces []config.WorkspaceMount
 }
 
 // UpgradeResult is the structured output of Upgrade. Fields mirror
@@ -100,6 +111,18 @@ func Upgrade(ctx context.Context, c forgectl.Client, opts UpgradeOpts) (UpgradeR
 	}
 	if !volExists {
 		return UpgradeResult{}, fmt.Errorf("%w: %s", ErrUpgradeNotFound, opts.Name)
+	}
+
+	// Preflight every configured workspace's host path before any
+	// destructive step. A missing or invalid bind source would only be
+	// rejected at ContainerCreate (step 6), at which point the old
+	// container has already been removed and the mind-form is stranded.
+	// Fail loudly here so the operator can correct the path with
+	// `eidos forge workspace remove` before retrying.
+	for _, w := range opts.Workspaces {
+		if err := config.ValidateWorkspaceHostPath(w.HostPath); err != nil {
+			return UpgradeResult{}, fmt.Errorf("workspace %q: %w (fix the path or run 'eidos forge workspace remove %s %s')", w.Name, err, opts.Name, w.Name)
+		}
 	}
 
 	res := UpgradeResult{
@@ -187,11 +210,26 @@ func Upgrade(ctx context.Context, c forgectl.Client, opts UpgradeOpts) (UpgradeR
 		}
 	}
 
-	// Step 6: create with new image, same volume.
+	// Step 6: create with new image, preserving the /eidos volume and
+	// any configured workspace bind mounts. Workspaces conceptually
+	// belong to the mind-form across upgrades — re-applying them here
+	// avoids surprising the operator with a "pending restart" diff
+	// immediately after upgrade.
+	mounts := []forgectl.Mount{
+		{Type: forgectl.MountVolume, Source: forgectl.VolumeName(opts.Name), Target: "/eidos"},
+	}
+	for _, w := range opts.Workspaces {
+		mounts = append(mounts, forgectl.Mount{
+			Type:     forgectl.MountBind,
+			Source:   w.HostPath,
+			Target:   "/workspace/" + w.Name,
+			ReadOnly: w.EffectiveMode() == "ro",
+		})
+	}
 	if err := c.ContainerCreate(ctx, forgectl.CreateOpts{
-		Name:  cont,
-		Image: opts.Image,
-		Mount: forgectl.Mount{VolumeName: forgectl.VolumeName(opts.Name), Target: "/eidos"},
+		Name:   cont,
+		Image:  opts.Image,
+		Mounts: mounts,
 	}); err != nil {
 		return res, fmt.Errorf("%w: %v", ErrUpgradeContainerCreate, err)
 	}

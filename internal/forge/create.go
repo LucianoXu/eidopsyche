@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 	"github.com/LucianoXu/eidopsyche/internal/ontology"
 )
@@ -65,7 +66,12 @@ type CreateOpts struct {
 // methodTable. forge.upgrade (a sibling flow in this package) does
 // flow through IPC; the asymmetry is acknowledged and tolerated
 // until the broader unified-call-path migration.
-func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOpts) error {
+//
+// cfg threads the host gate config through so the create-container
+// step can mount configured workspaces alongside /eidos. cfg=nil
+// mounts only /eidos (the First Contact wizard takes this branch —
+// a freshly-summoned mind-form has no workspace config yet).
+func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOpts, cfg *config.Config) error {
 	vol := forgectl.VolumeName(name)
 	cont := forgectl.ContainerName(name)
 
@@ -160,7 +166,7 @@ func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOp
 				}
 				res, err := c.RunInit(ctx, forgectl.RunInitOpts{
 					Image: image,
-					Mount: forgectl.Mount{VolumeName: vol, Target: "/eidos"},
+					Mount: forgectl.Mount{Type: forgectl.MountVolume, Source: vol, Target: "/eidos"},
 					// init-volume runs as root so it can extract the
 					// template tar, clone the bundle, and git-init the
 					// parent ontology with full privileges. Its last
@@ -185,11 +191,26 @@ func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOp
 			// `forge start` is then a thin docker-start. Using the
 			// image's default entrypoint (tini → entrypoint.sh →
 			// eidos supervisor run); no Cmd / Entrypoint override.
+			//
+			// Mounts list is volume-only at create time. forge purge
+			// removes the container + volume but leaves the host gate
+			// config's [forge.<name>].workspaces block intact, so a
+			// recycled name could silently inherit stale bind mounts
+			// from a previous (now-deleted) mind-form. The safe
+			// default is "fresh mind-forms start with /eidos only";
+			// operators add workspaces explicitly via
+			// `eidos forge workspace add` + `eidos forge restart`.
+			// The cfg parameter is preserved on the signature for
+			// future use (e.g., once forge purge cleans the config it
+			// would be safe to honour cfg.Forge[name] here).
 			Do: func(ctx context.Context) error {
+				_ = cfg // reserved for a future safe create-time use; see comment above.
 				if err := c.ContainerCreate(ctx, forgectl.CreateOpts{
 					Name:  cont,
 					Image: image,
-					Mount: forgectl.Mount{VolumeName: vol, Target: "/eidos"},
+					Mounts: []forgectl.Mount{
+						{Type: forgectl.MountVolume, Source: vol, Target: "/eidos"},
+					},
 				}); err != nil {
 					return fmt.Errorf("create container: %w", err)
 				}

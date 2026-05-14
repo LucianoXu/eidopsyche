@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 )
 
@@ -28,6 +29,10 @@ type fakeUpgradeClient struct {
 	// healthy idle JSON) from wait-idle probe (pre-start, returns empty
 	// to simulate a busy agentloop).
 	started bool
+
+	// lastCreateMounts captures the Mounts passed to the most recent
+	// ContainerCreate so tests can assert on the post-recreate mount list.
+	lastCreateMounts []forgectl.Mount
 
 	calls []string
 }
@@ -54,6 +59,10 @@ func (f *fakeUpgradeClient) ContainerInspectImage(ctx context.Context, name stri
 		return "", "", nil
 	}
 	return f.imageIDs[ref], ref, nil
+}
+
+func (f *fakeUpgradeClient) ContainerInspectMounts(ctx context.Context, name string) ([]forgectl.Mount, error) {
+	return nil, nil
 }
 
 func (f *fakeUpgradeClient) ImageExists(ctx context.Context, ref string) (bool, error) {
@@ -92,6 +101,9 @@ func (f *fakeUpgradeClient) ContainerRemove(ctx context.Context, name string) er
 
 func (f *fakeUpgradeClient) ContainerCreate(ctx context.Context, opts forgectl.CreateOpts) error {
 	f.record("ContainerCreate:" + opts.Name + ":" + opts.Image)
+	f.mu.Lock()
+	f.lastCreateMounts = append([]forgectl.Mount(nil), opts.Mounts...)
+	f.mu.Unlock()
 	f.containerStates[opts.Name] = "exited"
 	f.containerImages[opts.Name] = opts.Image
 	return nil
@@ -350,5 +362,99 @@ func TestUpgrade_IdempotentReentryWhenContainerAbsent(t *testing.T) {
 	}
 	if c.hasCall("ContainerStop") || c.hasCall("ContainerRemove") {
 		t.Errorf("absent-container path must NOT call Stop/Remove; calls: %v", c.calls)
+	}
+}
+
+func TestUpgrade_PreservesWorkspaceMounts(t *testing.T) {
+	c := newFakeUpgradeClient()
+	c.containerImages["eidos-mindform-alice"] = "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"
+	c.containerStates["eidos-mindform-alice"] = "running"
+	c.imageIDs["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"] = "sha256:aaa"
+	c.imageIDs["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"] = "sha256:bbb"
+	c.imageExistsLocal["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"] = true
+	c.imageExistsLocal["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"] = true
+	c.imageLabels["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"] = map[string]string{}
+	c.imageLabels["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"] = map[string]string{}
+
+	// Real tempdirs so the host-path preflight (ValidateWorkspaceHostPath)
+	// passes; both bind sources must exist on disk.
+	projDir := t.TempDir()
+	photosDir := t.TempDir()
+
+	_, err := Upgrade(context.Background(), c, UpgradeOpts{
+		Name:  "alice",
+		Image: "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3",
+		Grace: 10,
+		Workspaces: []config.WorkspaceMount{
+			{Name: "proj-x", HostPath: projDir, Mode: "rw"},
+			{Name: "photos", HostPath: photosDir, Mode: "ro"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+	want := []forgectl.Mount{
+		{Type: forgectl.MountVolume, Source: forgectl.VolumeName("alice"), Target: "/eidos"},
+		{Type: forgectl.MountBind, Source: projDir, Target: "/workspace/proj-x", ReadOnly: false},
+		{Type: forgectl.MountBind, Source: photosDir, Target: "/workspace/photos", ReadOnly: true},
+	}
+	if len(c.lastCreateMounts) != len(want) {
+		t.Fatalf("mount count: want %d got %d (%#v)", len(want), len(c.lastCreateMounts), c.lastCreateMounts)
+	}
+	for i := range want {
+		if c.lastCreateMounts[i] != want[i] {
+			t.Errorf("mount[%d]: want %#v got %#v", i, want[i], c.lastCreateMounts[i])
+		}
+	}
+}
+
+func TestUpgrade_NilWorkspaces_OntologyOnly(t *testing.T) {
+	c := newFakeUpgradeClient()
+	c.containerImages["eidos-mindform-alice"] = "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"
+	c.containerStates["eidos-mindform-alice"] = "running"
+	c.imageIDs["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"] = "sha256:aaa"
+	c.imageIDs["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"] = "sha256:bbb"
+	c.imageExistsLocal["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"] = true
+	c.imageExistsLocal["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"] = true
+	c.imageLabels["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"] = map[string]string{}
+	c.imageLabels["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"] = map[string]string{}
+
+	if _, err := Upgrade(context.Background(), c, UpgradeOpts{
+		Name:  "alice",
+		Image: "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3",
+		Grace: 10,
+		// Workspaces left nil.
+	}); err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+	if len(c.lastCreateMounts) != 1 || c.lastCreateMounts[0].Target != "/eidos" {
+		t.Errorf("nil-workspaces upgrade should mount only /eidos; got %#v", c.lastCreateMounts)
+	}
+}
+
+func TestUpgrade_PreflightMissingWorkspacePath(t *testing.T) {
+	c := newFakeUpgradeClient()
+	c.containerImages["eidos-mindform-alice"] = "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"
+	c.containerStates["eidos-mindform-alice"] = "running"
+	c.imageIDs["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"] = "sha256:aaa"
+	c.imageIDs["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"] = "sha256:bbb"
+	c.imageExistsLocal["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"] = true
+	c.imageExistsLocal["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"] = true
+	c.imageLabels["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"] = map[string]string{}
+	c.imageLabels["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"] = map[string]string{}
+
+	_, err := Upgrade(context.Background(), c, UpgradeOpts{
+		Name:  "alice",
+		Image: "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3",
+		Grace: 10,
+		Workspaces: []config.WorkspaceMount{
+			{Name: "missing", HostPath: "/no/such/path/upgrade-preflight", Mode: "rw"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected preflight error for missing host path")
+	}
+	if c.hasCall("ContainerStop") || c.hasCall("ContainerRemove") || c.hasCall("ContainerCreate") {
+		t.Errorf("preflight failure must not run Stop/Remove/Create; calls=%v", c.calls)
 	}
 }

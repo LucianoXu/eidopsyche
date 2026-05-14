@@ -41,7 +41,7 @@ func WriteToVolume(ctx context.Context, c Client, image, slug, relPath string, b
 		dir, target, target, dir)
 	res, err := c.RunInit(ctx, RunInitOpts{
 		Image: image,
-		Mount: Mount{VolumeName: VolumeName(slug), Target: "/eidos"},
+		Mount: Mount{Type: MountVolume, Source: VolumeName(slug), Target: "/eidos"},
 		User:  "0:0",
 		Cmd:   []string{"sh", "-c", script},
 		Stdin: bytes.NewReader(body),

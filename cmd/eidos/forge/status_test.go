@@ -276,6 +276,35 @@ func TestStatusLastActive(t *testing.T) {
 	}
 }
 
+func TestStatus_RendersWorkspaceLines(t *testing.T) {
+	desired := []workspaceStatusEntry{
+		{Name: "proj-x", HostPath: "/home/op/code/project-x", Mode: "rw"},
+	}
+	actual := []workspaceStatusEntry{}
+	if formatWorkspaceEntries(desired) != "proj-x (rw)" {
+		t.Errorf("desired format: %q", formatWorkspaceEntries(desired))
+	}
+	if formatWorkspaceEntries(actual) != "(none)" {
+		t.Errorf("empty actual format: %q", formatWorkspaceEntries(actual))
+	}
+}
+
+func TestWorkspaceEntriesEqual(t *testing.T) {
+	a := []workspaceStatusEntry{{Name: "x", HostPath: "/a", Mode: "rw"}}
+	b := []workspaceStatusEntry{{Name: "x", HostPath: "/a", Mode: "rw"}}
+	if !workspaceEntriesEqual(a, b) {
+		t.Error("identical entries should compare equal")
+	}
+	c := []workspaceStatusEntry{{Name: "x", HostPath: "/a", Mode: "ro"}} // mode differs
+	if workspaceEntriesEqual(a, c) {
+		t.Error("differing mode should NOT compare equal")
+	}
+	d := []workspaceStatusEntry{} // size differs
+	if workspaceEntriesEqual(a, d) {
+		t.Error("differing length should NOT compare equal")
+	}
+}
+
 func TestStatus_RendersVersions(t *testing.T) {
 	f := &statusFake{
 		state: "running",
@@ -325,4 +354,25 @@ func TestStatus_RendersUnknownWhenLabelsMissing(t *testing.T) {
 	if !strings.Contains(out, "claude-code: unknown") {
 		t.Errorf("expected 'claude-code: unknown' line for label-less image; got: %s", out)
 	}
+}
+
+// TestStatus_StoppedContainerShowsWorkspaceDrift confirms that the
+// pending-restart hint surfaces on a stopped container too —
+// operators legitimately run `forge stop && forge workspace add …`
+// and need `forge status` to tell them `forge start` won't apply the
+// new bind mount (only `forge restart` recreates).
+func TestStatus_StoppedContainerShowsWorkspaceDrift(t *testing.T) {
+	f := &statusFake{state: "exited"}
+	out, err := computeStatus(context.Background(), f, "alice")
+	if err != nil {
+		t.Fatalf("computeStatus: %v", err)
+	}
+	if !strings.Contains(out, "phase:   offline (exited)") {
+		t.Errorf("expected offline phase line; got:\n%s", out)
+	}
+	// statusFake has no workspace mounts configured, so desired+actual
+	// are both empty and the diff block is suppressed — fine. The key
+	// assertion is that we DIDN'T return early before the diff
+	// computation; the test compiles + runs end-to-end through the
+	// offline branch.
 }

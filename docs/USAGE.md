@@ -429,9 +429,9 @@ through `eidos gate relay-add` / `relay-remove` instead.
 ## Mind-form management (`eidos forge`)
 
 `eidos forge` manages mind-form containers from the host. Subcommands:
-`create`, `start`, `stop`, `status`, `list`, `logs`, `exec`, `wake`,
-`login`, `ontology`, `config`, `plan`, `watch`, `prompt-dump`,
-`upgrade`, `purge`.
+`create`, `start`, `stop`, `restart`, `status`, `list`, `logs`, `exec`,
+`wake`, `login`, `ontology`, `config`, `plan`, `watch`, `prompt-dump`,
+`upgrade`, `workspace`, `purge`.
 
 ### `eidos forge create`
 
@@ -454,6 +454,19 @@ image:       ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2
 eidos:       v0.11.2
 claude-code: 2.1.138
 whoami:  …
+```
+
+### `eidos forge restart <name>`
+
+Recreate the mind-form's container, picking up workspace config changes
+(see "Shared workspaces" below). The `/eidos` volume (ontology,
+identity, transcripts, claudeauth, dream state, inbox) is preserved;
+the container's image is preserved across the recreate cycle so a
+prior `forge upgrade` is not silently reverted. To change the image,
+use `forge upgrade` instead.
+
+```
+eidos forge restart <name> [--grace <seconds>]
 ```
 
 ### `eidos forge upgrade <name>`
@@ -501,6 +514,52 @@ The volume is never modified by upgrade. If a future eidos version
 ships a volume migration requirement, that migration runs from the
 mind-form's own entrypoint on next start; upgrade itself is purely
 the image swap.
+
+### Shared workspaces
+
+Mount a host directory into a mind-form's container so the mind-form
+can `Read` / `Write` / `Edit` files that you also see natively on the
+host.
+
+```
+# Bind ~/code/project-x into alice as /workspace/proj-x (rw default)
+eidos forge workspace add alice proj-x ~/code/project-x
+
+# Read-only mount, e.g. for a shared reference dataset
+eidos forge workspace add alice photos ~/Pictures --mode ro
+
+# Apply the change (recreates the container; /eidos is preserved)
+eidos forge restart alice
+
+# Inspect current state
+eidos forge workspace list alice
+eidos forge status alice            # shows pending-restart if config diverges from the running container
+
+# Remove a workspace
+eidos forge workspace remove alice proj-x
+eidos forge restart alice
+```
+
+To share a directory between two mind-forms, bind the same host path
+to both:
+
+```
+eidos forge workspace add alice proj-x ~/code/project-x
+eidos forge workspace add bob   proj-x ~/code/project-x
+eidos forge restart alice && eidos forge restart bob
+```
+
+Workspaces appear inside the container at `/workspace/<name>/`. They
+are **not** part of the mind-form's ontology (`/eidos/...`). The
+mind-form discovers them with `ls /workspace/` and learns about them
+through its system prompt at every wake.
+
+**UID note.** The mind-form runs as `uid=1000` inside the container.
+If the host directory is owned by a different uid (typical on macOS
+or non-default Linux setups), `rw` writes from the mind-form may
+fail with `EACCES`. `forge workspace add` warns when this would
+apply. Fix with `chown -R 1000 <path>` or pass `--no-warn-uid` to
+silence.
 
 ### `eidos forge purge <name>`
 

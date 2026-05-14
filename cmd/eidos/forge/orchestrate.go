@@ -2,7 +2,10 @@ package forge
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	iforge "github.com/LucianoXu/eidopsyche/internal/forge"
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 	"github.com/spf13/cobra"
@@ -23,12 +26,13 @@ const MindFormImageRepo = iforge.MindFormImageRepo
 // overrides version.Version at runtime.
 func DefaultImage() string { return iforge.DefaultImage() }
 
-// Orchestrate re-exports internal/forge.Orchestrate. Kept as a
-// function (not a var assignment) so the stable cobra-side signature
-// is documented at this layer too. See internal/forge/create.go for
-// the body.
-func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOpts) error {
-	return iforge.Orchestrate(ctx, c, name, o)
+// Orchestrate re-exports internal/forge.Orchestrate. cfg threads the
+// host gate config through so the create-container step can mount
+// configured workspaces alongside /eidos. cfg=nil mounts only /eidos
+// (the freshly-summoned mind-form has no workspace config yet — the
+// First Contact wizard takes this branch).
+func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOpts, cfg *config.Config) error {
+	return iforge.Orchestrate(ctx, c, name, o, cfg)
 }
 
 // runCreate2 is the cobra-level entry: creates a real Docker client,
@@ -38,8 +42,23 @@ func runCreate2(cmd *cobra.Command, name string, o CreateOpts) error {
 	if err != nil {
 		return err
 	}
+	// Load the host gate config so configured workspaces are mounted at
+	// create time. A missing config.toml (fresh-host install: operator
+	// hasn't run `eidos gate init` yet) is fine — passing nil to
+	// Orchestrate mounts only /eidos, and the operator can add
+	// workspaces later via `forge workspace add` + `forge restart`.
+	var cfgPtr *config.Config
+	stateDir, err := config.ResolveStateDir("")
+	if err != nil {
+		return err
+	}
+	if cfg, lerr := config.Load(filepath.Join(stateDir, "config.toml")); lerr == nil {
+		cfgPtr = &cfg
+	} else if !os.IsNotExist(lerr) {
+		return lerr
+	}
 	ctx := cmd.Context()
-	if err := Orchestrate(ctx, c, name, o); err != nil {
+	if err := Orchestrate(ctx, c, name, o, cfgPtr); err != nil {
 		return err
 	}
 	cmd.Printf("created mind-form %q (label %q)\n", name, o.Label)

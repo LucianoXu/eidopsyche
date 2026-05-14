@@ -76,7 +76,7 @@ func createMindForm(t *testing.T, c forgectl.Client, name, image string) {
 		HeartbeatInterval: "1m",
 		Image:             image,
 		NoLogin:           true,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("Orchestrate %s on %s: %v", name, image, err)
 	}
 	t.Cleanup(func() {

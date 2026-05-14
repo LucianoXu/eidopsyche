@@ -74,6 +74,9 @@ func (f *minimalFake) ContainerLogs(_ context.Context, _ string, _ bool, _ io.Wr
 func (f *minimalFake) CopyFromContainer(_ context.Context, _, _ string, _ io.Writer) error {
 	return nil
 }
+func (f *minimalFake) ContainerInspectMounts(_ context.Context, _ string) ([]Mount, error) {
+	return nil, nil
+}
 
 func TestPurgeForFailedSummon_RemovesBoth(t *testing.T) {
 	f := &minimalFake{hasContainer: true, hasVolume: true}

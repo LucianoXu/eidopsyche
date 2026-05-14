@@ -166,7 +166,9 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, ready <-chan R
 		PrefabID:          s.PrefabID,
 		HeartbeatInterval: s.HeartbeatInterval,
 	}
-	if err := forge.Orchestrate(ctx, d.DockerClient, s.Slug, createOpts); err != nil {
+	// Workspaces are configured post-create via 'eidos forge workspace add' +
+	// 'eidos forge restart'; first-contact creates the bare /eidos volume only.
+	if err := forge.Orchestrate(ctx, d.DockerClient, s.Slug, createOpts, nil); err != nil {
 		return nil, fmt.Errorf("forge.Orchestrate: %w", err)
 	}
 	// purge runs rollback against a fresh, time-bounded context so that

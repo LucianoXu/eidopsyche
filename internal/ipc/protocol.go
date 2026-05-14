@@ -65,6 +65,8 @@ const (
 	ErrForgeContainerCreate  = "FORGE_CONTAINER_CREATE"
 	ErrForgeContainerStart   = "FORGE_CONTAINER_START"
 	ErrForgeHealthTimeout    = "FORGE_HEALTH_TIMEOUT"
+	ErrWorkspaceExists       = "WORKSPACE_EXISTS"
+	ErrWorkspaceNotFound     = "WORKSPACE_NOT_FOUND"
 )
 
 // ForgeUpgradeParams is the JSON params shape for the forge.upgrade
