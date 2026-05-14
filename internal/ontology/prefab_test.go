@@ -237,3 +237,14 @@ func TestRenderPrefabFile_RejectsNonTpl(t *testing.T) {
 		t.Errorf("expected error when path does not end in .tpl")
 	}
 }
+
+func TestMetaFor_ParsesEssenceWhenPresent(t *testing.T) {
+	// _test_fixture intentionally has no [essence] — assert empty/nil.
+	m, err := MetaFor("_test_fixture")
+	if err != nil {
+		t.Fatalf("MetaFor: %v", err)
+	}
+	if len(m.Essence) != 0 {
+		t.Errorf("Essence should be empty for fixture; got %v", m.Essence)
+	}
+}
