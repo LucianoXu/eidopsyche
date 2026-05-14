@@ -50,8 +50,22 @@ func computeStatus(ctx context.Context, c forgectl.Client, name string) (string,
 	fmt.Fprintf(&sb, "name:    %s\n", name)
 
 	if state != "running" {
-		// Container down → phase is offline; nothing else to surface.
+		// Container down → phase is offline; nothing else to surface
+		// EXCEPT the workspace diff: operators legitimately run
+		// `forge stop alice && forge workspace add … && forge status
+		// alice` to confirm the change is queued. Without surfacing
+		// the pending-restart hint here, they'd assume a plain
+		// `forge start` would apply the new bind mount — it won't
+		// (start is a signal-restart, only `forge restart` recreates
+		// the container). docker inspect works on stopped containers.
 		fmt.Fprintf(&sb, "phase:   offline (%s)\n", state)
+		if desired, actual, pendingRestart, werr := workspaceStatusDiff(ctx, c, name); werr == nil && (len(desired) > 0 || len(actual) > 0) {
+			fmt.Fprintf(&sb, "workspaces (desired): %s\n", formatWorkspaceEntries(desired))
+			fmt.Fprintf(&sb, "workspaces (actual):  %s\n", formatWorkspaceEntries(actual))
+			if pendingRestart {
+				fmt.Fprintf(&sb, "⚠ pending restart: workspaces changed — run 'eidos forge restart %s' to apply\n", name)
+			}
+		}
 		return sb.String(), nil
 	}
 

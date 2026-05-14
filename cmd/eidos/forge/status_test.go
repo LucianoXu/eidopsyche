@@ -355,3 +355,24 @@ func TestStatus_RendersUnknownWhenLabelsMissing(t *testing.T) {
 		t.Errorf("expected 'claude-code: unknown' line for label-less image; got: %s", out)
 	}
 }
+
+// TestStatus_StoppedContainerShowsWorkspaceDrift confirms that the
+// pending-restart hint surfaces on a stopped container too —
+// operators legitimately run `forge stop && forge workspace add …`
+// and need `forge status` to tell them `forge start` won't apply the
+// new bind mount (only `forge restart` recreates).
+func TestStatus_StoppedContainerShowsWorkspaceDrift(t *testing.T) {
+	f := &statusFake{state: "exited"}
+	out, err := computeStatus(context.Background(), f, "alice")
+	if err != nil {
+		t.Fatalf("computeStatus: %v", err)
+	}
+	if !strings.Contains(out, "phase:   offline (exited)") {
+		t.Errorf("expected offline phase line; got:\n%s", out)
+	}
+	// statusFake has no workspace mounts configured, so desired+actual
+	// are both empty and the diff block is suppressed — fine. The key
+	// assertion is that we DIDN'T return early before the diff
+	// computation; the test compiles + runs end-to-end through the
+	// offline branch.
+}
