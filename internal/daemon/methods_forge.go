@@ -11,10 +11,6 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
 )
 
-func init() {
-	register("forge.upgrade", forgeUpgrade)
-}
-
 // forgeUpgrade is the IPC handler for the forge.upgrade method.
 // Validates params, invokes internal/forge.Upgrade, and maps typed
 // errors to IPC codes.

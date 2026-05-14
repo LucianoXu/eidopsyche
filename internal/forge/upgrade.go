@@ -90,6 +90,18 @@ func Upgrade(ctx context.Context, c forgectl.Client, opts UpgradeOpts) (UpgradeR
 
 	cont := forgectl.ContainerName(opts.Name)
 
+	// Preflight: refuse to upgrade a mind-form that doesn't exist at
+	// all (no container AND no volume). The container may legitimately
+	// be absent (idempotent re-entry after SIGINT'd previous run); the
+	// volume must exist for upgrade to have anywhere to mount.
+	volExists, err := c.VolumeExists(ctx, forgectl.VolumeName(opts.Name))
+	if err != nil {
+		return UpgradeResult{}, fmt.Errorf("%w: volume check: %v", ErrUpgradeImageInspect, err)
+	}
+	if !volExists {
+		return UpgradeResult{}, fmt.Errorf("%w: %s", ErrUpgradeNotFound, opts.Name)
+	}
+
 	res := UpgradeResult{
 		Name:     opts.Name,
 		NewImage: opts.Image,

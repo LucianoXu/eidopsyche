@@ -48,4 +48,7 @@ func TestForgeUpgrade_BadName(t *testing.T) {
 	if ierr == nil || ierr.Code != ipc.ErrInvalidParams {
 		t.Fatalf("expected ErrInvalidParams for invalid name characters, got %v", ierr)
 	}
+	if !strings.Contains(strings.ToLower(ierr.Message), "name:") {
+		t.Errorf("error message should include 'name:' prefix; got: %s", ierr.Message)
+	}
 }
