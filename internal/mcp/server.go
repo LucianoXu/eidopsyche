@@ -50,6 +50,7 @@ func (s *Server) registerTools() {
 	s.registerMessagingTools()
 	s.registerInviteTools()
 	s.registerRelayTools()
+	s.registerConfigTools()
 }
 
 // Close releases the IPC connection. Called by the cobra cmd on exit.
