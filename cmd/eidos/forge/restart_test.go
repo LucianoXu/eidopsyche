@@ -27,9 +27,9 @@ func (f *restartFakeClient) ContainerStop(_ context.Context, name string, _ int)
 	f.ops = append(f.ops, "stop:"+name)
 	return nil
 }
-func (f *restartFakeClient) ContainerInspectImage(_ context.Context, name string) (string, error) {
+func (f *restartFakeClient) ContainerInspectImage(_ context.Context, name string) (string, string, error) {
 	f.ops = append(f.ops, "inspect-image:"+name)
-	return f.inspectImageReturn, f.inspectImageErr
+	return "", f.inspectImageReturn, f.inspectImageErr
 }
 func (f *restartFakeClient) ContainerRemove(_ context.Context, name string) error {
 	f.ops = append(f.ops, "remove:"+name)
@@ -75,6 +75,12 @@ func (f *restartFakeClient) CopyFromContainer(_ context.Context, _, _ string, _ 
 }
 func (f *restartFakeClient) ImageExists(_ context.Context, _ string) (bool, error)    { return false, nil }
 func (f *restartFakeClient) ImagePull(_ context.Context, _ string, _ io.Writer) error { return nil }
+func (f *restartFakeClient) ImageInspectLabels(_ context.Context, _ string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+func (f *restartFakeClient) ImageInspectID(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
 func (f *restartFakeClient) ContainerLogs(_ context.Context, _ string, _ bool, _ io.Writer) error {
 	return nil
 }

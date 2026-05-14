@@ -27,8 +27,8 @@ type promptDumpFake struct {
 func (f *promptDumpFake) ContainerInspectState(_ context.Context, _ string) (string, error) {
 	return f.state, f.stateErr
 }
-func (f *promptDumpFake) ContainerInspectImage(_ context.Context, _ string) (string, error) {
-	return "", nil
+func (f *promptDumpFake) ContainerInspectImage(_ context.Context, _ string) (string, string, error) {
+	return "", "", nil
 }
 func (f *promptDumpFake) ContainerExec(_ context.Context, _ string, cmd []string) (forgectl.ExecResult, error) {
 	f.execArgs = cmd

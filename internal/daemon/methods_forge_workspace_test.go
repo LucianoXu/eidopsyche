@@ -210,7 +210,13 @@ func (f *fakeForgeClient) ContainerCreate(_ context.Context, _ forgectl.CreateOp
 func (f *fakeForgeClient) ContainerStart(_ context.Context, _ string) error               { return nil }
 func (f *fakeForgeClient) ContainerStop(_ context.Context, _ string, _ int) error         { return nil }
 func (f *fakeForgeClient) ContainerRemove(_ context.Context, _ string) error              { return nil }
-func (f *fakeForgeClient) ContainerInspectImage(_ context.Context, _ string) (string, error) {
+func (f *fakeForgeClient) ContainerInspectImage(_ context.Context, _ string) (string, string, error) {
+	return "", "", nil
+}
+func (f *fakeForgeClient) ImageInspectLabels(_ context.Context, _ string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+func (f *fakeForgeClient) ImageInspectID(_ context.Context, _ string) (string, error) {
 	return "", nil
 }
 func (f *fakeForgeClient) RunInit(_ context.Context, _ forgectl.RunInitOpts) (forgectl.RunInitResult, error) {

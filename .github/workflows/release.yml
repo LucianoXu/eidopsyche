@@ -57,6 +57,8 @@ jobs:
           context: .
           file: docker/mindform/Dockerfile
           push: true
+          build-args: |
+            EIDOS_VERSION=${{ github.ref_name }}
           tags: |
             ghcr.io/lucianoxu/eidopsyche-mindform:${{ github.ref_name }}
             ghcr.io/lucianoxu/eidopsyche-mindform:latest

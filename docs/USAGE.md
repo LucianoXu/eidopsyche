@@ -426,23 +426,94 @@ $ eidos relay config set relay.mode public
 changes. Adding/removing relay entries in the SQLite `own_relays` table goes
 through `eidos gate relay-add` / `relay-remove` instead.
 
-## MindForge — creating and managing mind-forms
+## Mind-form management (`eidos forge`)
 
-The `eidos forge` subcommand manages mind-form instances on the host. A mind-form
-runs in a Docker container and has persistent state stored in a Docker volume.
+`eidos forge` manages mind-form containers from the host. Subcommands:
+`create`, `start`, `stop`, `restart`, `status`, `list`, `logs`, `exec`,
+`wake`, `login`, `ontology`, `config`, `plan`, `watch`, `prompt-dump`,
+`upgrade`, `workspace`, `purge`.
 
-Basic lifecycle:
+### `eidos forge create`
+
+Summons a new mind-form. Run `eidos forge create --help` or use the
+interactive wizard (`eidos summon`) for the full option set.
+
+### `eidos forge start / stop / status / list`
+
+Lifecycle commands. `status <name>` prints container state, agentloop
+mode, and — for images built with version labels — the bundled `eidos`
+and `claude-code` versions:
 
 ```
-eidos forge create <name>       # create a new mind-form (interactive)
-eidos forge start <name>        # start the container and agent-loop
-eidos forge stop <name>         # stop the container (no data loss)
-eidos forge status <name>       # show current state
-eidos forge list                # list all mind-forms
-eidos forge logs <name>         # tail the running agent-loop transcript
-eidos forge watch <name>        # stream the running agent-loop real-time
-eidos forge purge <name>        # delete the mind-form and its volume
+$ eidos forge status alice
+name:    alice
+phase:   idle
+session: abc12345 (age 3m20s, 42 turns)
+last_active: 1m ago
+image:       ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2
+eidos:       v0.11.2
+claude-code: 2.1.138
+whoami:  …
 ```
+
+### `eidos forge restart <name>`
+
+Recreate the mind-form's container, picking up workspace config changes
+(see "Shared workspaces" below). The `/eidos` volume (ontology,
+identity, transcripts, claudeauth, dream state, inbox) is preserved;
+the container's image is preserved across the recreate cycle so a
+prior `forge upgrade` is not silently reverted. To change the image,
+use `forge upgrade` instead.
+
+```
+eidos forge restart <name> [--grace <seconds>]
+```
+
+### `eidos forge upgrade <name>`
+
+Swap a mind-form's container image to a newer version while preserving
+its volume. Identity, contacts, ontology, Claude auth state, and
+agentloop state all survive — only the container's image switches.
+
+```
+eidos forge upgrade <name> [--image <tag>] [--wait-idle [--idle-timeout 10m]]
+                           [--grace <seconds>] [--dry-run]
+```
+
+The command always prints a version diff first (eidos + claude-code
+versions, read from the image's `org.eidopsyche.*` labels), then on
+TTY prompts for confirmation, then stops the mind-form, recreates the
+container on the new image with the same volume, and starts it back
+up. Non-TTY invocations auto-confirm so the command is scripting-safe.
+
+```
+$ eidos forge upgrade alice
+upgrading alice:
+  image      : ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2
+             → ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3
+  eidos      : v0.11.2 → v0.11.3
+  claude-code: 2.1.138 → 2.1.140
+proceed? [Y/n] y
+✓ alice upgraded to v0.11.3
+```
+
+Flags:
+- `--image <tag>` — override the target image. Default is the image
+  tag paired with the host eidos binary
+  (`ghcr.io/lucianoxu/eidopsyche-mindform:<host-version>`).
+- `--wait-idle` — poll the mind-form's agentloop until it reports idle
+  before stopping; `--idle-timeout` (default `10m`) caps the wait. On
+  timeout the command aborts without touching the container.
+- `--grace <seconds>` — seconds to wait before SIGKILL when stopping
+  (default 10, matching `forge stop`).
+- `--dry-run` — print the version diff and exit; no container
+  mutation. Useful for confirming what an upgrade would change before
+  committing.
+
+The volume is never modified by upgrade. If a future eidos version
+ships a volume migration requirement, that migration runs from the
+mind-form's own entrypoint on next start; upgrade itself is purely
+the image swap.
 
 ### Shared workspaces
 
@@ -489,3 +560,8 @@ or non-default Linux setups), `rw` writes from the mind-form may
 fail with `EACCES`. `forge workspace add` warns when this would
 apply. Fix with `chown -R 1000 <path>` or pass `--no-warn-uid` to
 silence.
+
+### `eidos forge purge <name>`
+
+Stop, remove the container, and delete the volume. Irreversible; prompts
+for confirmation unless `--yes` is passed.

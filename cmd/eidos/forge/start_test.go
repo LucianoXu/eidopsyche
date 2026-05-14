@@ -19,8 +19,8 @@ type startStopFake struct {
 func (f *startStopFake) ContainerInspectState(_ context.Context, _ string) (string, error) {
 	return f.state, nil
 }
-func (f *startStopFake) ContainerInspectImage(_ context.Context, _ string) (string, error) {
-	return "", nil
+func (f *startStopFake) ContainerInspectImage(_ context.Context, _ string) (string, string, error) {
+	return "", "", nil
 }
 func (f *startStopFake) ContainerExists(_ context.Context, _ string) (bool, error) {
 	return f.state != "absent", nil

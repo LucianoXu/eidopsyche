@@ -25,9 +25,15 @@ func Restart(ctx context.Context, c forgectl.Client, name string, cfg *config.Co
 		return fmt.Errorf("stop %s: %w", cont, err)
 	}
 
-	image, err := c.ContainerInspectImage(ctx, cont)
+	// ContainerInspectImage returns (image-id, image-ref, err). We
+	// only need the ref (the tag) to recreate the container with the
+	// same image; the id is used by forge upgrade for change detection.
+	_, image, err := c.ContainerInspectImage(ctx, cont)
 	if err != nil {
 		return fmt.Errorf("inspect image %s: %w", cont, err)
+	}
+	if image == "" {
+		return fmt.Errorf("inspect image %s: container has no image ref (does it exist?)", cont)
 	}
 
 	if err := c.ContainerRemove(ctx, cont); err != nil {

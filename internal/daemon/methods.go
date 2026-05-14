@@ -43,6 +43,9 @@ func init() {
 	register("lifecycle.run", lifecycleRunMethod)
 	register("daemon.exec-replace", daemonExecReplace)
 
+	// forge orchestration (host-side container lifecycle)
+	register("forge.upgrade", forgeUpgrade)
+
 	// parameter-taking reads (state.get's path-only model can't express
 	// since/from/to/limit/status filters; kept until state.get gains
 	// optional contributor params)

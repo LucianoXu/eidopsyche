@@ -17,13 +17,12 @@ type statusFake struct {
 	state         string
 	execResponses map[string]forgectl.ExecResult
 	inspectErr    error
+	image         string            // container's image ref
+	labels        map[string]string // labels for that image
 }
 
 func (f *statusFake) ContainerInspectState(_ context.Context, _ string) (string, error) {
 	return f.state, f.inspectErr
-}
-func (f *statusFake) ContainerInspectImage(_ context.Context, _ string) (string, error) {
-	return "", nil
 }
 func (f *statusFake) ContainerExec(_ context.Context, _ string, cmd []string) (forgectl.ExecResult, error) {
 	if len(cmd) >= 3 {
@@ -33,6 +32,20 @@ func (f *statusFake) ContainerExec(_ context.Context, _ string, cmd []string) (f
 	}
 	// Default: command not registered → simulate older image (exit 1).
 	return forgectl.ExecResult{ExitCode: 1, Stderr: []byte("unknown command")}, nil
+}
+
+// ContainerInspectImage overrides the inherited fakeClient stub so the
+// version-block code path can be driven by the test.
+func (f *statusFake) ContainerInspectImage(_ context.Context, _ string) (string, string, error) {
+	if f.image == "" {
+		return "", "", nil
+	}
+	return "sha256:fake", f.image, nil
+}
+
+// ImageInspectLabels overrides the inherited fakeClient stub.
+func (f *statusFake) ImageInspectLabels(_ context.Context, _ string) (map[string]string, error) {
+	return f.labels, nil
 }
 
 func TestStatusOffline(t *testing.T) {
@@ -289,5 +302,56 @@ func TestWorkspaceEntriesEqual(t *testing.T) {
 	d := []workspaceStatusEntry{} // size differs
 	if workspaceEntriesEqual(a, d) {
 		t.Error("differing length should NOT compare equal")
+	}
+}
+
+func TestStatus_RendersVersions(t *testing.T) {
+	f := &statusFake{
+		state: "running",
+		execResponses: map[string]forgectl.ExecResult{
+			// Make whoami / status-detail / runtime-state best-effort no-ops so the
+			// test focuses on the version block.
+			"whoami":        {ExitCode: 1},
+			"status-detail": {ExitCode: 1},
+			"runtime-state": {ExitCode: 1},
+		},
+		image: "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2",
+		labels: map[string]string{
+			"org.eidopsyche.eidos-version":       "v0.11.2",
+			"org.eidopsyche.claude-code-version": "2.1.138",
+		},
+	}
+	out, err := computeStatus(context.Background(), f, "alice")
+	if err != nil {
+		t.Fatalf("computeStatus: %v", err)
+	}
+	for _, want := range []string{
+		"image:       ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2",
+		"eidos:       v0.11.2",
+		"claude-code: 2.1.138",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status output missing %q\n---\n%s\n---", want, out)
+		}
+	}
+}
+
+func TestStatus_RendersUnknownWhenLabelsMissing(t *testing.T) {
+	f := &statusFake{
+		state: "running",
+		execResponses: map[string]forgectl.ExecResult{
+			"whoami":        {ExitCode: 1},
+			"status-detail": {ExitCode: 1},
+			"runtime-state": {ExitCode: 1},
+		},
+		image:  "ghcr.io/lucianoxu/eidopsyche-mindform:legacy",
+		labels: map[string]string{},
+	}
+	out, _ := computeStatus(context.Background(), f, "alice")
+	if !strings.Contains(out, "eidos:       unknown") {
+		t.Errorf("expected 'eidos:       unknown' line for label-less image; got: %s", out)
+	}
+	if !strings.Contains(out, "claude-code: unknown") {
+		t.Errorf("expected 'claude-code: unknown' line for label-less image; got: %s", out)
 	}
 }

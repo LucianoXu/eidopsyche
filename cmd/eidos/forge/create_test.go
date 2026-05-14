@@ -41,9 +41,6 @@ func (f *fakeClient) ContainerExists(_ context.Context, _ string) (bool, error) 
 func (f *fakeClient) ContainerInspectState(_ context.Context, _ string) (string, error) {
 	return "absent", nil
 }
-func (f *fakeClient) ContainerInspectImage(_ context.Context, _ string) (string, error) {
-	return "", nil
-}
 func (f *fakeClient) ContainerCreate(_ context.Context, opts forgectl.CreateOpts) error {
 	f.createCalls = append(f.createCalls, opts)
 	return nil
@@ -55,6 +52,15 @@ func (f *fakeClient) ImageExists(_ context.Context, _ string) (bool, error) {
 	// Default: image absent → orchestrator falls through to ImagePull,
 	// preserving the existing test's pull-was-called assertions.
 	return false, nil
+}
+func (f *fakeClient) ImageInspectLabels(_ context.Context, _ string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+func (f *fakeClient) ContainerInspectImage(_ context.Context, _ string) (string, string, error) {
+	return "", "", nil
+}
+func (f *fakeClient) ImageInspectID(_ context.Context, _ string) (string, error) {
+	return "", nil
 }
 func (f *fakeClient) ImagePull(_ context.Context, ref string, _ io.Writer) error {
 	f.pulled = append(f.pulled, ref)

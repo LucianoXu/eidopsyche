@@ -201,9 +201,8 @@ Every adjustment and every read in the same state schema is reachable through th
 After merging the PR, you should always exit the worktree, delete the worktree, remove the local and remote feature branch, unless specificed otherwise.
 
 **Guidelines:**
-- When required to use `PR` mode, or the development work is heavy, you should work in a `git` worktree on a separate branch and contribute via pull request. Worktrees should be placed at `../eidopsyche-worktree/<worktree-name>/`, where `eidopsyche-worktree/` is a sibling path parallel to the main repo. Steps to follow:
-  1. First use `git worktree add <path> <branch-name>` to create the worktree.
-  2. Use `EnterWorktree` tool to enter the workspace.
+- When required to use `PR` mode, or the development work is heavy, you should work in a `git` worktree on a separate branch and contribute via pull request. Use the `EnterWorktree` tool — it creates the worktree under `.claude/worktrees/<name>/` (already gitignored) and switches the session into it.
+- **Go LSP caveat for worktrees.** The Claude Code harness binds **one `gopls` per session**, rooted at the session's start cwd via the LSP `initialize` rootUri. `EnterWorktree` switches the session's cwd but cannot relocate `gopls` — it keeps its original rootUri, so files under `.claude/worktrees/<name>/` are reported as a foreign module with cascading "use of internal package not allowed" / `undefined: <samepkg-symbol>` / "this file is within module … which is not included in your workspace" diagnostics. These are LSP-rooting artifacts, not real compile errors: `go build` / `go test` / `go vet` from inside the worktree are unaffected. **If the worktree task needs Go LSP (`LSP` tool, real-time semantic queries, accurate diagnostics on Read), ask the user to start a fresh `claude` session inside the worktree** (`cd .claude/worktrees/<name> && claude --dangerously-skip-permissions`) instead of `EnterWorktree`. `EnterWorktree` remains fine for non-LSP work (edits, Bash-driven builds/tests, git ops).
 - DO NOT use squash merge when you merge a branch or PR.
 - Make sure to run the identical check as CI locally and apply fix before push to GitHub remote.
 - GitHub issues/comments/PR comments: use literal multiline strings or `-F - <<'EOF'` (or $'...') for real newlines; never embed "\\n".
