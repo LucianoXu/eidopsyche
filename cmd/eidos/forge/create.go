@@ -10,46 +10,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// CreateOpts is the inputs to Orchestrate. All flag-bound CLI options
-// land here, and the First Contact wizard fills it in from in-memory
-// summoning state. The wizard-only fields KeyHex and SummoningBook are
-// not exposed as CLI flags — they make no sense for scripted use.
-type CreateOpts struct {
-	Owner   string
-	Relay   string
-	Label   string
-	NoLogin bool
-	Image   string
-	Model   string
-
-	// HeartbeatInterval is the per-mind-form HeartBeat cadence written
-	// into /eidos/gate/config.toml at init-volume time. Empty leaves
-	// the [heartbeat] block unset, so the supervisor falls back to
-	// config.DefaultHeartbeatInterval. Must be in the supported set
-	// (validated via config.ValidateHeartbeatInterval).
-	HeartbeatInterval string
-
-	KeyHex        string // wizard-only: pre-generated MindForm private hex
-	SummoningBook string // wizard-only: rendered summoning-book markdown
-	RoleResearch  string // wizard-only: rendered self/role-research.md (scratch path)
-
-	// PrefabID, when non-empty, makes Orchestrate stream the
-	// prefab/<id>/ tree into the volume instead of the canonical
-	// template. The wizard's Phase 3 prefab branch sets this; the
-	// scratch path leaves it empty.
-	PrefabID string
-
-	// OwnerLabel is the master's human-readable label, surfaced to
-	// prefab .tpl files (e.g. summoning-book templates). Empty on
-	// scratch path; the scratch template/ does not reference it.
-	OwnerLabel string
-
-	// MindFormNpub is the new mind-form's npub, surfaced to prefab
-	// .tpl files. The wizard knows it after key generation; CLI
-	// `eidos forge create` (which has no key context) leaves it
-	// empty — prefab path is wizard-only.
-	MindFormNpub string
-}
 
 func newCreateCmd() *cobra.Command {
 	o := CreateOpts{}
