@@ -52,6 +52,12 @@ func (f *fakeClient) ImageExists(_ context.Context, _ string) (bool, error) {
 func (f *fakeClient) ImageInspectLabels(_ context.Context, _ string) (map[string]string, error) {
 	return map[string]string{}, nil
 }
+func (f *fakeClient) ContainerInspectImage(_ context.Context, _ string) (string, string, error) {
+	return "", "", nil
+}
+func (f *fakeClient) ImageInspectID(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
 func (f *fakeClient) ImagePull(_ context.Context, ref string, _ io.Writer) error {
 	f.pulled = append(f.pulled, ref)
 	return nil
