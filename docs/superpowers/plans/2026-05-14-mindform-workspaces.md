@@ -813,8 +813,8 @@ import (
 	"strings"
 	"testing"
 
-	"lucianoxu/eidopsyche/internal/config"
-	"lucianoxu/eidopsyche/internal/ipc"
+	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/ipc"
 )
 
 func TestForgeWorkspaceAdd_Persists(t *testing.T) {
@@ -980,9 +980,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"lucianoxu/eidopsyche/internal/config"
-	"lucianoxu/eidopsyche/internal/forgectl"
-	"lucianoxu/eidopsyche/internal/ipc"
+	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/forgectl"
+	"github.com/LucianoXu/eidopsyche/internal/ipc"
 )
 
 func init() {
@@ -1712,8 +1712,8 @@ import (
 	"context"
 	"testing"
 
-	"lucianoxu/eidopsyche/internal/config"
-	"lucianoxu/eidopsyche/internal/forgectl"
+	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 )
 
 func TestOrchestrate_AssemblesWorkspaceMounts(t *testing.T) {
@@ -1794,8 +1794,8 @@ import (
 	"reflect"
 	"testing"
 
-	"lucianoxu/eidopsyche/internal/config"
-	"lucianoxu/eidopsyche/internal/forgectl"
+	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 )
 
 // TestRestart_PreservesImage_AppliesNewMounts confirms the new
@@ -1867,8 +1867,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"lucianoxu/eidopsyche/internal/config"
-	"lucianoxu/eidopsyche/internal/forgectl"
+	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 )
 
 // Restart performs the recreate cycle: stop → inspect-image → rm →
@@ -2157,7 +2157,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"lucianoxu/eidopsyche/internal/ipc"
+	"github.com/LucianoXu/eidopsyche/internal/ipc"
 )
 
 func WorkspaceCmd() *cobra.Command {
