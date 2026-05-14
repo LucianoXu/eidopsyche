@@ -81,6 +81,19 @@ func computeStatus(ctx context.Context, c forgectl.Client, name string) (string,
 		fmt.Fprintf(&sb, "state:   %s\n", state)
 	}
 
+	// Bundled-version surface — read the org.eidopsyche.* LABELs off
+	// the container's image. Best-effort; empty labels render as
+	// "unknown" so pre-this-change images stay functional.
+	if _, ref, ierr := c.ContainerInspectImage(ctx, cont); ierr == nil && ref != "" {
+		labels, lerr := c.ImageInspectLabels(ctx, ref)
+		if lerr == nil {
+			v := forgectl.VersionsFromLabels(labels)
+			fmt.Fprintf(&sb, "image:       %s\n", ref)
+			fmt.Fprintf(&sb, "eidos:       %s\n", orFallback(v.Eidos, "unknown"))
+			fmt.Fprintf(&sb, "claude-code: %s\n", orFallback(v.ClaudeCode, "unknown"))
+		}
+	}
+
 	// Best-effort whoami via in-container reflection.
 	res, err := c.ContainerExec(ctx, cont, []string{"eidos", "forge", "whoami"})
 	if err != nil || res.ExitCode != 0 {
