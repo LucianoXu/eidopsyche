@@ -113,6 +113,18 @@ func Upgrade(ctx context.Context, c forgectl.Client, opts UpgradeOpts) (UpgradeR
 		return UpgradeResult{}, fmt.Errorf("%w: %s", ErrUpgradeNotFound, opts.Name)
 	}
 
+	// Preflight every configured workspace's host path before any
+	// destructive step. A missing or invalid bind source would only be
+	// rejected at ContainerCreate (step 6), at which point the old
+	// container has already been removed and the mind-form is stranded.
+	// Fail loudly here so the operator can correct the path with
+	// `eidos forge workspace remove` before retrying.
+	for _, w := range opts.Workspaces {
+		if err := config.ValidateWorkspaceHostPath(w.HostPath); err != nil {
+			return UpgradeResult{}, fmt.Errorf("workspace %q: %w (fix the path or run 'eidos forge workspace remove %s %s')", w.Name, err, opts.Name, w.Name)
+		}
+	}
+
 	res := UpgradeResult{
 		Name:     opts.Name,
 		NewImage: opts.Image,

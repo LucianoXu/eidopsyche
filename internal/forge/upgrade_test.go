@@ -376,13 +376,18 @@ func TestUpgrade_PreservesWorkspaceMounts(t *testing.T) {
 	c.imageLabels["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"] = map[string]string{}
 	c.imageLabels["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"] = map[string]string{}
 
+	// Real tempdirs so the host-path preflight (ValidateWorkspaceHostPath)
+	// passes; both bind sources must exist on disk.
+	projDir := t.TempDir()
+	photosDir := t.TempDir()
+
 	_, err := Upgrade(context.Background(), c, UpgradeOpts{
 		Name:  "alice",
 		Image: "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3",
 		Grace: 10,
 		Workspaces: []config.WorkspaceMount{
-			{Name: "proj-x", HostPath: "/home/op/code/project-x", Mode: "rw"},
-			{Name: "photos", HostPath: "/home/op/Pictures", Mode: "ro"},
+			{Name: "proj-x", HostPath: projDir, Mode: "rw"},
+			{Name: "photos", HostPath: photosDir, Mode: "ro"},
 		},
 	})
 	if err != nil {
@@ -390,8 +395,8 @@ func TestUpgrade_PreservesWorkspaceMounts(t *testing.T) {
 	}
 	want := []forgectl.Mount{
 		{Type: forgectl.MountVolume, Source: forgectl.VolumeName("alice"), Target: "/eidos"},
-		{Type: forgectl.MountBind, Source: "/home/op/code/project-x", Target: "/workspace/proj-x", ReadOnly: false},
-		{Type: forgectl.MountBind, Source: "/home/op/Pictures", Target: "/workspace/photos", ReadOnly: true},
+		{Type: forgectl.MountBind, Source: projDir, Target: "/workspace/proj-x", ReadOnly: false},
+		{Type: forgectl.MountBind, Source: photosDir, Target: "/workspace/photos", ReadOnly: true},
 	}
 	if len(c.lastCreateMounts) != len(want) {
 		t.Fatalf("mount count: want %d got %d (%#v)", len(want), len(c.lastCreateMounts), c.lastCreateMounts)
@@ -424,5 +429,32 @@ func TestUpgrade_NilWorkspaces_OntologyOnly(t *testing.T) {
 	}
 	if len(c.lastCreateMounts) != 1 || c.lastCreateMounts[0].Target != "/eidos" {
 		t.Errorf("nil-workspaces upgrade should mount only /eidos; got %#v", c.lastCreateMounts)
+	}
+}
+
+func TestUpgrade_PreflightMissingWorkspacePath(t *testing.T) {
+	c := newFakeUpgradeClient()
+	c.containerImages["eidos-mindform-alice"] = "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"
+	c.containerStates["eidos-mindform-alice"] = "running"
+	c.imageIDs["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"] = "sha256:aaa"
+	c.imageIDs["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"] = "sha256:bbb"
+	c.imageExistsLocal["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"] = true
+	c.imageExistsLocal["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"] = true
+	c.imageLabels["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"] = map[string]string{}
+	c.imageLabels["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"] = map[string]string{}
+
+	_, err := Upgrade(context.Background(), c, UpgradeOpts{
+		Name:  "alice",
+		Image: "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3",
+		Grace: 10,
+		Workspaces: []config.WorkspaceMount{
+			{Name: "missing", HostPath: "/no/such/path/upgrade-preflight", Mode: "rw"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected preflight error for missing host path")
+	}
+	if c.hasCall("ContainerStop") || c.hasCall("ContainerRemove") || c.hasCall("ContainerCreate") {
+		t.Errorf("preflight failure must not run Stop/Remove/Create; calls=%v", c.calls)
 	}
 }

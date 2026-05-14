@@ -102,10 +102,12 @@ func TestRestart_PreservesImage_AppliesNewMounts(t *testing.T) {
 	fc := newRestartFakeClient(t)
 	fc.inspectImageReturn = "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"
 
+	// Use a real tempdir so the host-path preflight passes.
+	dir := t.TempDir()
 	cfg := &config.Config{
 		Forge: map[string]config.ForgeMindForm{
 			"alice": {Workspaces: []config.WorkspaceMount{
-				{Name: "proj-x", HostPath: "/home/op/code/project-x", Mode: "rw"},
+				{Name: "proj-x", HostPath: dir, Mode: "rw"},
 			}},
 		},
 	}
@@ -127,7 +129,7 @@ func TestRestart_PreservesImage_AppliesNewMounts(t *testing.T) {
 	}
 	wantMounts := []forgectl.Mount{
 		{Type: forgectl.MountVolume, Source: forgectl.VolumeName("alice"), Target: "/eidos"},
-		{Type: forgectl.MountBind, Source: "/home/op/code/project-x", Target: "/workspace/proj-x", ReadOnly: false},
+		{Type: forgectl.MountBind, Source: dir, Target: "/workspace/proj-x", ReadOnly: false},
 	}
 	if !reflect.DeepEqual(fc.createMounts, wantMounts) {
 		t.Errorf("create mounts\nwant %#v\n got %#v", wantMounts, fc.createMounts)
@@ -180,5 +182,36 @@ func TestRestart_FallsBackToRefWhenIDMissing(t *testing.T) {
 	}
 	if fc.createImage != "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3" {
 		t.Errorf("create image = %q; want fallback to ref", fc.createImage)
+	}
+}
+
+// TestRestart_PreflightMissingHostPath confirms restart aborts before
+// touching the container when a configured workspace's host_path was
+// deleted between forge workspace add and forge restart. The risk is
+// that ContainerCreate would otherwise fail at step 4 (after we've
+// already stop+rm'd the container), stranding the mind-form.
+func TestRestart_PreflightMissingHostPath(t *testing.T) {
+	fc := newRestartFakeClient(t)
+	fc.inspectImageID = "sha256:abc"
+	fc.inspectImageReturn = "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"
+	cfg := &config.Config{
+		Forge: map[string]config.ForgeMindForm{
+			"alice": {Workspaces: []config.WorkspaceMount{
+				{Name: "proj-x", HostPath: "/no/such/path/preflight-test", Mode: "rw"},
+			}},
+		},
+	}
+	err := Restart(context.Background(), fc, "alice", cfg, 10)
+	if err == nil {
+		t.Fatal("expected preflight error for missing host path")
+	}
+	for _, op := range fc.ops {
+		switch op {
+		case "stop:" + forgectl.ContainerName("alice"),
+			"remove:" + forgectl.ContainerName("alice"),
+			"create:" + forgectl.ContainerName("alice"),
+			"start:" + forgectl.ContainerName("alice"):
+			t.Errorf("preflight failure must not run %q; ops=%v", op, fc.ops)
+		}
 	}
 }

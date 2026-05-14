@@ -22,6 +22,22 @@ func Restart(ctx context.Context, c forgectl.Client, name string, cfg *config.Co
 	cont := forgectl.ContainerName(name)
 	vol := forgectl.VolumeName(name)
 
+	// Preflight every configured workspace's host path before we touch
+	// the running container. If any path was deleted or renamed since
+	// the operator ran `forge workspace add`, ContainerCreate would
+	// later reject the bind mount and leave the mind-form with no
+	// container at all (we've already done stop+rm by then). Fail
+	// loudly here, before the destructive steps, so the operator can
+	// fix the path or `forge workspace remove` it without losing
+	// container state.
+	if cfg != nil {
+		for _, w := range cfg.Forge[name].Workspaces {
+			if err := config.ValidateWorkspaceHostPath(w.HostPath); err != nil {
+				return fmt.Errorf("workspace %q: %w (fix the path or run 'eidos forge workspace remove %s %s')", w.Name, err, name, w.Name)
+			}
+		}
+	}
+
 	if err := c.ContainerStop(ctx, cont, graceSeconds); err != nil {
 		return fmt.Errorf("stop %s: %w", cont, err)
 	}
