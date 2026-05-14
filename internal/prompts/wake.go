@@ -2,9 +2,22 @@ package prompts
 
 import (
 	"fmt"
+	"os"
 	"strings"
+	"text/template"
 	"time"
 )
+
+// firstWordsTemplate is the embedded first-words wake-prefix template,
+// parsed once at init so a corrupt embed surfaces at process start.
+var firstWordsTemplate = func() *template.Template {
+	body := mustLoad("assets/firstwords-prefix.txt")
+	t, err := template.New("firstwords").Option("missingkey=error").Parse(body)
+	if err != nil {
+		panic(fmt.Sprintf("prompts: parse firstwords-prefix.txt: %v", err))
+	}
+	return t
+}()
 
 // WakeInput is the set of facts the per-wake message in BuildWake
 // depends on. The supervisor populates it from the wake signal,
@@ -35,12 +48,36 @@ type WakeInput struct {
 	// LastDreamFinishedAt is the unix-second timestamp of the most
 	// recent dream-end (0 if never). Surfaced in the first-wake prefix.
 	LastDreamFinishedAt int64
+
+	// FirstWordsPending is true when self/born_at exists but
+	// self/first_words_at does not — meaning the mind-form has finished
+	// role construction but has not yet greeted its creator. When set,
+	// BuildWake prepends the first-words instruction block above every
+	// other section.
+	FirstWordsPending bool
+	// OwnerLabel is the creator's display label; threaded through to
+	// the first-words prefix template's {{.OwnerLabel}}. Forwarder
+	// reads this once from self/identity.toml at agent-loop startup.
+	OwnerLabel string
 }
 
 // BuildWake renders the user-message body the supervisor sends to
 // claude on every wake except birth.
 func BuildWake(in WakeInput) string {
 	var sb strings.Builder
+	if in.FirstWordsPending {
+		var prefixBuf strings.Builder
+		if err := firstWordsTemplate.Execute(&prefixBuf, map[string]string{
+			"OwnerLabel": in.OwnerLabel,
+		}); err != nil {
+			// Should not happen — template was parsed at init. Log and
+			// drop the prefix so the wake still goes out without a
+			// diagnostic string the model cannot interpret.
+			fmt.Fprintf(os.Stderr, "prompts: firstwords Execute: %v\n", err)
+		} else {
+			sb.WriteString(prefixBuf.String())
+		}
+	}
 	if in.IsFirstWakeOfNewSession {
 		if in.LastDreamFinishedAt > 0 {
 			fmt.Fprintf(&sb,
