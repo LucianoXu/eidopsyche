@@ -34,11 +34,10 @@ func TestBirthUser_NewBirthFlow(t *testing.T) {
 		"summoning-book.md",
 		"calling-words.md",
 		"self/soul.md",
+		"memory/semantic/master.md",
 		"self/secret.md",
-		"chest/first-message.md",
-		"eidos gate send",
-		"creator_npub",
 		"self/born_at",
+		"Do NOT send any",
 		"Vibe / 气质",
 		"Personality / 性格",
 		"Speech / 表达方式",
@@ -50,13 +49,16 @@ func TestBirthUser_NewBirthFlow(t *testing.T) {
 			t.Errorf("BirthUser output missing %q", want)
 		}
 	}
-	// Must NOT contain stale references.
+	// Phase 1 must NOT do first-words — that moved to firstwords-prefix.txt.
 	for _, banned := range []string{
+		"chest/first-message.md",
+		"eidos gate send",
+		"creator_npub",
 		"first-words.md",
 		"identity.md",
 	} {
 		if strings.Contains(out, banned) {
-			t.Errorf("BirthUser output should no longer contain %q", banned)
+			t.Errorf("BirthUser output should no longer contain %q (Phase 2 territory)", banned)
 		}
 	}
 }
