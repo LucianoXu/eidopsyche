@@ -262,3 +262,32 @@ func TestStatusLastActive(t *testing.T) {
 		t.Errorf("missing last_active line: %q", out)
 	}
 }
+
+func TestStatus_RendersWorkspaceLines(t *testing.T) {
+	desired := []workspaceStatusEntry{
+		{Name: "proj-x", HostPath: "/home/op/code/project-x", Mode: "rw"},
+	}
+	actual := []workspaceStatusEntry{}
+	if formatWorkspaceEntries(desired) != "proj-x (rw)" {
+		t.Errorf("desired format: %q", formatWorkspaceEntries(desired))
+	}
+	if formatWorkspaceEntries(actual) != "(none)" {
+		t.Errorf("empty actual format: %q", formatWorkspaceEntries(actual))
+	}
+}
+
+func TestWorkspaceEntriesEqual(t *testing.T) {
+	a := []workspaceStatusEntry{{Name: "x", HostPath: "/a", Mode: "rw"}}
+	b := []workspaceStatusEntry{{Name: "x", HostPath: "/a", Mode: "rw"}}
+	if !workspaceEntriesEqual(a, b) {
+		t.Error("identical entries should compare equal")
+	}
+	c := []workspaceStatusEntry{{Name: "x", HostPath: "/a", Mode: "ro"}} // mode differs
+	if workspaceEntriesEqual(a, c) {
+		t.Error("differing mode should NOT compare equal")
+	}
+	d := []workspaceStatusEntry{} // size differs
+	if workspaceEntriesEqual(a, d) {
+		t.Error("differing length should NOT compare equal")
+	}
+}
