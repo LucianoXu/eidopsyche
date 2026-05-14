@@ -94,3 +94,67 @@ func forgeWorkspaceAdd(ctx context.Context, d *Daemon, _ *ipc.Conn, raw json.Raw
 	}
 	return forgeWorkspaceAddResult{PendingRestart: true, Warnings: warnings}, nil
 }
+
+func init() {
+	register("forge.workspace.remove", forgeWorkspaceRemove)
+}
+
+type forgeWorkspaceRemoveParams struct {
+	MindForm string `json:"mindform"`
+	Name     string `json:"name"`
+}
+
+func forgeWorkspaceRemove(ctx context.Context, d *Daemon, _ *ipc.Conn, raw json.RawMessage) (any, *ipc.Error) {
+	var p forgeWorkspaceRemoveParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidRequest, Message: "decode params: " + err.Error()}
+	}
+	if err := config.ValidateWorkspaceName(p.Name); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+	}
+	if !d.MindFormKnown(p.MindForm) {
+		return nil, &ipc.Error{Code: ipc.ErrForgeNotFound, Message: fmt.Sprintf("mind-form %q not found", p.MindForm)}
+	}
+
+	var notFoundErr *ipc.Error
+	merr := d.Mutate(ctx, "forge."+p.MindForm+".workspaces", config.HostCtx,
+		func() (any, any, error) {
+			cfg, err := config.Load(d.configPath())
+			if err != nil {
+				return nil, nil, err
+			}
+			mf := cfg.Forge[p.MindForm]
+			oldWs := append([]config.WorkspaceMount(nil), mf.Workspaces...)
+			filtered := mf.Workspaces[:0]
+			found := false
+			for _, w := range mf.Workspaces {
+				if w.Name == p.Name {
+					found = true
+					continue
+				}
+				filtered = append(filtered, w)
+			}
+			if !found {
+				notFoundErr = &ipc.Error{Code: ipc.ErrWorkspaceNotFound,
+					Message: fmt.Sprintf("no workspace %q on mind-form %q", p.Name, p.MindForm)}
+				return nil, nil, notFoundErr
+			}
+			mf.Workspaces = filtered
+			if len(mf.Workspaces) == 0 {
+				delete(cfg.Forge, p.MindForm)
+			} else {
+				cfg.Forge[p.MindForm] = mf
+			}
+			if err := config.Save(d.configPath(), cfg); err != nil {
+				return nil, nil, err
+			}
+			return oldWs, mf.Workspaces, nil
+		})
+	if notFoundErr != nil {
+		return nil, notFoundErr
+	}
+	if merr != nil {
+		return nil, asIPCError(merr)
+	}
+	return forgeWorkspaceAddResult{PendingRestart: true}, nil
+}

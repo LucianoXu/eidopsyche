@@ -145,3 +145,37 @@ func TestForgeWorkspaceAdd_RejectsUnknownMindform(t *testing.T) {
 		t.Errorf("want FORGE_NOT_FOUND; got %v", ipcErr)
 	}
 }
+
+func TestForgeWorkspaceRemove_Drops(t *testing.T) {
+	d := newTestDaemon(t)
+	d.SeedMindForm("alice")
+	seedEmptyConfig(t, d)
+	dir := t.TempDir()
+	rawAdd, _ := json.Marshal(map[string]any{"mindform": "alice", "name": "proj-x", "host_path": dir})
+	if _, e := forgeWorkspaceAdd(context.Background(), d, nil, rawAdd); e != nil {
+		t.Fatal(e)
+	}
+	rawRm, _ := json.Marshal(map[string]any{"mindform": "alice", "name": "proj-x"})
+	out, ipcErr := forgeWorkspaceRemove(context.Background(), d, nil, rawRm)
+	if ipcErr != nil {
+		t.Fatal(ipcErr)
+	}
+	if !out.(forgeWorkspaceAddResult).PendingRestart {
+		t.Errorf("expected pending_restart=true")
+	}
+	cfg, _ := config.Load(d.configPath())
+	if _, exists := cfg.Forge["alice"]; exists {
+		t.Errorf("alice's [forge] block should be removed when last workspace is dropped; got %#v", cfg.Forge["alice"])
+	}
+}
+
+func TestForgeWorkspaceRemove_NotFound(t *testing.T) {
+	d := newTestDaemon(t)
+	d.SeedMindForm("alice")
+	seedEmptyConfig(t, d)
+	raw, _ := json.Marshal(map[string]any{"mindform": "alice", "name": "missing"})
+	_, ipcErr := forgeWorkspaceRemove(context.Background(), d, nil, raw)
+	if ipcErr == nil || ipcErr.Code != ipc.ErrWorkspaceNotFound {
+		t.Errorf("want WORKSPACE_NOT_FOUND; got %v", ipcErr)
+	}
+}
