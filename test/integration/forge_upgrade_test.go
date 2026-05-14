@@ -204,11 +204,10 @@ func TestForgeUpgrade_NoOpWhenImageIDUnchanged(t *testing.T) {
 // and the agentloop never reports an idle phase within IdleTimeout,
 // Upgrade returns ErrUpgradeIdleTimeout without mutating the container.
 //
-// The container is started but the runtime-state probe inside it will
-// not emit an idle-phase JSON response within the 5-second budget
-// (the supervisor/agentloop hasn't had time to start, or the claude
-// binary is absent because NoLogin=true was used). Either way the
-// probe returns non-zero or non-idle JSON, so waitIdle times out.
+// The container is deliberately left stopped. ContainerExec cannot exec
+// into a stopped container, so every wait-idle probe fails immediately
+// without ever observing an idle phase. This guarantees the timeout
+// fires regardless of how fast the agentloop would otherwise settle.
 func TestForgeUpgrade_WaitIdleTimesOut(t *testing.T) {
 	base := requireBaseImage(t)
 	const oldTag = "eidopsyche-upgrade-it:v9.9.4"
@@ -223,19 +222,18 @@ func TestForgeUpgrade_WaitIdleTimesOut(t *testing.T) {
 
 	name := uniqueName("upgrade-waitidle")
 	createMindForm(t, c, name, oldTag)
-
-	// Start the container so ContainerExec works, but the agentloop is
-	// not expected to reach idle phase within 5 s (it requires Claude
-	// auth which isn't configured under NoLogin=true).
-	if err := c.ContainerStart(context.Background(), forgectl.ContainerName(name)); err != nil {
-		t.Fatalf("ContainerStart: %v", err)
-	}
+	// Deliberately do NOT start the container. With the container in
+	// stopped state, the wait-idle probe (ContainerExec calling
+	// `eidos forge runtime-state`) fails on every poll, so waitIdle
+	// never observes the idle phase and trips the IdleTimeout. This
+	// is the scenario the test was originally trying to exercise — a
+	// mind-form whose agentloop is unreachable within the deadline.
 
 	_, err = forge.Upgrade(context.Background(), c, forge.UpgradeOpts{
 		Name:        name,
 		Image:       newTag,
 		WaitIdle:    true,
-		IdleTimeout: 5 * time.Second,
+		IdleTimeout: 2 * time.Second,
 	})
 	if !errors.Is(err, forge.ErrUpgradeIdleTimeout) {
 		t.Fatalf("expected ErrUpgradeIdleTimeout, got %v", err)
