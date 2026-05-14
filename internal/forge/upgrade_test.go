@@ -163,6 +163,29 @@ func (f *fakeUpgradeClient) hasCall(substr string) bool {
 	return false
 }
 
+func TestIsIdlePhase(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"pretty-printed idle", "{\n  \"phase\": \"idle\"\n}", true},
+		{"pretty-printed sleeping", "{\n  \"phase\": \"sleeping\",\n  \"v\": 2\n}", true},
+		{"compact idle (legacy)", `{"phase":"idle"}`, true},
+		{"awake", `{"phase":"awake"}`, false},
+		{"in_turn", `{"phase": "in_turn"}`, false},
+		{"empty", ``, false},
+		{"malformed", `not json`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isIdlePhase([]byte(tc.input)); got != tc.want {
+				t.Errorf("isIdlePhase(%q) = %v, want %v", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestUpgrade_HappyPath(t *testing.T) {
 	c := newFakeUpgradeClient()
 	c.containerImages["eidos-mindform-alice"] = "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2"

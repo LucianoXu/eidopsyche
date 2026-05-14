@@ -2,10 +2,10 @@ package forge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
@@ -236,13 +236,17 @@ func waitIdle(ctx context.Context, c forgectl.Client, cont string, timeout time.
 // agentloop phase that is safe to interrupt. Conservative: only
 // "idle" / "sleeping" count as idle; "awake" / "in_turn" do not.
 //
-// Cheap substring match avoids pulling the RuntimeState struct into
-// this package and creating an import cycle with cmd/eidos/forge.
-// The JSON shape is stable per the runtime-state schema; if the
-// phase key spelling ever changes, update here.
+// Decodes a minimal struct rather than importing cmd/eidos/forge's
+// full RuntimeState (which would be an upward import). The phase
+// key is stable; if it ever changes, update here.
 func isIdlePhase(jsonStdout []byte) bool {
-	s := string(jsonStdout)
-	return strings.Contains(s, `"phase":"idle"`) || strings.Contains(s, `"phase":"sleeping"`)
+	var rs struct {
+		Phase string `json:"phase"`
+	}
+	if err := json.Unmarshal(jsonStdout, &rs); err != nil {
+		return false
+	}
+	return rs.Phase == "idle" || rs.Phase == "sleeping"
 }
 
 // waitHealthy polls the new container's gate IPC until it responds,
