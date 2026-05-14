@@ -18,6 +18,11 @@ type Config struct {
 	Wake      WakeConfig      `toml:"wake"`
 	MindForm  MindFormConfig  `toml:"mindform"`
 	Heartbeat HeartbeatConfig `toml:"heartbeat"`
+
+	// Forge is the host-gate per-mind-form section. Keyed by mind-form
+	// name. nil/empty on the in-container gate (mind-forms don't
+	// configure their own bind mounts). See WorkspaceMount.
+	Forge map[string]ForgeMindForm `toml:"forge,omitempty"`
 }
 
 // HeartbeatConfig is the in-container gate's mind-form heartbeat cadence.
