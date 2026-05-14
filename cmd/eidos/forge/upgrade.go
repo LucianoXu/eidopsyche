@@ -3,12 +3,13 @@ package forge
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/term"
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
@@ -84,14 +85,9 @@ func callDaemonForgeUpgrade(ctx context.Context, method string, params ipc.Forge
 	}
 	defer c.Close()
 
-	rawParams, err := json.Marshal(params)
-	if err != nil {
-		return ipc.ForgeUpgradeResult{}, &ipc.Error{Code: ipc.ErrInternal, Message: "marshal params: " + err.Error()}
-	}
-
 	_ = ctx // ipc.Client.Call does not take a context yet; ctx reserved for future use
 	var res ipc.ForgeUpgradeResult
-	ipcErr, callErr := c.Call(method, json.RawMessage(rawParams), &res)
+	ipcErr, callErr := c.Call(method, params, &res)
 	if callErr != nil {
 		return ipc.ForgeUpgradeResult{}, &ipc.Error{Code: ipc.ErrInternal, Message: "call: " + callErr.Error()}
 	}
@@ -168,11 +164,7 @@ func orFallback(s, fallback string) string {
 }
 
 func isTTY() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
+	return term.IsTerminal(int(os.Stdin.Fd()))
 }
 
 func confirm(out io.Writer, prompt string) bool {
