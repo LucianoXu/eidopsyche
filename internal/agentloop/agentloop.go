@@ -231,6 +231,8 @@ func Run(ctx context.Context, opts RunOpts) error {
 		FirstWakeFlagGetAndClear: func() bool {
 			return firstWakeFlag.CompareAndSwap(true, false)
 		},
+		OntologyDir: opts.OntologyDir,
+		OwnerLabel:  facts.OwnerLabel,
 	})
 
 	// ── 11. Initial agent-state.json snapshot ────────────────────────────
