@@ -294,3 +294,38 @@ func TestUpgrade_WaitIdleTimeout(t *testing.T) {
 		t.Errorf("wait-idle timeout must abort before mutation; calls: %v", c.calls)
 	}
 }
+
+func TestUpgrade_IdempotentReentryWhenContainerAbsent(t *testing.T) {
+	c := newFakeUpgradeClient()
+	// No containerImages entry, no containerStates entry — container is absent
+	// (e.g. previous Upgrade run was SIGINT'd between Remove and Create).
+	c.imageIDs["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"] = "sha256:new"
+	c.imageExistsLocal["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"] = true
+	c.imageLabels["ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"] = map[string]string{
+		"org.eidopsyche.eidos-version":       "v0.11.3",
+		"org.eidopsyche.claude-code-version": "2.1.140",
+	}
+
+	res, err := Upgrade(context.Background(), c, UpgradeOpts{
+		Name:  "alice",
+		Image: "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3",
+	})
+	if err != nil {
+		t.Fatalf("Upgrade should recover from absent container, got: %v", err)
+	}
+	if res.Skipped {
+		t.Error("Skipped should be false on idempotent re-entry to a missing container")
+	}
+	if res.OldImage != "" {
+		t.Errorf("OldImage should be empty when container was absent; got %q", res.OldImage)
+	}
+	if !c.hasCall("ContainerCreate:eidos-mindform-alice:ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3") {
+		t.Error("expected ContainerCreate with new image even on idempotent re-entry")
+	}
+	if !c.hasCall("ContainerStart:eidos-mindform-alice") {
+		t.Error("expected ContainerStart even on idempotent re-entry")
+	}
+	if c.hasCall("ContainerStop") || c.hasCall("ContainerRemove") {
+		t.Errorf("absent-container path must NOT call Stop/Remove; calls: %v", c.calls)
+	}
+}

@@ -61,8 +61,9 @@ type Client interface {
 	ContainerInspectImage(ctx context.Context, name string) (id string, ref string, err error)
 
 	// ImageInspectID returns the content-addressable image ID
-	// (sha256:...) for ref. Returns "" when the image is not present
-	// locally — callers should ImageExists or ImagePull first.
+	// (sha256:...) for ref. Returns an error if the image is not present
+	// locally; callers must ensure the image exists (via ImageExists or
+	// ImagePull) before calling.
 	ImageInspectID(ctx context.Context, ref string) (string, error)
 
 	ImagePull(ctx context.Context, ref string, w io.Writer) error

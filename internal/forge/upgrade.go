@@ -98,14 +98,15 @@ func Upgrade(ctx context.Context, c forgectl.Client, opts UpgradeOpts) (UpgradeR
 	// Step 1: inspect current container's image ref + ID + LABELs.
 	oldImageID, oldRef, err := c.ContainerInspectImage(ctx, cont)
 	if err != nil {
-		return res, fmt.Errorf("%w: inspect current container: %v", ErrUpgradeNotFound, err)
+		return res, fmt.Errorf("%w: inspect current container: %v", ErrUpgradeImageInspect, err)
 	}
 	res.OldImage = oldRef
 	if oldRef != "" {
 		labels, lerr := c.ImageInspectLabels(ctx, oldRef)
 		if lerr != nil {
-			// Tolerate — old image may have been pruned. Leave version fields empty.
-			oldImageID = ""
+			// Tolerate — old image may have been pruned from the local store.
+			// Leave version fields empty; oldImageID is still valid from
+			// container metadata, so the Skipped check below still works.
 		} else {
 			v := forgectl.VersionsFromLabels(labels)
 			res.OldEidos = v.Eidos
@@ -157,7 +158,7 @@ func Upgrade(ctx context.Context, c forgectl.Client, opts UpgradeOpts) (UpgradeR
 	// Step 4: stop if running.
 	state, err := c.ContainerInspectState(ctx, cont)
 	if err != nil {
-		return res, fmt.Errorf("inspect state: %w", err)
+		return res, fmt.Errorf("%w: inspect container state: %v", ErrUpgradeImageInspect, err)
 	}
 	if state == "running" {
 		if err := c.ContainerStop(ctx, cont, opts.Grace); err != nil {
