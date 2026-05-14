@@ -4,10 +4,13 @@
 // docs/specs/SPEC.md §"Claude Code 调用设计" is the prose authority;
 // this slice is its executable form. Edit them together.
 //
-// Target Claude Code version: 2.1.141. When bumping
-// docker/mindform/Dockerfile's CLAUDE_CODE_VERSION, re-validate
-// against the upstream release notes — tools added/removed/renamed
-// upstream must be reflected here and in SPEC.md.
+// Allowlist names target Claude Code 2.1.141 naming. The runtime
+// image (docker/mindform/Dockerfile's CLAUDE_CODE_VERSION) may pin
+// an older patch; every name in this list is still valid in the
+// currently shipped CC patch (claude logs and ignores unknown names
+// rather than failing). When bumping CLAUDE_CODE_VERSION, re-validate
+// this list against the upstream release notes — tools added /
+// removed / renamed upstream must be reflected here and in SPEC.md.
 package claudeexec
 
 import "strings"
