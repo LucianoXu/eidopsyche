@@ -91,3 +91,102 @@ func TestEffectiveMode(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateWorkspaceName(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"proj-x", true},
+		{"a", true},
+		{"abc123", true},
+		{"a-b-c", true},
+		{"", false},
+		{"-foo", false},    // leading hyphen
+		{"Foo", false},     // uppercase
+		{"foo_bar", false}, // underscore
+		{"foo/bar", false}, // slash
+		{"..", false},
+	}
+	for _, c := range cases {
+		got := ValidateWorkspaceName(c.in) == nil
+		if got != c.want {
+			t.Errorf("ValidateWorkspaceName(%q) ok=%v want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func TestValidateWorkspaceMode(t *testing.T) {
+	if err := ValidateWorkspaceMode(""); err != nil {
+		t.Errorf("empty mode should be valid (defaults to rw), got %v", err)
+	}
+	if err := ValidateWorkspaceMode("rw"); err != nil {
+		t.Error(err)
+	}
+	if err := ValidateWorkspaceMode("ro"); err != nil {
+		t.Error(err)
+	}
+	if err := ValidateWorkspaceMode("RW"); err == nil {
+		t.Error("RW should be rejected (case-sensitive)")
+	}
+	if err := ValidateWorkspaceMode("write"); err == nil {
+		t.Error("write should be rejected")
+	}
+}
+
+func TestValidateWorkspaceHostPath(t *testing.T) {
+	dir := t.TempDir()
+	regular := filepath.Join(dir, "regular")
+	if err := os.Mkdir(regular, 0755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "afile")
+	if err := os.WriteFile(file, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ValidateWorkspaceHostPath(regular); err != nil {
+		t.Errorf("regular dir: %v", err)
+	}
+	if err := ValidateWorkspaceHostPath("relative/path"); err == nil {
+		t.Error("relative path should be rejected")
+	}
+	if err := ValidateWorkspaceHostPath("/tmp/../etc"); err == nil {
+		t.Error("path containing .. should be rejected")
+	}
+	if err := ValidateWorkspaceHostPath("/no/such/path/" + t.Name()); err == nil {
+		t.Error("nonexistent path should be rejected")
+	}
+	if err := ValidateWorkspaceHostPath(file); err == nil {
+		t.Error("file (not directory) should be rejected")
+	}
+}
+
+func TestDangerousHostPath(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool // true = should produce a warning
+	}{
+		{"/", true},
+		{"/proc", true},
+		{"/proc/cpuinfo", true},
+		{"/sys", true},
+		{"/dev", true},
+		{"/etc", true},
+		{"/var/run/docker.sock", true},
+		{"/tmp/docker.sock", true},
+		{"/home/op/.ssh", true},
+		{"/home/op/.ssh/keys", true},
+		{"/home/op/.config/eidos", true},
+		{"/home/op/.config/eidos/config.toml", true},
+		{"/home/op/code/project-x", false},
+		{"/home/op/Pictures", false},
+		{"/var/log", false},
+	}
+	for _, c := range cases {
+		got := DangerousHostPath(c.in) != ""
+		if got != c.want {
+			t.Errorf("DangerousHostPath(%q) warned=%v want %v", c.in, got, c.want)
+		}
+	}
+}
