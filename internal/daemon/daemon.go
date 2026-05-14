@@ -17,6 +17,7 @@ import (
 	"github.com/LucianoXu/eidopsyche/internal/contacts"
 	"github.com/LucianoXu/eidopsyche/internal/dashboard"
 	"github.com/LucianoXu/eidopsyche/internal/envelope"
+	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 	"github.com/LucianoXu/eidopsyche/internal/identity"
 	"github.com/LucianoXu/eidopsyche/internal/inbox"
 	"github.com/LucianoXu/eidopsyche/internal/invitedb"
@@ -113,6 +114,19 @@ type Daemon struct {
 	// testEmitAck, if non-nil, replaces emitAck during tests to avoid
 	// actual NIP-17 publish over the network.
 	testEmitAck func(ctx context.Context, toPubkey string, ref string)
+
+	// forgectlClient is the docker client used by forge.* IPC methods on
+	// the host daemon. Eager-initialised at startup with graceful fallback
+	// (a docker-less daemon leaves it nil; forge.* handlers reject calls
+	// with FORGE_NOT_FOUND when it's nil because they cannot verify
+	// mind-form existence). Container-side daemons leave this nil.
+	forgectlClient forgectl.Client
+
+	// testKnownMindForms is a test-only short-circuit so unit tests can
+	// fake mind-form existence without a docker daemon. Populated via
+	// SeedMindForm. Production paths leave this nil and fall through to
+	// the real docker probe.
+	testKnownMindForms map[string]struct{}
 }
 
 // Start loads state from stateDir and initialises the daemon without yet
@@ -169,6 +183,14 @@ func Start(stateDir string) (*Daemon, error) {
 		ackedInnerIDs: make(map[string]struct{}, 1024),
 		relayHealth:   newRelayHealthStore(),
 		wakeDir:       cfg.Wake.Dir,
+	}
+	// Best-effort docker client init. A failure here (no docker socket,
+	// permission denied, …) is logged but does not block daemon startup —
+	// forge.* handlers gate on nil.
+	if c, err := forgectl.New(); err == nil {
+		d.forgectlClient = c
+	} else {
+		d.Log.Warn("forgectl client unavailable", "err", err)
 	}
 	// Hydrate the in-memory dedupe maps from on-disk inbox/outbox so a
 	// relay re-delivering events after daemon restart doesn't re-process

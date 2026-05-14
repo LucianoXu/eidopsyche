@@ -55,6 +55,9 @@ const (
 	ErrContextMismatch       = "CONTEXT_MISMATCH"
 	ErrPathNotFound          = "PATH_NOT_FOUND"
 	ErrInconsistent          = "STATE_INCONSISTENT"
+	ErrForgeNotFound         = "FORGE_NOT_FOUND"
+	ErrWorkspaceExists       = "WORKSPACE_EXISTS"
+	ErrWorkspaceNotFound     = "WORKSPACE_NOT_FOUND"
 )
 
 // WrapInconsistent composes an apply-failure error with a rollback-
