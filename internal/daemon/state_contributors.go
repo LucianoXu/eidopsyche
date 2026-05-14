@@ -50,12 +50,16 @@ func (d *Daemon) registerCoreStateContributors() {
 	d.RegisterStateContributor(outboxContrib{d: d})
 	d.RegisterStateContributor(invitesContrib{d: d})
 	d.RegisterStateContributor(serviceContrib{d: d})
-	// forge.workspaces is container-side only: mind-forms inspect their own
-	// bind mounts. Host operators read the desired/actual diff through the
-	// forge.workspace.list IPC method instead.
-	if d.Context&config.ContainerCtx != 0 {
-		d.RegisterStateContributor(forgeWorkspacesContrib{d: d})
-	}
+	// forge.workspaces: mind-forms inspect their own bind mounts via this
+	// path; host operators get a richer desired/actual diff through the
+	// forge.workspace.list IPC method. Registered unconditionally because
+	// the natural container-only behaviour falls out of the data source —
+	// the contributor reads /proc/self/mounts and filters /workspace/<name>
+	// entries, which never exist on a host daemon (no bind mounts are
+	// configured there). Gating on d.Context here is wrong: this function
+	// runs in daemon.Start before cmd/eidos/gate/daemon.go has a chance to
+	// call SetContext(ContainerCtx) from the EIDOS_IN_CONTAINER branch.
+	d.RegisterStateContributor(forgeWorkspacesContrib{d: d})
 }
 
 // ── identity ────────────────────────────────────────────────────────
