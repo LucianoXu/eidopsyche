@@ -446,12 +446,14 @@ and `claude-code` versions:
 
 ```
 $ eidos forge status alice
-name:        alice
-container:   running  (id=a3f1…)
-agentloop:   idle
+name:    alice
+phase:   idle
+session: abc12345 (age 3m20s, 42 turns)
+last_active: 1m ago
 image:       ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.2
-  eidos      : v0.11.2
-  claude-code: 2.1.138
+eidos:       v0.11.2
+claude-code: 2.1.138
+whoami:  …
 ```
 
 ### `eidos forge upgrade <name>`
@@ -479,11 +481,6 @@ upgrading alice:
   eidos      : v0.11.2 → v0.11.3
   claude-code: 2.1.138 → 2.1.140
 proceed? [Y/n] y
-pulling ghcr.io/...:v0.11.3 ... done
-stopping alice ... done
-creating new container ... done
-starting alice ... done
-verifying health ... done
 ✓ alice upgraded to v0.11.3
 ```
 

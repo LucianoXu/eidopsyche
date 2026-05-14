@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"io"
 	"strings"
 	"time"
 
@@ -133,7 +133,7 @@ func Upgrade(ctx context.Context, c forgectl.Client, opts UpgradeOpts) (UpgradeR
 		return res, fmt.Errorf("%w: %v", ErrUpgradeImageInspect, err)
 	}
 	if !existsLocal {
-		if err := c.ImagePull(ctx, opts.Image, os.Stderr); err != nil {
+		if err := c.ImagePull(ctx, opts.Image, io.Discard); err != nil {
 			return res, fmt.Errorf("%w: %v", ErrUpgradeImagePull, err)
 		}
 	}
