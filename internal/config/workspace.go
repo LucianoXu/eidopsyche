@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 )
 
 // WorkspaceMount is one entry in a mind-form's bind-mount list. The
@@ -142,18 +141,11 @@ func DangerousHostPath(p string) string {
 const MindFormContainerUID uint32 = 1000
 
 // HostPathOwnerUID returns the owning uid of p on the host. The
-// daemon's add handler uses this to emit a uid-mismatch warning.
-func HostPathOwnerUID(p string) (uint32, error) {
-	st, err := os.Stat(p)
-	if err != nil {
-		return 0, fmt.Errorf("stat %s: %w", p, err)
-	}
-	sys, ok := st.Sys().(*syscall.Stat_t)
-	if !ok {
-		return 0, fmt.Errorf("stat %s: cannot read owner uid (non-Unix?)", p)
-	}
-	return sys.Uid, nil
-}
+// daemon's add handler uses this to emit a uid-mismatch warning when
+// uid != MindFormContainerUID on an rw mount. Implementation is
+// split between workspace_uid_unix.go and workspace_uid_windows.go
+// because syscall.Stat_t is Unix-only and the host binary cross-
+// builds for windows/{amd64,arm64} as well.
 
 // UIDMismatchWarning composes the operator-facing warning when an
 // rw-mode workspace's host path is not owned by uid 1000.

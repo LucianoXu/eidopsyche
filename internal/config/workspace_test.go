@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/BurntSushi/toml"
@@ -195,24 +194,8 @@ func TestDangerousHostPath(t *testing.T) {
 	}
 }
 
-// TestHostPathOwnerUID exercises the helper against tempdirs the test
-// process owns (uid == os.Geteuid() under any test runner). Distinct
-// uid scenarios are tested in the IPC handler test with a stat-stub.
-func TestHostPathOwnerUID(t *testing.T) {
-	dir := t.TempDir()
-	uid, err := HostPathOwnerUID(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := uint32(os.Geteuid())
-	if uid != want {
-		t.Errorf("HostPathOwnerUID(%q)=%d, want %d", dir, uid, want)
-	}
-
-	if _, err := HostPathOwnerUID("/no/such/path/" + t.Name()); err == nil {
-		t.Error("nonexistent path should error")
-	}
-}
+// TestHostPathOwnerUID lives in workspace_uid_unix_test.go (Unix-only;
+// HostPathOwnerUID has a Windows stub returning a non-fatal error).
 
 func TestUIDMismatchWarning(t *testing.T) {
 	got := UIDMismatchWarning("/home/op/code/foo", 501)
@@ -220,6 +203,3 @@ func TestUIDMismatchWarning(t *testing.T) {
 		t.Errorf("warning missing key fields: %q", got)
 	}
 }
-
-// Silence the syscall import lint when the helper compiles without it.
-var _ = syscall.Stat_t{}
