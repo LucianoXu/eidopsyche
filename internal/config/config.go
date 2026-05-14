@@ -34,16 +34,20 @@ type HeartbeatConfig struct {
 // Lives in /eidos/gate/config.toml; host gates leave MindForm at its
 // zero value because the [mindform] block is absent from their config.
 type MindFormConfig struct {
-	// Model pins the claude model used by agent-runner. Empty = let
-	// claude pick its subscription default. The mindform.model
-	// registry key validates writes via ValidateModelID; Load tolerates
-	// anything so a hand-edited config.toml with an unknown id
-	// surfaces at the next wake when claude rejects it, not at
-	// gate-daemon startup.
+	// Model pins the claude model used by agent-runner. Empty resolves
+	// to DefaultModel ("opus") at every spawn site (agent-loop,
+	// supervisor birth, prompt-dump). Accepted values: bare family
+	// aliases sonnet|haiku|opus, or a full claude-{family}-N[-N...]
+	// id. The mindform.model registry key validates writes via
+	// ValidateModelID; Load tolerates anything so a hand-edited
+	// config.toml with an unknown id surfaces at the next wake when
+	// claude rejects it, not at gate-daemon startup.
 	Model string `toml:"model"`
 
-	// Effort is the reasoning-effort level surfaced to the mind-form
-	// via the system prompt's Info block. Empty = DefaultEffort
+	// Effort is the reasoning-effort level. Drives the `--effort` flag
+	// passed to the claude CLI at every spawn (agent-loop, birth,
+	// prompt-dump) and is also surfaced to the mind-form as text via
+	// the system prompt's Info block. Empty = DefaultEffort
 	// ("medium"). Validated by ValidateEffort on writes through the
 	// mindform.effort registry key.
 	Effort string `toml:"effort"`

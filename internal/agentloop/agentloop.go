@@ -113,6 +113,9 @@ func Run(ctx context.Context, opts RunOpts) error {
 		fmt.Fprintf(stderr(), "agent-loop: read identity facts: %v (proceeding with empty facts)\n", factErr)
 	}
 	facts.Model = cfg.MindForm.Model
+	if facts.Model == "" {
+		facts.Model = config.DefaultModel
+	}
 	facts.Effort = cfg.MindForm.Effort
 	if facts.Effort == "" {
 		facts.Effort = config.DefaultEffort
@@ -137,7 +140,8 @@ func Run(ctx context.Context, opts RunOpts) error {
 		Binary:       opts.ClaudeBin,
 		Mode:         mode.Kind,
 		SessionUUID:  mode.UUID,
-		Model:        cfg.MindForm.Model,
+		Model:        facts.Model,
+		Effort:       facts.Effort,
 		SystemPrompt: systemPrompt,
 		Cwd:          opts.OntologyDir,
 		ClaudeDir:    opts.ClaudeDir,
@@ -287,7 +291,8 @@ func Run(ctx context.Context, opts RunOpts) error {
 						Binary:       opts.ClaudeBin,
 						Mode:         SessionNew,
 						SessionUUID:  newUUID,
-						Model:        cfg.MindForm.Model,
+						Model:        facts.Model,
+						Effort:       facts.Effort,
 						SystemPrompt: systemPrompt,
 						Cwd:          opts.OntologyDir,
 						ClaudeDir:    opts.ClaudeDir,
@@ -362,7 +367,8 @@ func Run(ctx context.Context, opts RunOpts) error {
 					Binary:       opts.ClaudeBin,
 					Mode:         SessionNew,
 					SessionUUID:  fresh.SessionID,
-					Model:        cfg.MindForm.Model,
+					Model:        facts.Model,
+					Effort:       facts.Effort,
 					SystemPrompt: systemPrompt,
 					Cwd:          opts.OntologyDir,
 					ClaudeDir:    opts.ClaudeDir,

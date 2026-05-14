@@ -118,6 +118,16 @@ func TestBuildClaudeArgs_StreamJSONContract(t *testing.T) {
 			require: []string{"--model", "claude-opus-4-7"},
 		},
 		{
+			name:    "effort when non-empty",
+			opts:    SpawnOpts{Mode: SessionNew, SessionUUID: "u", Effort: "high", SystemPrompt: "x"},
+			require: []string{"--effort", "high"},
+		},
+		{
+			name:    "effort omitted when empty",
+			opts:    SpawnOpts{Mode: SessionNew, SessionUUID: "u", SystemPrompt: "x"},
+			exclude: []string{"--effort"},
+		},
+		{
 			name:    "extra args appended last",
 			opts:    SpawnOpts{Mode: SessionNew, SessionUUID: "u", SystemPrompt: "x", ExtraArgs: []string{"--mode", "normal"}},
 			require: []string{"--mode", "normal"},
