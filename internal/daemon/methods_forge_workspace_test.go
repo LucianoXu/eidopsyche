@@ -298,3 +298,42 @@ func TestForgeWorkspaceList_InSync(t *testing.T) {
 		t.Errorf("expected pending_restart=false")
 	}
 }
+
+// TestForgeWorkspaceRemove_OrphanedConfig confirms remove works even
+// when the mind-form's container and volume are gone (e.g., after
+// `forge purge` which doesn't clean the host gate config today).
+// Without this, recycled names silently inherit stale mounts.
+func TestForgeWorkspaceRemove_OrphanedConfig(t *testing.T) {
+	d := newTestDaemon(t)
+	// Note: NO SeedMindForm — simulates post-purge state where the
+	// docker container + volume are gone but config still has entries.
+	seedEmptyConfig(t, d)
+
+	// Manually inject orphaned config (can't go through add since add
+	// gates on MindFormKnown).
+	cfg, err := config.Load(d.configPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Forge = map[string]config.ForgeMindForm{
+		"alice": {Workspaces: []config.WorkspaceMount{
+			{Name: "proj-x", HostPath: "/tmp", Mode: "rw"},
+		}},
+	}
+	if err := config.Save(d.configPath(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, _ := json.Marshal(map[string]any{"mindform": "alice", "name": "proj-x"})
+	out, ipcErr := forgeWorkspaceRemove(context.Background(), d, nil, raw)
+	if ipcErr != nil {
+		t.Fatalf("remove of orphaned config should succeed; got %v", ipcErr)
+	}
+	if !out.(forgeWorkspaceAddResult).PendingRestart {
+		t.Errorf("want pending_restart=true")
+	}
+	cfg, _ = config.Load(d.configPath())
+	if _, exists := cfg.Forge["alice"]; exists {
+		t.Errorf("orphaned [forge.alice] block should be removed; got %#v", cfg.Forge["alice"])
+	}
+}

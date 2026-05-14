@@ -120,9 +120,11 @@ func forgeWorkspaceRemove(ctx context.Context, d *Daemon, _ *ipc.Conn, raw json.
 	if err := config.ValidateWorkspaceName(p.Name); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
 	}
-	if !d.MindFormKnown(p.MindForm) {
-		return nil, &ipc.Error{Code: ipc.ErrForgeNotFound, Message: fmt.Sprintf("mind-form %q not found", p.MindForm)}
-	}
+	// No MindFormKnown gate here — removing workspace config is always
+	// safe, and we must allow operators to clean up orphaned entries
+	// left behind after `forge purge` (which today only removes the
+	// container + volume, not the host gate config). Without this
+	// carve-out a recycled name silently inherits stale mounts.
 
 	var notFoundErr *ipc.Error
 	merr := d.Mutate(ctx, "forge."+p.MindForm+".workspaces", config.HostCtx,
@@ -195,9 +197,10 @@ func forgeWorkspaceList(ctx context.Context, d *Daemon, _ *ipc.Conn, raw json.Ra
 	if err := forgectl.ValidateName(p.MindForm); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: "mindform: " + err.Error()}
 	}
-	if !d.MindFormKnown(p.MindForm) {
-		return nil, &ipc.Error{Code: ipc.ErrForgeNotFound, Message: fmt.Sprintf("mind-form %q not found", p.MindForm)}
-	}
+	// No MindFormKnown gate here — list must work on orphaned config
+	// (post-purge) so the operator can see and clean up stale entries.
+	// Both `desired` (config) and `actual` (docker inspect) are
+	// independently best-effort below.
 
 	desired := []forgeWorkspaceListEntry{}
 	cfg, err := config.Load(d.configPath())
