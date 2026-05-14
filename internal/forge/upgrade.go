@@ -40,15 +40,16 @@ type UpgradeResult struct {
 
 // Typed errors that the daemon handler maps to IPC error codes.
 var (
-	ErrUpgradeNotFound        = errors.New("forge upgrade: mind-form not found")
-	ErrUpgradeImagePull       = errors.New("forge upgrade: image pull failed")
-	ErrUpgradeImageInspect    = errors.New("forge upgrade: image inspect failed")
-	ErrUpgradeIdleTimeout     = errors.New("forge upgrade: agentloop did not become idle within timeout")
-	ErrUpgradeContainerStop   = errors.New("forge upgrade: container stop failed")
-	ErrUpgradeContainerRemove = errors.New("forge upgrade: container remove failed")
-	ErrUpgradeContainerCreate = errors.New("forge upgrade: container create failed")
-	ErrUpgradeContainerStart  = errors.New("forge upgrade: container start failed")
-	ErrUpgradeHealthTimeout   = errors.New("forge upgrade: container did not become healthy within 30s")
+	ErrUpgradeNotFound         = errors.New("forge upgrade: mind-form not found")
+	ErrUpgradeImagePull        = errors.New("forge upgrade: image pull failed")
+	ErrUpgradeImageInspect     = errors.New("forge upgrade: image inspect failed")
+	ErrUpgradeContainerInspect = errors.New("forge upgrade: container inspect failed")
+	ErrUpgradeIdleTimeout      = errors.New("forge upgrade: agentloop did not become idle within timeout")
+	ErrUpgradeContainerStop    = errors.New("forge upgrade: container stop failed")
+	ErrUpgradeContainerRemove  = errors.New("forge upgrade: container remove failed")
+	ErrUpgradeContainerCreate  = errors.New("forge upgrade: container create failed")
+	ErrUpgradeContainerStart   = errors.New("forge upgrade: container start failed")
+	ErrUpgradeHealthTimeout    = errors.New("forge upgrade: container did not become healthy within 30s")
 )
 
 // HealthProbeTimeout caps how long Upgrade waits for the new
@@ -158,7 +159,7 @@ func Upgrade(ctx context.Context, c forgectl.Client, opts UpgradeOpts) (UpgradeR
 	// Step 4: stop if running.
 	state, err := c.ContainerInspectState(ctx, cont)
 	if err != nil {
-		return res, fmt.Errorf("%w: inspect container state: %v", ErrUpgradeImageInspect, err)
+		return res, fmt.Errorf("%w: inspect container state: %v", ErrUpgradeContainerInspect, err)
 	}
 	if state == "running" {
 		if err := c.ContainerStop(ctx, cont, opts.Grace); err != nil {
