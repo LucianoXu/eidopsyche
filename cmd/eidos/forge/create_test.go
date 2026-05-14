@@ -18,12 +18,13 @@ import (
 // ---------------------------------------------------------------------------
 
 type fakeClient struct {
-	volExists  bool
-	volCreated bool
-	contExists bool
-	pulled     []string
-	inits      []forgectl.RunInitOpts
-	initStdin  [][]byte // captured stdin bytes (one entry per RunInit call)
+	volExists   bool
+	volCreated  bool
+	contExists  bool
+	pulled      []string
+	inits       []forgectl.RunInitOpts
+	initStdin   [][]byte              // captured stdin bytes (one entry per RunInit call)
+	createCalls []forgectl.CreateOpts // captured ContainerCreate args
 }
 
 func (f *fakeClient) VolumeExists(_ context.Context, _ string) (bool, error) {
@@ -43,10 +44,13 @@ func (f *fakeClient) ContainerInspectState(_ context.Context, _ string) (string,
 func (f *fakeClient) ContainerInspectImage(_ context.Context, _ string) (string, error) {
 	return "", nil
 }
-func (f *fakeClient) ContainerCreate(_ context.Context, _ forgectl.CreateOpts) error { return nil }
-func (f *fakeClient) ContainerStart(_ context.Context, _ string) error               { return nil }
-func (f *fakeClient) ContainerStop(_ context.Context, _ string, _ int) error         { return nil }
-func (f *fakeClient) ContainerRemove(_ context.Context, _ string) error              { return nil }
+func (f *fakeClient) ContainerCreate(_ context.Context, opts forgectl.CreateOpts) error {
+	f.createCalls = append(f.createCalls, opts)
+	return nil
+}
+func (f *fakeClient) ContainerStart(_ context.Context, _ string) error       { return nil }
+func (f *fakeClient) ContainerStop(_ context.Context, _ string, _ int) error { return nil }
+func (f *fakeClient) ContainerRemove(_ context.Context, _ string) error      { return nil }
 func (f *fakeClient) ImageExists(_ context.Context, _ string) (bool, error) {
 	// Default: image absent → orchestrator falls through to ImagePull,
 	// preserving the existing test's pull-was-called assertions.
@@ -152,7 +156,7 @@ func TestCreateRefusesIfVolumeExists(t *testing.T) {
 	f := &fakeClient{volExists: true}
 	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
 		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice", NoLogin: true, Image: "img:dev",
-	})
+	}, nil)
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("want exists error, got %v", err)
 	}
@@ -168,7 +172,7 @@ func TestCreateSkipsPullWhenImagePresentLocally(t *testing.T) {
 	f := &fakeClientLocalImage{}
 	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
 		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice", NoLogin: true, Image: "img:dev",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("orchestrate: %v", err)
 	}
@@ -190,7 +194,7 @@ func TestCreateOrchestratesAllSteps(t *testing.T) {
 	f := &fakeClient{}
 	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
 		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice", NoLogin: true, Image: "img:dev",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("orchestrate: %v", err)
 	}
@@ -222,7 +226,7 @@ func TestCreateImagePullErrorsBubbled(t *testing.T) {
 	wrapped := &fakeClientPullErr{fakeClient: *f, pullErr: pullErrFn}
 	err := Orchestrate(context.Background(), wrapped, "alice", CreateOpts{
 		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice", NoLogin: true, Image: "img:dev",
-	})
+	}, nil)
 	if err == nil || !errors.Is(err, want) {
 		t.Errorf("expected wrapped pull error, got %v", err)
 	}
@@ -235,7 +239,7 @@ func TestCreateInitContainerRunsAsRoot(t *testing.T) {
 	f := &fakeClient{}
 	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
 		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice", NoLogin: true, Image: "img:dev",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("orchestrate: %v", err)
 	}
@@ -254,7 +258,7 @@ func TestCreateModelEnvPlumbing(t *testing.T) {
 	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
 		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice",
 		NoLogin: true, Image: "img:dev", Model: "claude-sonnet-4-7",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("orchestrate: %v", err)
 	}
@@ -303,7 +307,7 @@ func TestCreateHeartbeatIntervalEnvPlumbing(t *testing.T) {
 	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
 		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice",
 		NoLogin: true, Image: "img:dev", HeartbeatInterval: "2m",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("orchestrate: %v", err)
 	}
@@ -371,7 +375,7 @@ func TestOrchestrate_KeyHexFlowsToInitEnv(t *testing.T) {
 	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
 		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice",
 		Image: "img:dev", KeyHex: "deadbeef",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("orchestrate: %v", err)
 	}
@@ -388,7 +392,7 @@ func TestOrchestrate_NoKeyHexOmitsEnv(t *testing.T) {
 	f := &fakeClient{}
 	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
 		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice", Image: "img:dev",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("orchestrate: %v", err)
 	}
@@ -409,7 +413,7 @@ func TestOrchestrate_SummoningBookLandsInTar(t *testing.T) {
 	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
 		Owner: "npub1ownertest", Relay: "wss://r", Label: "alice",
 		Image: "img:dev", SummoningBook: journal,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("orchestrate: %v", err)
 	}
@@ -454,7 +458,7 @@ func TestOrchestrate_RollsBackVolumeOnInitFailure(t *testing.T) {
 	f := &fakeClientRunInitErr{}
 	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
 		Label: "alice", Owner: "npub1ownertest", Relay: "wss://x", Image: "img:dev",
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -488,7 +492,7 @@ func TestOrchestrate_RollsBackVolumeOnContainerCreateFailure(t *testing.T) {
 	f := &fakeClientContainerCreateErr{}
 	err := Orchestrate(context.Background(), f, "alice", CreateOpts{
 		Label: "alice", Owner: "npub1ownertest", Relay: "wss://x", Image: "img:dev",
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -510,7 +514,7 @@ func TestOrchestrate_NoVolumeCreatedOnImagePullFailure(t *testing.T) {
 	wrapped := &fakeClientPullErr{fakeClient: *f, pullErr: pullErrFn}
 	err := Orchestrate(context.Background(), wrapped, "alice", CreateOpts{
 		Label: "alice", Owner: "npub1ownertest", Relay: "wss://x", Image: "img:dev",
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}

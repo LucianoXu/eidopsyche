@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 	"github.com/LucianoXu/eidopsyche/internal/ontology"
 	"github.com/LucianoXu/eidopsyche/internal/version"
@@ -89,7 +91,7 @@ func runSteps(ctx context.Context, steps []orchestrateStep) error {
 // Mid-flight failures (init-volume, container-create) reverse-undo any
 // completed steps so the operator can retry cleanly without manual
 // `docker volume rm` / `docker rm` housekeeping.
-func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOpts) error {
+func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOpts, cfg *config.Config) error {
 	vol := forgectl.VolumeName(name)
 	cont := forgectl.ContainerName(name)
 
@@ -210,10 +212,23 @@ func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOp
 			// image's default entrypoint (tini → entrypoint.sh →
 			// eidos supervisor run); no Cmd / Entrypoint override.
 			do: func(ctx context.Context) error {
+				mounts := []forgectl.Mount{
+					{Type: forgectl.MountVolume, Source: vol, Target: "/eidos"},
+				}
+				if cfg != nil {
+					for _, w := range cfg.Forge[name].Workspaces {
+						mounts = append(mounts, forgectl.Mount{
+							Type:     forgectl.MountBind,
+							Source:   w.HostPath,
+							Target:   "/workspace/" + w.Name,
+							ReadOnly: w.EffectiveMode() == "ro",
+						})
+					}
+				}
 				if err := c.ContainerCreate(ctx, forgectl.CreateOpts{
 					Name:   cont,
 					Image:  image,
-					Mounts: []forgectl.Mount{{Type: forgectl.MountVolume, Source: vol, Target: "/eidos"}},
+					Mounts: mounts,
 				}); err != nil {
 					return fmt.Errorf("create container: %w", err)
 				}
@@ -232,8 +247,16 @@ func runCreate2(cmd *cobra.Command, name string, o CreateOpts) error {
 	if err != nil {
 		return err
 	}
+	stateDir, err := config.ResolveStateDir("")
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(filepath.Join(stateDir, "config.toml"))
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
-	if err := Orchestrate(ctx, c, name, o); err != nil {
+	if err := Orchestrate(ctx, c, name, o, &cfg); err != nil {
 		return err
 	}
 	cmd.Printf("created mind-form %q (label %q)\n", name, o.Label)
