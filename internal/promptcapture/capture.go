@@ -27,6 +27,10 @@ type Opts struct {
 	SystemPrompt string
 	// Model, if non-empty, is passed as --model. Empty → omitted.
 	Model string
+	// Effort, if non-empty, is passed as --effort. Empty → omitted.
+	// Mirrors the production agent-loop spawn so prompt-dump captures
+	// match what the mind-form actually sends.
+	Effort string
 	// Prompt is the -p argument. Default "ping" when empty.
 	Prompt string
 	// ExtraArgs are appended after the standard args. Used by
@@ -137,6 +141,9 @@ func buildClaudeArgs(opts Opts) []string {
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
+	}
+	if opts.Effort != "" {
+		args = append(args, "--effort", opts.Effort)
 	}
 	args = append(args, "--dangerously-skip-permissions")
 	args = append(args, opts.ExtraArgs...)

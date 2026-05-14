@@ -7,21 +7,28 @@ func TestValidateModelID(t *testing.T) {
 		in   string
 		want bool // true = should be accepted
 	}{
-		{"", true}, // empty = use claude default
+		{"", true}, // empty = use DefaultModel
+		{"sonnet", true},
+		{"haiku", true},
+		{"opus", true},
 		{"claude-sonnet-4-7", true},
 		{"claude-haiku-4-5", true},
 		{"claude-opus-4-7", true},
 		{"claude-sonnet-4-6-20250101", true},
+		// Reject: wrong family alias
+		{"foo", false},
+		{"Opus", false}, // case-sensitive
 		// Reject: wrong family
 		{"claude-foo-4-7", false},
 		// Reject: missing version
 		{"claude-sonnet", false},
-		// Reject: not claude-prefixed
+		// Reject: not claude-prefixed and not a bare alias
 		{"sonnet-4-7", false},
 		// Reject: non-numeric segment
 		{"claude-sonnet-x-7", false},
 		// Reject: trailing junk (would be a shell-injection vector)
 		{"claude-sonnet-4-7 ; rm -rf /", false},
+		{"opus ; rm -rf /", false},
 	}
 	for _, c := range cases {
 		err := ValidateModelID(c.in)

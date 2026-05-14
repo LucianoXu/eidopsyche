@@ -109,9 +109,12 @@ func productionBirthHandler(ctx context.Context, sig wake.BirthSignal, ontologyD
 		return fmt.Errorf("read identity facts: %w", err)
 	}
 	facts.OntologyDir = ontologyDir
+	facts.Model = config.DefaultModel
 	facts.Effort = config.DefaultEffort
 	if cfg, err := config.Load(agentLoopGateConfigPath); err == nil {
-		facts.Model = cfg.MindForm.Model
+		if cfg.MindForm.Model != "" {
+			facts.Model = cfg.MindForm.Model
+		}
 		if cfg.MindForm.Effort != "" {
 			facts.Effort = cfg.MindForm.Effort
 		}
@@ -131,6 +134,9 @@ func productionBirthHandler(ctx context.Context, sig wake.BirthSignal, ontologyD
 	}
 	if facts.Model != "" {
 		args = append(args, "--model", facts.Model)
+	}
+	if facts.Effort != "" {
+		args = append(args, "--effort", facts.Effort)
 	}
 	args = append(args, "-p", userPrompt)
 

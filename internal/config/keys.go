@@ -170,7 +170,7 @@ func init() {
 	})
 	register(Key{
 		Path:        "mindform.model",
-		Description: "Pin the claude model used by agent-loop (e.g. claude-sonnet-4-7). Empty lets claude pick its subscription default.",
+		Description: "Pin the claude model used by agent-loop. Accepted: family alias (sonnet|haiku|opus) or full id (e.g. claude-sonnet-4-7). Empty defaults to opus. Takes effect at the next claude spawn.",
 		Contexts:    ContainerCtx,
 		Get:         func(c *Config) string { return c.MindForm.Model },
 		Set: func(c *Config, v string) error {
@@ -184,7 +184,7 @@ func init() {
 	})
 	register(Key{
 		Path:        "mindform.effort",
-		Description: "Reasoning effort surfaced to the mind-form. One of low|medium|high. Empty defaults to medium.",
+		Description: "Reasoning effort passed to claude via --effort and surfaced to the mind-form in the system prompt. One of low|medium|high|xhigh|max. Empty defaults to medium. Takes effect at the next claude spawn (session rotation, agent-loop restart, or supervisor-triggered birth).",
 		Contexts:    ContainerCtx,
 		Get:         func(c *Config) string { return c.MindForm.Effort },
 		Set: func(c *Config, v string) error {

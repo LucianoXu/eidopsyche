@@ -11,11 +11,14 @@ func TestValidateEffort(t *testing.T) {
 		{"low", true},
 		{"medium", true},
 		{"high", true},
+		{"xhigh", true},
+		{"max", true},
 		// Reject: unknown level
 		{"ultra", false},
 		// Reject: wrong case
 		{"Low", false},
 		{"MEDIUM", false},
+		{"Max", false},
 		// Reject: trailing junk
 		{"low; rm -rf /", false},
 	}

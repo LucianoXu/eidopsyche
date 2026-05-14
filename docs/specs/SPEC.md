@@ -176,8 +176,8 @@ dream 之间，sub-agents、background tasks（`Bash {run_in_background: true}`�
 claude \
     --dangerously-skip-permissions \
     --system-prompt <system-prompt>
-    --model "${cfg.MindForm.Model}"                # 可选
-    --effort "..."
+    --model "${cfg.MindForm.Model:-opus}"          # config.DefaultModel = "opus"
+    --effort "${cfg.MindForm.Effort:-medium}"      # config.DefaultEffort = "medium"
     --tools <tools>
     --session-id <UUID>     # 或 --resume <UUID>  (依 Mode 而定,新 session vs 续接)
     --input-format stream-json \
@@ -186,6 +186,8 @@ claude \
     --include-partial-messages \
     -p ""                                          # 字面空 prompt 占位
 ```
+
+`mindform.model` 接受家族别名(`sonnet|haiku|opus`)或完整 id(如 `claude-opus-4-7`);`mindform.effort` 接受 `low|medium|high|xhigh|max`。两者空值在 spawn 处解析为框架默认常量,不写入 `config.toml`。
 
 - 工具方面，我们只保留下列工具，通过 `<tools>` 传入（Claude Code 2.1.139 命名口径）：
 
