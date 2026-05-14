@@ -119,11 +119,15 @@ func newWorkspaceListCmd() *cobra.Command {
 			cmd.Printf("workspaces for %s:\n", args[0])
 			if len(resp.Desired) == 0 {
 				cmd.Println("  (none)")
-				return nil
+			} else {
+				for _, w := range resp.Desired {
+					cmd.Printf("  %s\t%s\t%s\n", w.Name, w.Mode, w.HostPath)
+				}
 			}
-			for _, w := range resp.Desired {
-				cmd.Printf("  %s\t%s\t%s\n", w.Name, w.Mode, w.HostPath)
-			}
+			// Pending restart can be true even when Desired is empty: the
+			// operator may have just removed the last workspace and the
+			// container still has the old bind mount. Always surface the
+			// hint so they don't think removal is already in effect.
 			if resp.PendingRestart {
 				cmd.Printf("\n⚠ pending restart — run 'eidos forge restart %s' to apply\n", args[0])
 			}

@@ -33,6 +33,9 @@ func forgeWorkspaceAdd(ctx context.Context, d *Daemon, _ *ipc.Conn, raw json.Raw
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidRequest, Message: "decode params: " + err.Error()}
 	}
+	if err := forgectl.ValidateName(p.MindForm); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: "mindform: " + err.Error()}
+	}
 	if err := config.ValidateWorkspaceName(p.Name); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
 	}
@@ -111,6 +114,9 @@ func forgeWorkspaceRemove(ctx context.Context, d *Daemon, _ *ipc.Conn, raw json.
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidRequest, Message: "decode params: " + err.Error()}
 	}
+	if err := forgectl.ValidateName(p.MindForm); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: "mindform: " + err.Error()}
+	}
 	if err := config.ValidateWorkspaceName(p.Name); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
 	}
@@ -185,6 +191,9 @@ func forgeWorkspaceList(ctx context.Context, d *Daemon, _ *ipc.Conn, raw json.Ra
 	var p forgeWorkspaceListParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, &ipc.Error{Code: ipc.ErrInvalidRequest, Message: "decode params: " + err.Error()}
+	}
+	if err := forgectl.ValidateName(p.MindForm); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: "mindform: " + err.Error()}
 	}
 	if !d.MindFormKnown(p.MindForm) {
 		return nil, &ipc.Error{Code: ipc.ErrForgeNotFound, Message: fmt.Sprintf("mind-form %q not found", p.MindForm)}
