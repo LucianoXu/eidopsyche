@@ -56,6 +56,9 @@ func TestBuild_RendersAllSections(t *testing.T) {
 	if !strings.Contains(out, "memory/notes/") {
 		t.Error("memory contract should reference memory/notes/")
 	}
+	if !strings.Contains(out, "/workspace/<name>/") {
+		t.Error("system prompt missing workspaces section")
+	}
 	for _, banned := range []string{
 		"Claude Code",
 		"/<skill-name>",
