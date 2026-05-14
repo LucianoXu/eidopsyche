@@ -10,7 +10,7 @@ type CardParseInput struct {
 	URI string `json:"uri" jsonschema:"a mindgate:// URI to decode"`
 }
 type CardParseOutput struct {
-	Card any `json:"card" jsonschema:"decoded fields: npub, pubkey, relays, label"`
+	Card any `json:"card" jsonschema:"decoded fields: npub, pubkey, relay, label"`
 }
 
 func (s *Server) eidosCardParse(ctx context.Context, _ *mcp.CallToolRequest, in CardParseInput) (*mcp.CallToolResult, CardParseOutput, error) {
@@ -39,7 +39,7 @@ func (s *Server) eidosCardScan(ctx context.Context, _ *mcp.CallToolRequest, in C
 func (s *Server) registerCardTools() {
 	mcp.AddTool(s.sdk, &mcp.Tool{
 		Name:        "eidos_card_parse",
-		Description: "Decode a mindgate:// URI into its parts (npub, pubkey, relays, label). Pure parse — does not touch contacts.",
+		Description: "Decode a mindgate:// URI into its parts (npub, pubkey, relay, label). Pure parse — does not touch contacts.",
 	}, s.eidosCardParse)
 	mcp.AddTool(s.sdk, &mcp.Tool{
 		Name:        "eidos_card_scan",
