@@ -309,7 +309,7 @@ func (v *volumeTailer) Wait(ctx context.Context, slug, gatePath, bodyPath string
 	for {
 		res, err := v.client.RunInit(ctx, forgectl.RunInitOpts{
 			Image: v.image,
-			Mount: forgectl.Mount{VolumeName: forgectl.VolumeName(slug), Target: "/eidos"},
+			Mount: forgectl.Mount{Type: forgectl.MountVolume, Source: forgectl.VolumeName(slug), Target: "/eidos"},
 			User:  "0:0",
 			Cmd:   []string{"sh", "-c", script},
 		})

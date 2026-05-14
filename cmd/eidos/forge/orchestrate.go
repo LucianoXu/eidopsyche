@@ -184,7 +184,7 @@ func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOp
 				}
 				res, err := c.RunInit(ctx, forgectl.RunInitOpts{
 					Image: image,
-					Mount: forgectl.Mount{VolumeName: vol, Target: "/eidos"},
+					Mount: forgectl.Mount{Type: forgectl.MountVolume, Source: vol, Target: "/eidos"},
 					// init-volume runs as root so it can extract the
 					// template tar, clone the bundle, and git-init the
 					// parent ontology with full privileges. Its last
@@ -211,9 +211,9 @@ func Orchestrate(ctx context.Context, c forgectl.Client, name string, o CreateOp
 			// eidos supervisor run); no Cmd / Entrypoint override.
 			do: func(ctx context.Context) error {
 				if err := c.ContainerCreate(ctx, forgectl.CreateOpts{
-					Name:  cont,
-					Image: image,
-					Mount: forgectl.Mount{VolumeName: vol, Target: "/eidos"},
+					Name:   cont,
+					Image:  image,
+					Mounts: []forgectl.Mount{{Type: forgectl.MountVolume, Source: vol, Target: "/eidos"}},
 				}); err != nil {
 					return fmt.Errorf("create container: %w", err)
 				}

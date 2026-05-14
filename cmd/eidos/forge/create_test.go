@@ -40,6 +40,9 @@ func (f *fakeClient) ContainerExists(_ context.Context, _ string) (bool, error) 
 func (f *fakeClient) ContainerInspectState(_ context.Context, _ string) (string, error) {
 	return "absent", nil
 }
+func (f *fakeClient) ContainerInspectImage(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
 func (f *fakeClient) ContainerCreate(_ context.Context, _ forgectl.CreateOpts) error { return nil }
 func (f *fakeClient) ContainerStart(_ context.Context, _ string) error               { return nil }
 func (f *fakeClient) ContainerStop(_ context.Context, _ string, _ int) error         { return nil }
@@ -204,8 +207,8 @@ func TestCreateOrchestratesAllSteps(t *testing.T) {
 	if init.Image != "img:dev" {
 		t.Errorf("init image = %q", init.Image)
 	}
-	if init.Mount.VolumeName != "eidos-mindform-alice" {
-		t.Errorf("init mount volume = %q", init.Mount.VolumeName)
+	if init.Mount.Source != "eidos-mindform-alice" {
+		t.Errorf("init mount volume = %q", init.Mount.Source)
 	}
 }
 

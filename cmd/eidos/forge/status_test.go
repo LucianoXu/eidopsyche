@@ -22,6 +22,9 @@ type statusFake struct {
 func (f *statusFake) ContainerInspectState(_ context.Context, _ string) (string, error) {
 	return f.state, f.inspectErr
 }
+func (f *statusFake) ContainerInspectImage(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
 func (f *statusFake) ContainerExec(_ context.Context, _ string, cmd []string) (forgectl.ExecResult, error) {
 	if len(cmd) >= 3 {
 		if r, ok := f.execResponses[cmd[2]]; ok {

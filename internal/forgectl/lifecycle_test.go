@@ -35,6 +35,9 @@ func (f *minimalFake) ContainerExists(_ context.Context, _ string) (bool, error)
 func (f *minimalFake) ContainerInspectState(_ context.Context, _ string) (string, error) {
 	return "absent", nil
 }
+func (f *minimalFake) ContainerInspectImage(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
 func (f *minimalFake) ContainerCreate(_ context.Context, _ CreateOpts) error { return nil }
 func (f *minimalFake) ContainerStart(_ context.Context, _ string) error      { return nil }
 func (f *minimalFake) ContainerStop(_ context.Context, _ string, _ int) error {

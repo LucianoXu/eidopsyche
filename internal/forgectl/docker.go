@@ -31,6 +31,12 @@ type Client interface {
 	ContainerStop(ctx context.Context, name string, graceSeconds int) error
 	ContainerRemove(ctx context.Context, name string) error
 
+	// ContainerInspectImage returns the image ref the container was
+	// created with (Config.Image). Used by forge restart to preserve the
+	// existing image across the stop→rm→create→start cycle (so a
+	// previous forge upgrade is not silently reverted).
+	ContainerInspectImage(ctx context.Context, name string) (string, error)
+
 	// RunInit runs a one-shot container with the given image, mount, env,
 	// and command. Pipes stdin into the container; returns combined
 	// stdout+stderr and exit code. Container is auto-removed on exit.
@@ -69,20 +75,33 @@ type ExecResult struct {
 	Stderr   []byte
 }
 
+// MountType distinguishes named-volume mounts from host-bind mounts.
+type MountType string
+
+const (
+	MountVolume MountType = "volume"
+	MountBind   MountType = "bind"
+)
+
+// Mount is one entry in a container's mount list.
+type Mount struct {
+	Type MountType
+	// Source is the volume name when Type=volume, or the host path when
+	// Type=bind. The Docker SDK accepts either in the same field of
+	// mount.Mount, so we mirror that here.
+	Source   string
+	Target   string
+	ReadOnly bool // honoured for bind; ignored for volume
+}
+
 // CreateOpts is the subset of container create the forge orchestrator uses.
 type CreateOpts struct {
 	Name       string
 	Image      string
-	Mount      Mount
+	Mounts     []Mount
 	Env        []string
 	Entrypoint []string
 	Cmd        []string
-}
-
-// Mount is a named-volume mount target.
-type Mount struct {
-	VolumeName string
-	Target     string
 }
 
 // RunInitOpts is the input for one-shot init container runs.
@@ -161,7 +180,33 @@ func (r *realClient) ContainerInspectState(ctx context.Context, name string) (st
 	return resp.State.Status, nil
 }
 
+func (r *realClient) ContainerInspectImage(ctx context.Context, name string) (string, error) {
+	resp, err := r.c.ContainerInspect(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	return resp.Config.Image, nil
+}
+
 func (r *realClient) ContainerCreate(ctx context.Context, opts CreateOpts) error {
+	mounts := make([]mount.Mount, 0, len(opts.Mounts))
+	for _, m := range opts.Mounts {
+		var t mount.Type
+		switch m.Type {
+		case MountVolume:
+			t = mount.TypeVolume
+		case MountBind:
+			t = mount.TypeBind
+		default:
+			return fmt.Errorf("container create %s: mount type %q is not supported", opts.Name, m.Type)
+		}
+		mounts = append(mounts, mount.Mount{
+			Type:     t,
+			Source:   m.Source,
+			Target:   m.Target,
+			ReadOnly: m.ReadOnly,
+		})
+	}
 	_, err := r.c.ContainerCreate(ctx,
 		&container.Config{
 			Image:      opts.Image,
@@ -170,11 +215,7 @@ func (r *realClient) ContainerCreate(ctx context.Context, opts CreateOpts) error
 			Cmd:        opts.Cmd,
 		},
 		&container.HostConfig{
-			Mounts: []mount.Mount{{
-				Type:   mount.TypeVolume,
-				Source: opts.Mount.VolumeName,
-				Target: opts.Mount.Target,
-			}},
+			Mounts:        mounts,
 			RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
 		},
 		nil, nil, opts.Name,
@@ -235,7 +276,7 @@ func (r *realClient) RunInit(ctx context.Context, opts RunInitOpts) (RunInitResu
 		AutoRemove: true,
 		Mounts: []mount.Mount{{
 			Type:   mount.TypeVolume,
-			Source: opts.Mount.VolumeName,
+			Source: opts.Mount.Source,
 			Target: opts.Mount.Target,
 		}},
 	}
