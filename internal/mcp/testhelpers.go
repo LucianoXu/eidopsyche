@@ -35,3 +35,7 @@ func (f *fakeIPC) Call(method string, params any, result any) (*ipc.Error, error
 }
 
 func (f *fakeIPC) Close() error { return nil }
+
+func pathNotFound(path string) *ipc.Error {
+	return &ipc.Error{Code: ipc.ErrPathNotFound, Message: path}
+}

@@ -43,7 +43,7 @@ func (s *Server) Run(ctx context.Context) error {
 // their init-time hooks. Kept as a single method so the per-domain
 // files can add registrations without each touching server.go.
 func (s *Server) registerTools() {
-	// populated in tools_*.go
+	s.registerStateTools()
 }
 
 // Close releases the IPC connection. Called by the cobra cmd on exit.
