@@ -50,6 +50,12 @@ func (d *Daemon) registerCoreStateContributors() {
 	d.RegisterStateContributor(outboxContrib{d: d})
 	d.RegisterStateContributor(invitesContrib{d: d})
 	d.RegisterStateContributor(serviceContrib{d: d})
+	// forge.workspaces is container-side only: mind-forms inspect their own
+	// bind mounts. Host operators read the desired/actual diff through the
+	// forge.workspace.list IPC method instead.
+	if d.Context&config.ContainerCtx != 0 {
+		d.RegisterStateContributor(forgeWorkspacesContrib{d: d})
+	}
 }
 
 // ── identity ────────────────────────────────────────────────────────
