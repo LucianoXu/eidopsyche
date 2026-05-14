@@ -8,8 +8,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/LucianoXu/eidopsyche/internal/claudeexec"
 	"github.com/LucianoXu/eidopsyche/internal/wake"
 )
 
@@ -100,5 +102,43 @@ func TestDrainBirth_HandlerErrorLeavesBirthJSON(t *testing.T) {
 	// iteration retries.
 	if _, statErr := os.Stat(filepath.Join(wakeD, wake.BirthFileName)); statErr != nil {
 		t.Errorf("birth.json should remain after handler error: %v", statErr)
+	}
+}
+
+func TestBuildBirthArgs(t *testing.T) {
+	got := buildBirthArgs(birthArgsInput{
+		SystemPrompt: "sys",
+		Model:        "claude-opus-4-7",
+		Effort:       "high",
+		UserPrompt:   "boot",
+	})
+	joined := strings.Join(got, " ")
+	for _, want := range []string{
+		"--system-prompt", "sys",
+		"--dangerously-skip-permissions",
+		"--model", "claude-opus-4-7",
+		"--effort", "high",
+		"--tools " + claudeexec.ToolsArg(),
+		"-p", "boot",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing required arg %q in: %s", want, joined)
+		}
+	}
+}
+
+func TestBuildBirthArgs_OmitsModelAndEffortWhenEmpty(t *testing.T) {
+	got := buildBirthArgs(birthArgsInput{
+		SystemPrompt: "sys",
+		UserPrompt:   "boot",
+	})
+	joined := strings.Join(got, " ")
+	for _, no := range []string{"--model", "--effort"} {
+		if strings.Contains(joined, no) {
+			t.Errorf("unexpected arg %q in: %s", no, joined)
+		}
+	}
+	if !strings.Contains(joined, "--tools") {
+		t.Errorf("--tools missing from: %s", joined)
 	}
 }

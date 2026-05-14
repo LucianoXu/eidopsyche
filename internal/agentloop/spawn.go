@@ -18,6 +18,7 @@ import (
 	"syscall"
 
 	"github.com/LucianoXu/eidopsyche/internal/claudeauth"
+	"github.com/LucianoXu/eidopsyche/internal/claudeexec"
 )
 
 // SessionMode selects --session-id (new session) vs --resume (existing).
@@ -148,6 +149,7 @@ func buildClaudeArgs(opts SpawnOpts) []string {
 		"--output-format", "stream-json",
 		"--verbose",
 		"--include-partial-messages",
+		"--tools", claudeexec.ToolsArg(),
 		"-p", "",
 	)
 	args = append(args, opts.ExtraArgs...)

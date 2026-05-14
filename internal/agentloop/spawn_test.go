@@ -8,6 +8,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/LucianoXu/eidopsyche/internal/claudeexec"
 )
 
 func TestSpawnClaude_StreamJSONInputProcessesOneTurn(t *testing.T) {
@@ -131,6 +133,13 @@ func TestBuildClaudeArgs_StreamJSONContract(t *testing.T) {
 			name:    "extra args appended last",
 			opts:    SpawnOpts{Mode: SessionNew, SessionUUID: "u", SystemPrompt: "x", ExtraArgs: []string{"--mode", "normal"}},
 			require: []string{"--mode", "normal"},
+		},
+		{
+			name: "tools allowlist is passed adjacently",
+			opts: SpawnOpts{Mode: SessionNew, SessionUUID: "u", SystemPrompt: "x"},
+			require: []string{
+				"--tools " + claudeexec.ToolsArg(),
+			},
 		},
 	}
 	for _, tc := range cases {

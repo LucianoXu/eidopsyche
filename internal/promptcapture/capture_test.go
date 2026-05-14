@@ -5,8 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/LucianoXu/eidopsyche/internal/claudeexec"
 )
 
 func buildStubClaude(t *testing.T) string {
@@ -76,5 +79,38 @@ func TestRunReturnsTimeoutWhenStubPostsNothing(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected timeout error, got nil")
+	}
+}
+
+func TestBuildClaudeArgs_IncludesToolsAllowlist(t *testing.T) {
+	args := buildClaudeArgs(Opts{
+		SystemPrompt: "sys",
+		Model:        "claude-opus-4-7",
+		Effort:       "high",
+		Prompt:       "ping",
+	})
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"--system-prompt", "sys",
+		"--model", "claude-opus-4-7",
+		"--effort", "high",
+		"--dangerously-skip-permissions",
+		"--tools " + claudeexec.ToolsArg(),
+		"-p", "ping",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing required arg %q in: %s", want, joined)
+		}
+	}
+}
+
+func TestBuildClaudeArgs_BareOmitsSystemPrompt(t *testing.T) {
+	args := buildClaudeArgs(Opts{Prompt: "ping"})
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "--system-prompt") {
+		t.Errorf("--system-prompt leaked in bare mode: %s", joined)
+	}
+	if !strings.Contains(joined, "--tools") {
+		t.Errorf("--tools must be present even in bare mode: %s", joined)
 	}
 }

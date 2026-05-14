@@ -196,7 +196,7 @@ claude \
 
 `mindform.model` 接受家族别名(`sonnet|haiku|opus`)或完整 id(如 `claude-opus-4-7`);`mindform.effort` 接受 `low|medium|high|xhigh|max`。两者空值在 spawn 处解析为框架默认常量,不写入 `config.toml`。
 
-- 工具方面，我们只保留下列工具，通过 `<tools>` 传入（Claude Code 2.1.139 命名口径）：
+- 工具方面，我们只保留下列工具，通过 `<tools>` 传入（Claude Code 2.1.141 命名口径，与 `internal/claudeexec.Allowed` 保持一致）：
 
   | 类别 | 工具 |
   |---|---|
@@ -204,10 +204,11 @@ claude \
   | 执行 | `Bash` |
   | 子代理与节奏 | `Agent`, `ScheduleWakeup`, `Monitor` |
   | 后台任务管理 | `TaskOutput`, `TaskStop` |
-  | turn 内待办 | `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate` |
+  | turn 内待办 | `TodoWrite` |
   | 长期方法 | `Skill` |
-  | 外界探索 | `WebFetch` |
-  | 框架代码 | `LSP` |
+  | 外界探索 | `WebFetch`, `WebSearch` |
+
+  当 `docker/mindform/Dockerfile` 的 `CLAUDE_CODE_VERSION` 升级时，需对照 upstream release notes 校验本表，并与 `internal/claudeexec.Allowed` 同步更新。
 
 - 其中 <system-prompt> 的设计如下。它又 Claude Code 官方 system prompt 改造而来。削弱其中关于编程智能体的叙述，并添加心智体和其身份说明。同时，我们覆盖其 auto memory 机制，并用 mindform 的 memory 机制覆盖。
 

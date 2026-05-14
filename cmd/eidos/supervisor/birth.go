@@ -64,6 +64,34 @@ func drainBirthIfPresent(ctx context.Context, wakeDir, ontologyDir string, handl
 	return wake.ClearBirth(wakeDir)
 }
 
+// birthArgsInput is the parameter packet for buildBirthArgs. It
+// exists so the argv assembly is independently unit-testable.
+type birthArgsInput struct {
+	SystemPrompt string
+	Model        string
+	Effort       string
+	UserPrompt   string
+}
+
+// buildBirthArgs assembles the argv for the one-shot birth claude.
+// The --tools value is sourced from internal/claudeexec so all
+// mind-form claude subprocesses share the same allowlist.
+func buildBirthArgs(in birthArgsInput) []string {
+	args := []string{
+		"--system-prompt", in.SystemPrompt,
+		"--dangerously-skip-permissions",
+	}
+	if in.Model != "" {
+		args = append(args, "--model", in.Model)
+	}
+	if in.Effort != "" {
+		args = append(args, "--effort", in.Effort)
+	}
+	args = append(args, "--tools", claudeexec.ToolsArg())
+	args = append(args, "-p", in.UserPrompt)
+	return args
+}
+
 // productionBirthHandler reads the summoning book and calling-words
 // from the paths in birth.json, builds the agent's prompt
 // (constitution-augmented identity + birth boot prompt as the system
@@ -128,17 +156,12 @@ func productionBirthHandler(ctx context.Context, sig wake.BirthSignal, ontologyD
 	if err != nil {
 		return fmt.Errorf("build birth user prompt: %w", err)
 	}
-	args := []string{
-		"--system-prompt", systemPrompt,
-		"--dangerously-skip-permissions",
-	}
-	if facts.Model != "" {
-		args = append(args, "--model", facts.Model)
-	}
-	if facts.Effort != "" {
-		args = append(args, "--effort", facts.Effort)
-	}
-	args = append(args, "-p", userPrompt)
+	args := buildBirthArgs(birthArgsInput{
+		SystemPrompt: systemPrompt,
+		Model:        facts.Model,
+		Effort:       facts.Effort,
+		UserPrompt:   userPrompt,
+	})
 
 	c := exec.Command("claude", args...)
 	c.Dir = ontologyDir

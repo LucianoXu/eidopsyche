@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/LucianoXu/eidopsyche/internal/claudeexec"
 )
 
 // Opts configures one capture run. Callers fill in the fields they
@@ -146,6 +148,7 @@ func buildClaudeArgs(opts Opts) []string {
 		args = append(args, "--effort", opts.Effort)
 	}
 	args = append(args, "--dangerously-skip-permissions")
+	args = append(args, "--tools", claudeexec.ToolsArg())
 	args = append(args, opts.ExtraArgs...)
 	args = append(args, "-p", opts.Prompt)
 	return args

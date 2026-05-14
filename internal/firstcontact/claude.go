@@ -37,6 +37,11 @@ func (c *Claude) model() string {
 	return c.Model
 }
 
+// args builds the argv for the wizard's one-shot research / text call.
+// Deliberately omits --tools: this is `-p --output-format json` with
+// no tool loop, so internal/claudeexec.Allowed does not apply here.
+// See docs/superpowers/specs/2026-05-14-mindform-tool-allowlist-design.md
+// §"Non-Goals: first-contact research call".
 func (c *Claude) args(prompt string) []string {
 	return []string{"-p", "--model", c.model(), "--output-format", "json", prompt}
 }
