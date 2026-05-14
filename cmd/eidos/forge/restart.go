@@ -26,12 +26,20 @@ func Restart(ctx context.Context, c forgectl.Client, name string, cfg *config.Co
 		return fmt.Errorf("stop %s: %w", cont, err)
 	}
 
-	// ContainerInspectImage returns (image-id, image-ref, err). We
-	// only need the ref (the tag) to recreate the container with the
-	// same image; the id is used by forge upgrade for change detection.
-	_, image, err := c.ContainerInspectImage(ctx, cont)
+	// ContainerInspectImage returns (image-id, image-ref, err). Prefer
+	// the content-addressable ID over the ref so a mutable tag like
+	// `:dev` or `:latest` can't silently move the mind-form to a newer
+	// image bits between create and restart (the operator may have
+	// pulled or rebuilt the tag in between). The ID is immutable; if
+	// it's missing for some reason (older containers, weird state),
+	// fall back to the ref so the command still does something useful.
+	imageID, imageRef, err := c.ContainerInspectImage(ctx, cont)
 	if err != nil {
 		return fmt.Errorf("inspect image %s: %w", cont, err)
+	}
+	image := imageID
+	if image == "" {
+		image = imageRef
 	}
 	if image == "" {
 		return fmt.Errorf("inspect image %s: container has no image ref (does it exist?)", cont)

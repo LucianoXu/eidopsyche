@@ -19,7 +19,8 @@ type restartFakeClient struct {
 	ops                []string
 	createImage        string
 	createMounts       []forgectl.Mount
-	inspectImageReturn string
+	inspectImageID     string // image ID (sha256:...) returned by ContainerInspectImage
+	inspectImageReturn string // image ref (tag) returned by ContainerInspectImage
 	inspectImageErr    error
 }
 
@@ -29,7 +30,7 @@ func (f *restartFakeClient) ContainerStop(_ context.Context, name string, _ int)
 }
 func (f *restartFakeClient) ContainerInspectImage(_ context.Context, name string) (string, string, error) {
 	f.ops = append(f.ops, "inspect-image:"+name)
-	return "", f.inspectImageReturn, f.inspectImageErr
+	return f.inspectImageID, f.inspectImageReturn, f.inspectImageErr
 }
 func (f *restartFakeClient) ContainerRemove(_ context.Context, name string) error {
 	f.ops = append(f.ops, "remove:"+name)
@@ -146,5 +147,38 @@ func TestRestart_ImageInspectError_AbortsCleanly(t *testing.T) {
 		if op == "remove:"+forgectl.ContainerName("alice") {
 			t.Errorf("must not remove after inspect-image failure: ops=%v", fc.ops)
 		}
+	}
+}
+
+// TestRestart_PrefersImageIDOverRef confirms the recreate uses the
+// content-addressable image ID (sha256:...) when available, so mutable
+// tags like :dev or :latest can't silently move the mind-form to a
+// rebuilt image between create and restart.
+func TestRestart_PrefersImageIDOverRef(t *testing.T) {
+	fc := newRestartFakeClient(t)
+	fc.inspectImageID = "sha256:abc123"
+	fc.inspectImageReturn = "ghcr.io/lucianoxu/eidopsyche-mindform:dev"
+
+	if err := Restart(context.Background(), fc, "alice", &config.Config{}, 10); err != nil {
+		t.Fatal(err)
+	}
+	if fc.createImage != "sha256:abc123" {
+		t.Errorf("create image = %q; want the ID (sha256:abc123), not the mutable ref", fc.createImage)
+	}
+}
+
+// TestRestart_FallsBackToRefWhenIDMissing confirms that if the docker
+// client returns an empty ID for any reason, the ref is used so the
+// command still completes rather than refusing.
+func TestRestart_FallsBackToRefWhenIDMissing(t *testing.T) {
+	fc := newRestartFakeClient(t)
+	fc.inspectImageID = ""
+	fc.inspectImageReturn = "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3"
+
+	if err := Restart(context.Background(), fc, "alice", &config.Config{}, 10); err != nil {
+		t.Fatal(err)
+	}
+	if fc.createImage != "ghcr.io/lucianoxu/eidopsyche-mindform:v0.11.3" {
+		t.Errorf("create image = %q; want fallback to ref", fc.createImage)
 	}
 }
