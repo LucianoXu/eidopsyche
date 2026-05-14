@@ -19,7 +19,8 @@ type Meta struct {
 	ID      string
 	Kind    string            // "m" | "f" | "spirit"
 	Display map[string]string // lang → display_name
-	Tagline map[string]string
+	Tagline map[string]string // author-side internal note; not shown in menu
+	Essence map[string]string // menu temperament line, e.g. "a cunning old demon"
 	Preview map[string]string
 }
 
@@ -94,6 +95,7 @@ func MetaFor(id string) (Meta, error) {
 		Kind    string            `toml:"kind"`
 		Display map[string]string `toml:"display"`
 		Tagline map[string]string `toml:"tagline"`
+		Essence map[string]string `toml:"essence"`
 		Preview map[string]string `toml:"preview"`
 	}
 	if err := toml.Unmarshal(body, &raw); err != nil {
@@ -107,6 +109,7 @@ func MetaFor(id string) (Meta, error) {
 		Kind:    raw.Kind,
 		Display: raw.Display,
 		Tagline: raw.Tagline,
+		Essence: raw.Essence,
 		Preview: raw.Preview,
 	}, nil
 }
