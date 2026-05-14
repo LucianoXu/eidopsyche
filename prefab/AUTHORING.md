@@ -89,8 +89,12 @@ zh = "中文显示名"
 en = "Display name"
 
 [tagline]
-zh = "一行话标语"
-en = "One-line tagline"
+zh = "一行话标签（作者内部笔记，不显示在菜单）"
+en = "One-line tag (author-side internal note, not menu-visible)"
+
+[essence]
+zh = "气质描述（30 字以内）"
+en = "Temperament description (≤ 30 chars)"
 
 [preview]
 zh = """中文 2-4 句的预览段落，
@@ -109,6 +113,14 @@ Constraints:
 - Language keys: `zh` and `en` are supported today. Add more if a new
   language ships; missing keys render as empty strings on that
   language's menu.
+- `[essence]` is the menu's temperament line. Menu format is
+  `<display> - <essence>`. Keep each language under 30 characters;
+  prefer descriptive adjectives over contract-mechanism nouns.
+- `[tagline]` is preserved as an author-side internal note (e.g.
+  contract-mechanism summary) and is **not** rendered in the menu.
+  Prefabs lacking `[essence]` fall back to the legacy
+  `<display> · <tagline>` form — this is intended only for the
+  `_test_fixture` slot.
 
 ---
 
@@ -194,19 +206,43 @@ across the six shipped characters:
 
 ## `role-research.md` — birth's first read
 
-Unlike the other `.md` files this one is **not** a `.tpl` — it ships as
-a plain markdown dossier that the birth-wake agent reads as the
+Unlike the other `.md` files this one is **not** a `.tpl` — it ships
+as a plain markdown dossier that the birth-wake agent reads as the
 *first* of three input files (before the summoning book, before the
 calling words). It is the framework's hook to bias the just-spawned
-mind-form toward the right character before it writes its own soul.
+mind-form toward the right archetype before it writes its own soul.
 
-300-600 words of dramaturge prose covering origins, temperament,
-world, recurring imagery, defining scenes. Concrete beats abstract;
-quote small specifics from canon when you can. Do not invent canon
-you cannot verify — the dossier is reference, not fan-fiction.
+**Archetype, not character.** A prefab is an archetype kit the
+operator names, not a specific named character to impersonate.
+`role-research.md` MUST NOT name:
+
+- source works (Faust, Kuroshitsuji, Spirited Away …),
+- original-character names (Ciel, Chihiro, Shahryar …),
+- named places that anchor a specific fictional setting,
+- derived adjective forms ("Faustian", "Calcifer-like").
+
+World-flavor categories are encouraged: devil, butler, river-spirit,
+frame-narrator, soul-pact, hearth-flame. Historical-period
+descriptors associated with a canon remain acceptable
+(late-Victorian, Tang-era, medieval-monastic) — they describe a
+register the archetype lives in, not the canon work itself.
+
+200-400 words of dramaturge prose covering temperament, voice,
+world-flavor, recurring imagery, and 2-4 short scene cues. Concrete
+sensory imagery is encouraged — a velvet coat in a candlelit study,
+the hush before a storm, a green-silk lamp. The recognizable canon
+name remains in `[display]` (the menu hook for the operator) and in
+the markdown `H1` title at the top of `role-research.md`. It MUST
+NOT appear in the prose body.
 
 The six shipped characters' `role-research.md` files are reasonable
 references for tone and length.
+
+> **Same discipline programmatically enforced on the scratch path.**
+> The claude-driven branch's `prompts.RoleResearch()` prompt carries
+> the same hard constraints (no source-work names, no original-
+> character names, no named places, no derived adjectives). Authors
+> and the model are aligned. See `internal/prompts/firstcontact.go`.
 
 ---
 
