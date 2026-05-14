@@ -68,7 +68,7 @@ Field rules:
 
 | Field | Type | Constraint |
 |---|---|---|
-| `name` | string | Matches `^[a-z0-9][a-z0-9-]*$`. Unique within a mind-form's list. Becomes the last segment of the container path `/workspace/<name>/`. |
+| `name` | string | Matches `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`. Unique within a mind-form's list. Becomes the last segment of the container path `/workspace/<name>/`. |
 | `host_path` | string | Absolute path; `filepath.Clean` is a no-op (no `..`, no double slashes). Must exist on the host and be a directory at `forge.workspace.add` time. |
 | `mode` | string | `"ro"` or `"rw"`. Default `"rw"` when the field is omitted. |
 

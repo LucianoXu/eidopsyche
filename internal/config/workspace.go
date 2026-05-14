@@ -37,7 +37,7 @@ func (w WorkspaceMount) EffectiveMode() string {
 	return w.Mode
 }
 
-var workspaceNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+var workspaceNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 // ValidateWorkspaceName enforces the persisted name regex. The name
 // becomes the last segment of the container path /workspace/<name>/.

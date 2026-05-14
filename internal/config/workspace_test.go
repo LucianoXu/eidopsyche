@@ -107,6 +107,8 @@ func TestValidateWorkspaceName(t *testing.T) {
 		{"foo_bar", false}, // underscore
 		{"foo/bar", false}, // slash
 		{"..", false},
+		{"foo-", false}, // trailing hyphen
+		{"a-", false},   // trailing hyphen on single-letter prefix
 	}
 	for _, c := range cases {
 		got := ValidateWorkspaceName(c.in) == nil
