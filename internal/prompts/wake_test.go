@@ -99,3 +99,68 @@ func TestBuildWake_PlannedWake(t *testing.T) {
 		t.Errorf("planned wake message missing hint: %s", got)
 	}
 }
+
+func TestBuildWake_FirstWordsPending_AddsPrefix(t *testing.T) {
+	msg := prompts.BuildWake(prompts.WakeInput{
+		Reason:            "heartbeat",
+		OwnerLabel:        "Alice",
+		FirstWordsPending: true,
+	})
+	for _, want := range []string{
+		"first time",
+		"chest/first-message.md",
+		"eidos gate send",
+		"creator_npub",
+		"self/first_words_at",
+		"calling-words.md",
+		"Alice",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("first-words prefix missing %q; got:\n%s", want, msg)
+		}
+	}
+}
+
+func TestBuildWake_FirstWordsPendingFalse_NoPrefix(t *testing.T) {
+	msg := prompts.BuildWake(prompts.WakeInput{
+		Reason:            "heartbeat",
+		FirstWordsPending: false,
+	})
+	if strings.Contains(msg, "chest/first-message.md") {
+		t.Errorf("first-words prefix must not appear when FirstWordsPending=false; got:\n%s", msg)
+	}
+}
+
+func TestBuildWake_FirstWordsAboveNewSession(t *testing.T) {
+	msg := prompts.BuildWake(prompts.WakeInput{
+		Reason:                  "heartbeat",
+		OwnerLabel:              "Alice",
+		FirstWordsPending:       true,
+		IsFirstWakeOfNewSession: true,
+	})
+	firstWordsIdx := strings.Index(msg, "chest/first-message.md")
+	newSessionIdx := strings.Index(msg, "first wake of a new session")
+	if firstWordsIdx < 0 || newSessionIdx < 0 {
+		t.Fatalf("expected both prefixes; firstWords=%d newSession=%d msg=%q",
+			firstWordsIdx, newSessionIdx, msg)
+	}
+	if firstWordsIdx > newSessionIdx {
+		t.Errorf("first-words prefix must precede new-session paragraph; firstWords=%d newSession=%d",
+			firstWordsIdx, newSessionIdx)
+	}
+}
+
+func TestBuildWake_FirstWordsPending_EmptyOwnerLabel(t *testing.T) {
+	// Empty OwnerLabel must not crash or omit the prefix; the prefix
+	// still renders with a blank substitution. Forwarder is expected
+	// to provide a non-empty label in production, but this guards
+	// against an incomplete identity.toml in dev/test setups.
+	msg := prompts.BuildWake(prompts.WakeInput{
+		Reason:            "heartbeat",
+		OwnerLabel:        "",
+		FirstWordsPending: true,
+	})
+	if !strings.Contains(msg, "chest/first-message.md") {
+		t.Errorf("first-words prefix missing for empty OwnerLabel; got:\n%s", msg)
+	}
+}

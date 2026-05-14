@@ -6,8 +6,12 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
@@ -39,6 +43,15 @@ type ForwarderConfig struct {
 	// deliverToClaude write. The drainer pops from this queue at
 	// turn-open time so transcript filenames match the real wake ID/Reason.
 	WakeQueue *wakeQueue
+	// OntologyDir is the mind-form's ontology root. Forwarder stats
+	// <OntologyDir>/self/born_at and <OntologyDir>/self/first_words_at
+	// per-wake to decide whether to render the first-words prefix.
+	// Leave empty to disable the marker check (treated as "not pending").
+	OntologyDir string
+	// OwnerLabel is the operator's display label, threaded into the
+	// first-words prefix template. Read once at agent-loop startup
+	// from self/identity.toml.
+	OwnerLabel string
 }
 
 // Forwarder pumps wake JSONL from supervisor stdin to claude stdin.
@@ -106,6 +119,8 @@ func (f *Forwarder) deliverToClaude(sig wake.Signal) error {
 		IsFirstWakeOfNewSession: firstWake,
 		DreamCount:              f.cfg.DreamState.DreamCount,
 		LastDreamFinishedAt:     f.cfg.DreamState.LastDreamFinishedAt,
+		FirstWordsPending:       f.firstWordsPending(),
+		OwnerLabel:              f.cfg.OwnerLabel,
 	})
 
 	envelope := map[string]any{
@@ -137,4 +152,29 @@ func (f *Forwarder) deliverToClaude(sig wake.Signal) error {
 		f.cfg.OutstandingWakes.Add(1)
 	}
 	return nil
+}
+
+// firstWordsPending returns true when <OntologyDir>/self/born_at exists
+// and <OntologyDir>/self/first_words_at does not. Stat errors other than
+// fs.ErrNotExist are logged and treated as "not pending" (fail-closed:
+// do not nag the mind-form on a filesystem hiccup).
+func (f *Forwarder) firstWordsPending() bool {
+	if f.cfg.OntologyDir == "" {
+		return false
+	}
+	bornAt := filepath.Join(f.cfg.OntologyDir, "self", "born_at")
+	firstWordsAt := filepath.Join(f.cfg.OntologyDir, "self", "first_words_at")
+	if _, err := os.Stat(bornAt); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			fmt.Fprintf(stderr(), "agent-loop: stat %s: %v\n", bornAt, err)
+		}
+		return false
+	}
+	if _, err := os.Stat(firstWordsAt); err == nil {
+		return false
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(stderr(), "agent-loop: stat %s: %v\n", firstWordsAt, err)
+		return false
+	}
+	return true
 }

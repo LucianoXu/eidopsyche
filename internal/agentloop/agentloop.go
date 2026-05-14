@@ -65,6 +65,14 @@ type RunOpts struct {
 // supervision loop that handles rotation requests, claude crashes, and
 // context cancellation.
 func Run(ctx context.Context, opts RunOpts) error {
+	// ── 0. Wait for Phase 1 (birth) to write self/born_at ────────────────
+	// The system prompt assembled in step 4b inlines self/soul.md; we
+	// must wait until Phase 1 has finalized it before that snapshot is
+	// frozen for the lifetime of this claude process.
+	if err := waitForBornAt(ctx, opts.OntologyDir); err != nil {
+		return err
+	}
+
 	// ── 1. Acquire the single-instance lock ──────────────────────────────
 	lock, err := acquireLock(opts.AgentLockPath)
 	if err != nil {
@@ -231,6 +239,8 @@ func Run(ctx context.Context, opts RunOpts) error {
 		FirstWakeFlagGetAndClear: func() bool {
 			return firstWakeFlag.CompareAndSwap(true, false)
 		},
+		OntologyDir: opts.OntologyDir,
+		OwnerLabel:  facts.OwnerLabel,
 	})
 
 	// ── 11. Initial agent-state.json snapshot ────────────────────────────
@@ -414,4 +424,34 @@ func acquireLock(path string) (*os.File, error) {
 func releaseLock(f *os.File) {
 	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 	_ = f.Close()
+}
+
+// waitForBornAt blocks until <ontologyDir>/self/born_at exists or ctx
+// is cancelled. Polls every 500ms with a ctx-aware select. The gate is
+// a no-op once born_at exists (instant return on the up-front stat),
+// so subsequent agent-loop spawns (rotation, restart) skip the wait.
+// During first-ever startup, the wait window is bounded by Phase 1's
+// wall time — typically tens of seconds while claude writes soul.md.
+func waitForBornAt(ctx context.Context, ontologyDir string) error {
+	if ontologyDir == "" {
+		return nil
+	}
+	marker := filepath.Join(ontologyDir, "self", "born_at")
+	if _, err := os.Stat(marker); err == nil {
+		return nil
+	}
+	fmt.Fprintf(stderr(), "agent-loop: waiting for %s (Phase 1 birth in progress)\n", marker)
+	t := time.NewTicker(500 * time.Millisecond)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+			if _, err := os.Stat(marker); err == nil {
+				fmt.Fprintf(stderr(), "agent-loop: %s observed; proceeding\n", marker)
+				return nil
+			}
+		}
+	}
 }
