@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 )
 
 // WorkspaceMount is one entry in a mind-form's bind-mount list. The
@@ -133,4 +134,34 @@ func DangerousHostPath(p string) string {
 		}
 	}
 	return ""
+}
+
+// MindFormContainerUID is the uid the eidos user owns inside the
+// mind-form container; see docker/mindform/Dockerfile:73. Hard-coded
+// because the Dockerfile is the source of truth.
+const MindFormContainerUID uint32 = 1000
+
+// HostPathOwnerUID returns the owning uid of p on the host. The
+// daemon's add handler uses this to emit a uid-mismatch warning.
+func HostPathOwnerUID(p string) (uint32, error) {
+	st, err := os.Stat(p)
+	if err != nil {
+		return 0, fmt.Errorf("stat %s: %w", p, err)
+	}
+	sys, ok := st.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, fmt.Errorf("stat %s: cannot read owner uid (non-Unix?)", p)
+	}
+	return sys.Uid, nil
+}
+
+// UIDMismatchWarning composes the operator-facing warning when an
+// rw-mode workspace's host path is not owned by uid 1000.
+func UIDMismatchWarning(hostPath string, ownerUID uint32) string {
+	return fmt.Sprintf(
+		"host_path %s is owned by uid=%d, but the mind-form container runs as uid=%d. "+
+			"Writes from the mind-form may fail with EACCES. "+
+			"Run 'chown -R %d %s' to align, or pass --no-warn-uid to suppress.",
+		hostPath, ownerUID, MindFormContainerUID, MindFormContainerUID, hostPath,
+	)
 }
