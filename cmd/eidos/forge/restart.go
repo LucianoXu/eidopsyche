@@ -3,6 +3,7 @@ package forge
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -84,15 +85,20 @@ recreate cycle. To change the image, use 'eidos forge upgrade'.`,
 			if err != nil {
 				return err
 			}
+			// Missing config.toml is fine — the container will be
+			// recreated with /eidos only. Operators who configured
+			// workspaces presumably also have a config.toml.
+			var cfgPtr *config.Config
 			stateDir, err := config.ResolveStateDir("")
 			if err != nil {
 				return err
 			}
-			cfg, err := config.Load(filepath.Join(stateDir, "config.toml"))
-			if err != nil {
-				return err
+			if cfg, lerr := config.Load(filepath.Join(stateDir, "config.toml")); lerr == nil {
+				cfgPtr = &cfg
+			} else if !os.IsNotExist(lerr) {
+				return lerr
 			}
-			if err := Restart(cmd.Context(), c, args[0], &cfg, grace); err != nil {
+			if err := Restart(cmd.Context(), c, args[0], cfgPtr, grace); err != nil {
 				return err
 			}
 			cmd.Printf("restarted %s\n", args[0])

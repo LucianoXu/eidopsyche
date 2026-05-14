@@ -2,6 +2,7 @@ package forge
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
@@ -41,16 +42,23 @@ func runCreate2(cmd *cobra.Command, name string, o CreateOpts) error {
 	if err != nil {
 		return err
 	}
+	// Load the host gate config so configured workspaces are mounted at
+	// create time. A missing config.toml (fresh-host install: operator
+	// hasn't run `eidos gate init` yet) is fine — passing nil to
+	// Orchestrate mounts only /eidos, and the operator can add
+	// workspaces later via `forge workspace add` + `forge restart`.
+	var cfgPtr *config.Config
 	stateDir, err := config.ResolveStateDir("")
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(filepath.Join(stateDir, "config.toml"))
-	if err != nil {
-		return err
+	if cfg, lerr := config.Load(filepath.Join(stateDir, "config.toml")); lerr == nil {
+		cfgPtr = &cfg
+	} else if !os.IsNotExist(lerr) {
+		return lerr
 	}
 	ctx := cmd.Context()
-	if err := Orchestrate(ctx, c, name, o, &cfg); err != nil {
+	if err := Orchestrate(ctx, c, name, o, cfgPtr); err != nil {
 		return err
 	}
 	cmd.Printf("created mind-form %q (label %q)\n", name, o.Label)
