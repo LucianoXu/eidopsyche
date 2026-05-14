@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/forge"
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
@@ -27,7 +29,7 @@ import (
 // is re-entrant at the Docker level), and concurrent upgrades for the
 // same mind-form are an edge case with no real user impact at this stage.
 // Add a keyed mutex (sync.Map[string]*sync.Mutex) here when the need arises.
-func forgeUpgrade(ctx context.Context, _ *Daemon, _ *ipc.Conn, raw json.RawMessage) (any, *ipc.Error) {
+func forgeUpgrade(ctx context.Context, d *Daemon, _ *ipc.Conn, raw json.RawMessage) (any, *ipc.Error) {
 	var p ipc.ForgeUpgradeParams
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &p); err != nil {
@@ -65,6 +67,19 @@ func forgeUpgrade(ctx context.Context, _ *Daemon, _ *ipc.Conn, raw json.RawMessa
 		IdleTimeout: idleTimeout,
 		Grace:       p.Grace,
 		DryRun:      p.DryRun,
+	}
+
+	// Preserve the operator's configured workspace bind mounts across
+	// the upgrade. Without this, step 6 (create) would silently drop
+	// them, and forge status would show "pending restart" immediately
+	// after upgrade. Missing config.toml is fine — passes nil through
+	// and step 6 mounts only /eidos (the pre-workspaces behaviour).
+	if d != nil {
+		if cfg, lerr := config.Load(d.configPath()); lerr == nil {
+			opts.Workspaces = cfg.Forge[p.Name].Workspaces
+		} else if !os.IsNotExist(lerr) {
+			return nil, &ipc.Error{Code: ipc.ErrInternal, Message: "load config: " + lerr.Error()}
+		}
 	}
 
 	res, err := forge.Upgrade(ctx, client, opts)

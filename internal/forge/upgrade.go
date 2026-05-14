@@ -8,6 +8,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/LucianoXu/eidopsyche/internal/config"
 	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 )
 
@@ -21,6 +22,16 @@ type UpgradeOpts struct {
 	IdleTimeout time.Duration // zero → 10 minutes
 	Grace       int           // zero → 10 seconds
 	DryRun      bool
+
+	// Workspaces is the list of bind mounts to re-apply when the new
+	// container is created in step 6. Without this, upgrade would silently
+	// drop any workspaces the operator had configured, forcing them to
+	// run `forge restart` afterwards just to recover state that
+	// conceptually never changed. The daemon handler populates this
+	// from the host gate config; CLI tests / direct callers can leave it
+	// nil to get the /eidos-only mount list (matching the pre-workspaces
+	// behaviour).
+	Workspaces []config.WorkspaceMount
 }
 
 // UpgradeResult is the structured output of Upgrade. Fields mirror
@@ -187,16 +198,26 @@ func Upgrade(ctx context.Context, c forgectl.Client, opts UpgradeOpts) (UpgradeR
 		}
 	}
 
-	// Step 6: create with new image, same volume. Mounts list is
-	// volume-only — upgrade does not touch workspace bind mounts; an
-	// operator who wants to add/remove workspaces does that via
-	// `eidos forge workspace add/remove` plus `eidos forge restart`.
+	// Step 6: create with new image, preserving the /eidos volume and
+	// any configured workspace bind mounts. Workspaces conceptually
+	// belong to the mind-form across upgrades — re-applying them here
+	// avoids surprising the operator with a "pending restart" diff
+	// immediately after upgrade.
+	mounts := []forgectl.Mount{
+		{Type: forgectl.MountVolume, Source: forgectl.VolumeName(opts.Name), Target: "/eidos"},
+	}
+	for _, w := range opts.Workspaces {
+		mounts = append(mounts, forgectl.Mount{
+			Type:     forgectl.MountBind,
+			Source:   w.HostPath,
+			Target:   "/workspace/" + w.Name,
+			ReadOnly: w.EffectiveMode() == "ro",
+		})
+	}
 	if err := c.ContainerCreate(ctx, forgectl.CreateOpts{
-		Name:  cont,
-		Image: opts.Image,
-		Mounts: []forgectl.Mount{
-			{Type: forgectl.MountVolume, Source: forgectl.VolumeName(opts.Name), Target: "/eidos"},
-		},
+		Name:   cont,
+		Image:  opts.Image,
+		Mounts: mounts,
 	}); err != nil {
 		return res, fmt.Errorf("%w: %v", ErrUpgradeContainerCreate, err)
 	}
