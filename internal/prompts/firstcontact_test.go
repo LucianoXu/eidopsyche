@@ -45,3 +45,56 @@ func TestCallingWordsPromptCarriesBookAndLang(t *testing.T) {
 		t.Errorf("CallingWords missing lang directive; got:\n%s", got)
 	}
 }
+
+func TestRoleResearch_HasHardCanonConstraint(t *testing.T) {
+	got := prompts.RoleResearch(prompts.RoleResearchInput{
+		Description: "a quiet river-spirit",
+		Archetype:   "river-spirit",
+		Temperament: "calm",
+		World:       "rural shrine",
+		Settings:    []string{"a stone bridge"},
+		Imagery:     []string{"moonlight on water"},
+		Lang:        "en",
+	})
+	for _, want := range []string{
+		"Do NOT name any source work",
+		"original character",
+		"derived adjective",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("RoleResearch prompt missing constraint %q; got:\n%s", want, got)
+		}
+	}
+	for _, banned := range []string{
+		"search the named sources",
+		"quote small specifics",
+	} {
+		if strings.Contains(got, banned) {
+			t.Errorf("RoleResearch prompt still contains banned phrase %q", banned)
+		}
+	}
+}
+
+func TestRoleResearch_DoesNotInterpolateSources(t *testing.T) {
+	got := prompts.RoleResearch(prompts.RoleResearchInput{
+		Description: "x", Archetype: "y", Temperament: "z",
+		World: "w", Settings: nil, Imagery: nil, Lang: "en",
+	})
+	if strings.Contains(got, "sources (works/franchises") {
+		t.Errorf("RoleResearch prompt still references sources; got:\n%s", got)
+	}
+}
+
+func TestCallingWords_HasNoCanonNamesConstraint(t *testing.T) {
+	got := prompts.CallingWords("a figure at the gate", "en")
+	if !strings.Contains(got, "Do not name characters, works, or fictional settings") {
+		t.Errorf("CallingWords prompt missing defensive constraint; got:\n%s", got)
+	}
+}
+
+func TestResearch_SourcesMarkedDebugOnly(t *testing.T) {
+	got := prompts.Research("a wanderer", "en")
+	if !strings.Contains(got, "dramaturge bookkeeping") {
+		t.Errorf("Research prompt missing sources-is-debug-only note; got:\n%s", got)
+	}
+}

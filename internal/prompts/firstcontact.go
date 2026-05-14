@@ -18,7 +18,7 @@ func Research(userText, lang string) string {
 Research it (use WebSearch if helpful). Return a JSON object with these keys exactly:
   archetype (string), temperament (string), world (string),
   settings (string array of typical scenes), imagery (string array of recurring motifs),
-  sources (string array of works/franchises this archetype draws from — debug only, not shown).
+  sources (string array of works/franchises this archetype draws from — for dramaturge bookkeeping only; later stages will not surface these names to the mind-form).
 
 Return ONLY the JSON object, no prose. Language for archetype/temperament/world: %s.`, userText, lang)
 }
@@ -58,6 +58,12 @@ Tone: plain and sincere, the way a real person speaks. No "宛如 / 仿佛 / 朦
 // RoleResearchInput is the set of fields RoleResearch needs from the
 // wizard's earlier research turn plus the operator's free-text
 // description.
+//
+// Sources is intentionally absent: the dramaturge Research step
+// records source works/franchises in CharacterProfile.Sources for
+// debug only; surfacing those names into the dossier the mind-form
+// reads would re-introduce the canon-anchored relationships this
+// flow is designed to avoid.
 type RoleResearchInput struct {
 	Description string // operator's free-text character description
 	Archetype   string
@@ -65,7 +71,6 @@ type RoleResearchInput struct {
 	World       string
 	Settings    []string
 	Imagery     []string
-	Sources     []string
 	Lang        string
 }
 
@@ -87,22 +92,35 @@ Earlier dramaturge research summarized this character as:
 - world: %s
 - settings: %v
 - imagery: %v
-- sources (works/franchises this archetype draws from): %v
 
 Compose a rich role-research dossier the new mind-form will read on
-its first wake. Use WebSearch and WebFetch when helpful — search the
-named sources, follow plausible canonical references, and quote
-small specifics back into the dossier (named scenes, recurring lines,
-defining mannerisms). Do NOT fabricate canon you cannot verify.
+its first wake. WebSearch/WebFetch may be used to inform archetype
+understanding, but the dossier output must read as archetype prose,
+not canon reference.
+
+Constraints (HARD):
+- Do NOT name any source work, original character, named master /
+  companion / family member, or place that anchors a specific
+  fictional setting.
+- Strip proper nouns from canon. Keep archetype, temperament, voice,
+  recurring imagery, and world-flavor categories (e.g. "river-
+  spirit", "demon-butler", "frame-narrator") only.
+- The same applies to derived adjective forms ("Faustian",
+  "Calcifer-like", "Sebastian-style") — equally forbidden; use
+  pure-archetype rephrasings ("soul-pact", "hearth-flame",
+  "demon-butler").
+- Historical-period descriptors associated with a canon (late-
+  Victorian, Tang-era, medieval-monastic) remain acceptable — they
+  describe a register the archetype lives in, not the canon work.
 
 Output format (markdown, no surrounding fences):
 
 # Role research — <one-line title>
 
 A 2–4 paragraph narrative dossier covering:
-- who they are (origins, defining facts, what they want)
-- temperament and texture (voice, cadence, characteristic gestures)
-- world and setting (the places they inhabit; the period / register)
+- who they are (archetype, temperament, what they want)
+- voice and texture (cadence, characteristic gestures)
+- world-flavor and register (the kind of place they inhabit; the period)
 - imagery (recurring motifs the mind-form can lean on)
 - a brief "scenes to draw from" list at the end — 3 to 6 short bullets
 
@@ -116,7 +134,7 @@ Language: %s.
 
 Return ONLY the markdown body; no preamble, no code fences.`,
 		in.Description, in.Archetype, in.Temperament, in.World,
-		in.Settings, in.Imagery, in.Sources, in.Lang)
+		in.Settings, in.Imagery, in.Lang)
 }
 
 // CallingWords returns the prompt that asks the model to draft the
@@ -134,6 +152,7 @@ Constraints:
 - Address the mind-form directly ("你" / "you").
 - Pick up one image or feeling from the summoning book, but do NOT quote it verbatim.
 - Plain, sincere, human. No "I summon thee", no archaic register, no theatrical solemnity, no "宛如 / 仿佛 / 朦胧" pile-ups. The way one might quietly say to a friend they have long wanted to meet: "你来了" — direct, warm, unadorned.
+- Do not name characters, works, or fictional settings from the summoning book.
 - Language: %s.
 
 Return ONLY the words themselves; no preamble.`, book, lang)

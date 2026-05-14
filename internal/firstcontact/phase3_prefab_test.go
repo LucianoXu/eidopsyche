@@ -92,3 +92,46 @@ func TestPreferLang_NilEmpty(t *testing.T) {
 		t.Errorf("got %q from nil map", got)
 	}
 }
+
+func TestPrefabMenuLine_EssencePathRendersDashed(t *testing.T) {
+	m := ontology.Meta{
+		ID:      "demo",
+		Kind:    "m",
+		Display: map[string]string{"zh": "梅菲斯特", "en": "Mephistopheles"},
+		Tagline: map[string]string{"zh": "恶魔灵魂契约"},
+		Essence: map[string]string{"zh": "狡黠、博学、犬儒而善辩的老恶魔"},
+	}
+	got := prefabMenuLine(m, "zh")
+	want := "梅菲斯特 - 狡黠、博学、犬儒而善辩的老恶魔"
+	if got != want {
+		t.Errorf("zh menu line = %q, want %q", got, want)
+	}
+}
+
+func TestPrefabMenuLine_FallsBackToTaglineWhenEssenceMissing(t *testing.T) {
+	m := ontology.Meta{
+		ID:      "demo",
+		Kind:    "spirit",
+		Display: map[string]string{"en": "Test Spirit"},
+		Tagline: map[string]string{"en": "test only — do not summon"},
+		// Essence: nil
+	}
+	got := prefabMenuLine(m, "en")
+	want := "Test Spirit · test only — do not summon"
+	if got != want {
+		t.Errorf("fallback menu line = %q, want %q", got, want)
+	}
+}
+
+func TestPrefabMenuLine_EssenceFallsBackAcrossLangs(t *testing.T) {
+	// zh asked for, only en essence present → preferLang returns en.
+	m := ontology.Meta{
+		Display: map[string]string{"zh": "梅菲斯特", "en": "Mephistopheles"},
+		Essence: map[string]string{"en": "a cunning old demon"},
+	}
+	got := prefabMenuLine(m, "zh")
+	want := "梅菲斯特 - a cunning old demon"
+	if got != want {
+		t.Errorf("cross-lang fallback = %q, want %q", got, want)
+	}
+}
