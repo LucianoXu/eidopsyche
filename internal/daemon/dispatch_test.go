@@ -415,3 +415,144 @@ func TestDispatch_InboundAck_NoInboxNoWake(t *testing.T) {
 		}
 	}
 }
+
+// TestDispatch_UnknownSender_PersistsNoWakeNoAck asserts the new policy:
+// chats from a pubkey with no contact row are persisted to the inbox so
+// the operator can see them in `eidos gate inbox --sender unknown`, but
+// they do NOT fire a wake (no cold-summoning of a mindform by a stranger)
+// and they do NOT receive an ack envelope (no presence leak to strangers).
+func TestDispatch_UnknownSender_PersistsNoWakeNoAck(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	from := "stranger-pubkey-hex"
+
+	ackCalled := 0
+	d.testEmitAck = func(context.Context, string, string) { ackCalled++ }
+
+	wakeDir := t.TempDir()
+	d.wakeDir = wakeDir
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeChat, Text: "first contact"}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ev-stranger"}, makeRumor(from, content))
+
+	// Persisted.
+	got, _ := d.Box.ListInbox(nil, "", 10)
+	if len(got) != 1 || got[0].From != from || got[0].Malformed {
+		t.Fatalf("expected one clean inbox row from unknown sender; got %+v", got)
+	}
+	// No ack.
+	if ackCalled != 0 {
+		t.Errorf("ack emitted for unknown sender: count=%d", ackCalled)
+	}
+	// No wake file.
+	entries, _ := os.ReadDir(wakeDir)
+	if len(entries) != 0 {
+		t.Errorf("wake fired for unknown sender: dir entries=%v", entries)
+	}
+}
+
+// TestDispatch_BlockedSender_HardDrop asserts that TierBlocked is still
+// the hardest possible filter: no persistence, no wake, no ack, no
+// broadcast. The new persist-unknowns policy must NOT downgrade blocked
+// into pending.
+func TestDispatch_BlockedSender_HardDrop(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	from := "mallory-pubkey-hex"
+	if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: from, Tier: contacts.TierBlocked}); err != nil {
+		t.Fatal(err)
+	}
+
+	ackCalled := 0
+	d.testEmitAck = func(context.Context, string, string) { ackCalled++ }
+
+	wakeDir := t.TempDir()
+	d.wakeDir = wakeDir
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeChat, Text: "rude"}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ev-blocked"}, makeRumor(from, content))
+
+	got, _ := d.Box.ListInbox(nil, "", 10)
+	if len(got) != 0 {
+		t.Errorf("blocked sender persisted: %+v", got)
+	}
+	if ackCalled != 0 {
+		t.Errorf("blocked sender acked: %d", ackCalled)
+	}
+	entries, _ := os.ReadDir(wakeDir)
+	if len(entries) != 0 {
+		t.Errorf("blocked sender woke mindform: %v", entries)
+	}
+}
+
+// TestDispatch_KnownContact_WakeFires guards against accidental tightening
+// of the wake gate. A normal known contact's chat must still fire a wake
+// when wakeDir is configured.
+func TestDispatch_KnownContact_WakeFires(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	from := "bob-pubkey-hex"
+	if err := d.Repo.Add(ctx, contacts.Contact{Pubkey: from, Tier: contacts.TierFriend}); err != nil {
+		t.Fatal(err)
+	}
+	wakeDir := t.TempDir()
+	d.wakeDir = wakeDir
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeChat, Text: "hi"}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ev-known"}, makeRumor(from, content))
+
+	entries, _ := os.ReadDir(wakeDir)
+	if len(entries) == 0 {
+		t.Errorf("known contact did NOT fire a wake; entries=%v", entries)
+	}
+}
+
+// TestDispatch_SelfCopy_WakeFires asserts that self-chats still wake
+// (today's behavior). The wake-from-self path is used by the container
+// daemon for self-reflection bumps; do not break it.
+func TestDispatch_SelfCopy_WakeFires(t *testing.T) {
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	wakeDir := t.TempDir()
+	d.wakeDir = wakeDir
+
+	env := envelope.Envelope{V: 1, Type: envelope.TypeChat, Text: "self-note"}
+	content, _ := envelope.Encode(env)
+	d.dispatchEnvelope(ctx, &gnostr.Event{ID: "ev-self-wake"}, makeRumor(d.Key.PublicHex, content))
+
+	entries, _ := os.ReadDir(wakeDir)
+	if len(entries) == 0 {
+		t.Errorf("self-chat did NOT fire a wake; entries=%v", entries)
+	}
+}
+
+// TestSenderFilter_Allows exercises the per-subscriber inbox.tail filter
+// matrix so a regression in broadcastInbox's allows() check is caught
+// before a stranger's message can leak into a known-only tail.
+func TestSenderFilter_Allows(t *testing.T) {
+	pending := inbox.Message{Pending: true}
+	known := inbox.Message{Pending: false}
+	cases := []struct {
+		name   string
+		f      senderFilter
+		row    inbox.Message
+		allows bool
+	}{
+		{"known filter + pending row → drop", senderKnown, pending, false},
+		{"known filter + known row → push", senderKnown, known, true},
+		{"unknown filter + pending row → push", senderUnknown, pending, true},
+		{"unknown filter + known row → drop", senderUnknown, known, false},
+		{"all filter + pending row → push", senderAll, pending, true},
+		{"all filter + known row → push", senderAll, known, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.f.allows(tc.row); got != tc.allows {
+				t.Errorf("allows: got %v want %v", got, tc.allows)
+			}
+		})
+	}
+}

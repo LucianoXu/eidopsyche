@@ -17,6 +17,13 @@ type Message struct {
 	// dashboard, future TUI) renders pubkeys consistently. AppendInbox
 	// strips it before persisting; ListInbox always returns "".
 	Label string `json:"label,omitempty"`
+	// Pending is a transit-only annotation: IPC handlers populate it
+	// from the contacts store at list/tail time using contacts.IsPending.
+	// True means the sender has no non-blocked contact row, so the row
+	// belongs in the operator's "pending" inbox view rather than the
+	// default view. AppendInbox strips it before persisting; ListInbox
+	// always returns false.
+	Pending bool `json:"pending,omitempty"`
 }
 
 type Sent struct {

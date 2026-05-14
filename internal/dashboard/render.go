@@ -123,6 +123,15 @@ type messagesData struct {
 	Rows       []messageRow
 	NextCursor string
 	OnlyMal    bool
+	// Pending is true when the panel is currently showing the unknown-
+	// sender view (?view=pending). The template uses it to highlight the
+	// active chip and label the panel "Pending" instead of "Inbox".
+	Pending bool
+	// PendingCount is the number of currently-pending inbox rows (capped
+	// at messagesPageSize+1, used by the template to render a count chip
+	// or a "50+" badge when the cap is hit). Always populated regardless
+	// of which view is active.
+	PendingCount int
 }
 
 type messageRow struct {
@@ -134,6 +143,11 @@ type messageRow struct {
 	RejectReason string
 	EventID      string
 	Pubkey       string
+	// Pending tags an inbox row whose sender is not a known contact.
+	// The template renders it with a subdued style + "Promote to contact"
+	// affordance so the operator can decide whether to keep talking.
+	// Always false for outbox rows.
+	Pending bool
 }
 
 type composeData struct {

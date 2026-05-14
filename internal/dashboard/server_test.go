@@ -136,8 +136,31 @@ type configSetCall struct{ Path, Value string }
 
 func (f fakeDeps) OwnPubkey() string                        { return f.pubkey }
 func (f fakeDeps) OwnLabel(context.Context) (string, error) { return f.label, nil }
-func (f fakeDeps) ListInbox(*time.Time, string, int) ([]inbox.Message, error) {
-	return f.inbox, nil
+func (f fakeDeps) ListInbox(_ *time.Time, _ string, _ int, sender string) ([]inbox.Message, error) {
+	// Honour sender so /messages and /messages?view=pending tests can
+	// distinguish the panels even on a shared fake: "unknown" returns
+	// rows tagged Pending; everything else returns non-Pending rows
+	// (and self/unset/known share that bucket).
+	out := f.inbox
+	if sender == "" || sender == "known" {
+		filtered := out[:0:0]
+		for _, m := range out {
+			if !m.Pending {
+				filtered = append(filtered, m)
+			}
+		}
+		return filtered, nil
+	}
+	if sender == "unknown" {
+		filtered := out[:0:0]
+		for _, m := range out {
+			if m.Pending {
+				filtered = append(filtered, m)
+			}
+		}
+		return filtered, nil
+	}
+	return out, nil
 }
 func (f fakeDeps) ListOutbox(*time.Time, string, int) ([]inbox.Sent, error) {
 	return f.outbox, nil

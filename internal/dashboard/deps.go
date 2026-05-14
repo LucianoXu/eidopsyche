@@ -21,7 +21,11 @@ type DashboardDeps interface {
 	OwnPubkey() string
 	OwnLabel(ctx context.Context) (string, error)
 
-	ListInbox(since *time.Time, from string, limit int) ([]inbox.Message, error)
+	// ListInbox returns inbox rows newest-first. `sender` filters by
+	// contact-graph tier: "known" (or "" — the default for the main
+	// inbox panel), "unknown" (no contact row or TierBlocked — drives
+	// the pending tab), or "all" (no contact filter).
+	ListInbox(since *time.Time, from string, limit int, sender string) ([]inbox.Message, error)
 	ListOutbox(since *time.Time, to string, limit int) ([]inbox.Sent, error)
 	ListContacts(ctx context.Context) ([]*contacts.Contact, error)
 	ListRelayHealth() []RelayState

@@ -176,6 +176,30 @@ back to a short hex prefix (`abc1234…`) for senders not in your
 contacts. Add the sender as a contact with a label to upgrade the
 display the next time they message you.
 
+By default, `eidos gate inbox` shows only messages from **known**
+senders (contacts on file, any non-blocked tier). Messages from
+strangers — pubkeys with no contact row, or a `TierBlocked` row — are
+kept in a separate **pending** view. This is what surfaces an unsolicited
+first-touch (e.g. a friend you handed your card to out-of-band, or a
+mind-form's birth message) without letting random spam pollute your
+main inbox.
+
+```
+$ eidos gate inbox --sender unknown
+2026-05-14 14:02:00  (pending) abc1234…  Hello, Bob. You were right…
+```
+
+Promote a pending sender with `eidos gate add-contact`; their backlog
+appears in the default view on the next refresh, no replay needed.
+
+`--sender all` shows both classes mixed (useful when you forgot
+whether a particular peer is in your contacts).
+
+**Note on wake:** a mind-form is only woken by chats from senders it
+already has as contacts. A stranger's message lands in the operator's
+pending inbox but does **not** wake the mind-form. Promote the sender
+first, then send (or have the operator forward) the message again.
+
 ### Sending an operator command
 
 You can send a v1 command envelope to your own daemon (e.g., from a
@@ -323,6 +347,8 @@ Top-level:
 - `eidos gate inbox --from <npub>` — filter inbox by sender
 - `eidos gate inbox --since <unix-seconds>` — show messages since timestamp
 - `eidos gate inbox --limit <n>` — cap results (default 50)
+- `eidos gate inbox --sender {known|unknown|all}` — contact-graph filter
+  (default `known`). Use `unknown` to triage the pending tab, `all` to mix both.
 - `eidos gate send --stdin` — read message body from stdin instead of argument
 - `eidos gate outbox --to <npub>` — filter outbox by recipient
 

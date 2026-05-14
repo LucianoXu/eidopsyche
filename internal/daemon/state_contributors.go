@@ -237,7 +237,7 @@ func (c inboxContrib) Snapshot(ctx context.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	annotateInboxLabels(ctx, c.d, rows)
+	annotateInboxRows(ctx, c.d, rows)
 	return map[string]any{
 		"recent": rows,
 		"count":  len(rows),

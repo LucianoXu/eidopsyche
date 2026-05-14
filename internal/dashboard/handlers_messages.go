@@ -16,7 +16,8 @@ func messagesHandler(deps DashboardDeps, r *renderer, logger *slog.Logger) http.
 	return func(w http.ResponseWriter, req *http.Request) {
 		onlyMal := req.URL.Query().Get("malformed") == "1"
 		cursor := req.URL.Query().Get("cursor")
-		view := buildMessagesView(deps, onlyMal, cursor)
+		pending := req.URL.Query().Get("view") == "pending"
+		view := buildMessagesView(deps, onlyMal, cursor, pending)
 		out, err := r.Render("messages", view)
 		if err != nil {
 			logger.Error("render messages", "err", err)
@@ -215,7 +216,7 @@ func sendChat(w http.ResponseWriter, req *http.Request, deps DashboardDeps, r *r
 	_, _ = w.Write([]byte(out))
 }
 
-func buildMessagesView(deps DashboardDeps, onlyMal bool, cursor string) messagesData {
+func buildMessagesView(deps DashboardDeps, onlyMal bool, cursor string, pending bool) messagesData {
 	// v1 returns the newest page only. Cursor / "Load more" pagination
 	// requires a "before" (upper-bound) timestamp filter that the inbox
 	// store does not yet expose; building it on top of the existing
@@ -224,14 +225,20 @@ func buildMessagesView(deps DashboardDeps, onlyMal bool, cursor string) messages
 	_ = cursor
 	rows := []messageRow{}
 
-	if !onlyMal {
+	// Outbox rows are hidden in the pending view — the pending tab is
+	// "messages from strangers waiting for triage," not a mixed thread.
+	if !onlyMal && !pending {
 		if sents, err := deps.ListOutbox(nil, "", messagesPageSize); err == nil {
 			for _, s := range sents {
 				rows = append(rows, sentToRow(s))
 			}
 		}
 	}
-	if msgs, err := deps.ListInbox(nil, "", messagesPageSize); err == nil {
+	sender := "known"
+	if pending {
+		sender = "unknown"
+	}
+	if msgs, err := deps.ListInbox(nil, "", messagesPageSize, sender); err == nil {
 		for _, m := range msgs {
 			if onlyMal && !m.Malformed {
 				continue
@@ -248,7 +255,15 @@ func buildMessagesView(deps DashboardDeps, onlyMal bool, cursor string) messages
 	if len(rows) > messagesPageSize {
 		rows = rows[:messagesPageSize]
 	}
-	return messagesData{Rows: rows, OnlyMal: onlyMal}
+
+	// Pending count: fetch just enough to render "N" or "N+" without
+	// loading the entire pending backlog. messagesPageSize is the cap.
+	pendingCount := 0
+	if pendingRows, err := deps.ListInbox(nil, "", messagesPageSize, "unknown"); err == nil {
+		pendingCount = len(pendingRows)
+	}
+
+	return messagesData{Rows: rows, OnlyMal: onlyMal, Pending: pending, PendingCount: pendingCount}
 }
 
 func msgToRow(m inbox.Message) messageRow {
@@ -261,6 +276,7 @@ func msgToRow(m inbox.Message) messageRow {
 		Malformed:    m.Malformed,
 		RejectReason: m.RejectReason,
 		EventID:      m.EventID,
+		Pending:      m.Pending,
 	}
 }
 
@@ -285,7 +301,8 @@ func previewFor(content string) string {
 
 func buildBubbles(deps DashboardDeps, pk string) []bubbleData {
 	bubbles := []bubbleData{}
-	if msgs, err := deps.ListInbox(nil, pk, 100); err == nil {
+	// from=pk supersedes any sender filter; pass "all" defensively.
+	if msgs, err := deps.ListInbox(nil, pk, 100, "all"); err == nil {
 		for _, m := range msgs {
 			bubbles = append(bubbles, msgToBubble(m))
 		}
