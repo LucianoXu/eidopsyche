@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/LucianoXu/eidopsyche/internal/claudeexec"
 )
 
 // buildStubClaude builds the testdata/stubclaude binary from
@@ -78,6 +80,22 @@ func TestRunPromptDumpInContainer_PopulatesCapturedFrom(t *testing.T) {
 	}
 	if cf["bare"] != false {
 		t.Errorf("bare=%v", cf["bare"])
+	}
+
+	args, _ := env["claude_args"].([]any)
+	var sawTools bool
+	for i, a := range args {
+		if s, _ := a.(string); s == "--tools" && i+1 < len(args) {
+			next, _ := args[i+1].(string)
+			if next == claudeexec.ToolsArg() {
+				sawTools = true
+				break
+			}
+		}
+	}
+	if !sawTools {
+		t.Errorf("claude_args must contain --tools %s, got %v",
+			claudeexec.ToolsArg(), args)
 	}
 }
 
