@@ -160,6 +160,26 @@ func TestBuildClaudeArgs_StreamJSONContract(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeArgs_IncludesMCPConfig(t *testing.T) {
+	args := buildClaudeArgs(SpawnOpts{
+		SystemPrompt: "sys",
+		Mode:         SessionNew,
+		SessionUUID:  "00000000-0000-0000-0000-000000000000",
+	})
+	for i, a := range args {
+		if a == "--mcp-config" {
+			if i+1 >= len(args) {
+				t.Fatal("--mcp-config missing value")
+			}
+			if got := args[i+1]; got != "/etc/eidos/mcp.json" {
+				t.Fatalf("--mcp-config = %q, want /etc/eidos/mcp.json", got)
+			}
+			return
+		}
+	}
+	t.Fatal("--mcp-config not present in argv")
+}
+
 func TestSpawnedClaude_WaitIsIdempotent(t *testing.T) {
 	c, err := SpawnClaude(SpawnOpts{
 		Binary:       stubClaudeBin,
