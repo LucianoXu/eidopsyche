@@ -104,6 +104,21 @@ RUN chmod +x /usr/local/bin/entrypoint.sh \
 COPY --from=repobundle /opt/eidopsyche-bundle /opt/eidopsyche-bundle.git
 COPY --from=build /out/eidos /usr/local/bin/eidos
 
+# Version metadata. CLAUDE_CODE_VERSION is the same arg used by Stage 3
+# (re-declared here so Stage 4 can reference it). EIDOS_VERSION is
+# passed from Makefile / release.yml so the image self-identifies the
+# host binary version it shipped with.
+ARG CLAUDE_CODE_VERSION
+ARG EIDOS_VERSION=dev
+
+LABEL org.eidopsyche.claude-code-version="${CLAUDE_CODE_VERSION}"
+LABEL org.eidopsyche.eidos-version="${EIDOS_VERSION}"
+
+RUN mkdir -p /etc/eidos \
+ && echo "${CLAUDE_CODE_VERSION}" > /etc/eidos/claude-code.version \
+ && echo "${EIDOS_VERSION}"       > /etc/eidos/eidos.version \
+ && chmod 0644 /etc/eidos/*.version
+
 ENV EIDOS_IN_CONTAINER=1
 ENV EIDOS_GATE_HOME=/eidos/gate
 ENV HOME=/eidos/claude
