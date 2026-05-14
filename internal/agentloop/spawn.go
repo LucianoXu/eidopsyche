@@ -40,6 +40,10 @@ type SpawnOpts struct {
 	SessionUUID string
 	// Model, if non-empty, is passed as --model. Empty → omitted (claude picks default).
 	Model string
+	// Effort, if non-empty, is passed as --effort (one of
+	// low|medium|high|xhigh|max). Empty → omitted (claude picks
+	// default). Validated upstream by config.ValidateEffort.
+	Effort string
 	// SystemPrompt is the full --system-prompt payload assembled by
 	// internal/prompts.Build. Replaces the previous identity-only
 	// --append-system-prompt; the mind-form no longer sees Claude
@@ -135,6 +139,9 @@ func buildClaudeArgs(opts SpawnOpts) []string {
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
+	}
+	if opts.Effort != "" {
+		args = append(args, "--effort", opts.Effort)
 	}
 	args = append(args,
 		"--input-format", "stream-json",

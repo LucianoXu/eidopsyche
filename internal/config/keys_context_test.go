@@ -36,6 +36,19 @@ func TestContextBitmask_ModelIsContainerOnly(t *testing.T) {
 	}
 }
 
+func TestContextBitmask_EffortIsContainerOnly(t *testing.T) {
+	k, ok := KeyByPath("mindform.effort")
+	if !ok {
+		t.Fatal("mindform.effort not registered")
+	}
+	if k.Contexts&HostCtx != 0 {
+		t.Errorf("mindform.effort must not have HostCtx; got %d", k.Contexts)
+	}
+	if k.Contexts&ContainerCtx == 0 {
+		t.Errorf("mindform.effort must have ContainerCtx; got %d", k.Contexts)
+	}
+}
+
 func TestContextBitmask_LogLevelIsBoth(t *testing.T) {
 	k, ok := KeyByPath("log_level")
 	if !ok {

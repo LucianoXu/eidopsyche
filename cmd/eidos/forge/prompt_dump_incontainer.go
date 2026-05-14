@@ -62,9 +62,17 @@ func runPromptDumpInContainer(ctx context.Context, in promptDumpInContainerInput
 		identityRel = ""
 	}
 
-	var model string
+	var (
+		model  = config.DefaultModel
+		effort = config.DefaultEffort
+	)
 	if cfg, err := config.Load(in.GateConfigPath); err == nil {
-		model = cfg.MindForm.Model
+		if cfg.MindForm.Model != "" {
+			model = cfg.MindForm.Model
+		}
+		if cfg.MindForm.Effort != "" {
+			effort = cfg.MindForm.Effort
+		}
 	}
 
 	// Assemble the full system prompt the agent-loop would send, so the
@@ -75,10 +83,7 @@ func runPromptDumpInContainer(ctx context.Context, in promptDumpInContainerInput
 		facts, _ := prompts.FromOntology(in.OntologyRoot)
 		facts.Model = model
 		facts.OntologyDir = in.OntologyRoot
-		facts.Effort = config.DefaultEffort
-		if cfg, err := config.Load(in.GateConfigPath); err == nil && cfg.MindForm.Effort != "" {
-			facts.Effort = cfg.MindForm.Effort
-		}
+		facts.Effort = effort
 		built, bErr := prompts.Build(ctx, facts, in.OntologyRoot)
 		if bErr != nil {
 			return fmt.Errorf("build system prompt: %w", bErr)
@@ -93,6 +98,7 @@ func runPromptDumpInContainer(ctx context.Context, in promptDumpInContainerInput
 		Cwd:          in.OntologyRoot,
 		SystemPrompt: systemPrompt,
 		Model:        model,
+		Effort:       effort,
 		Prompt:       in.Prompt,
 		ClaudeDir:    in.ClaudeDir,
 		Verbose:      in.Verbose,
