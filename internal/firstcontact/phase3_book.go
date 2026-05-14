@@ -69,7 +69,6 @@ func Phase3(ctx context.Context, s *Summoning, r render.Renderer, c *Claude, d P
 		World:       s.Profile.World,
 		Settings:    s.Profile.Settings,
 		Imagery:     s.Profile.Imagery,
-		Sources:     s.Profile.Sources,
 		Lang:        s.Lang,
 	}))
 	stRR.Stop()
