@@ -44,7 +44,7 @@ type Daemon struct {
 
 	kick        chan struct{}
 	mu          sync.Mutex
-	subs        []*ipc.Conn
+	subs        []ipcSubscriber
 	dashSubs    []*dashSub
 	dedupe      map[string]struct{}
 	selfWrapIDs map[string]struct{}
@@ -552,16 +552,36 @@ func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *
 
 	switch env.Type {
 	case envelope.TypeChat:
-		// Chats from self (e.g., command replies, self-notes) bypass the
-		// contact filter — self is always trusted.
+		// Classify the sender into one of three groups:
+		//   * self        — rumor.PubKey == own pubkey; always trusted.
+		//   * known       — contact row exists and not TierBlocked.
+		//   * unknown     — no contact row.
+		//   * blocked     — contact row exists and is TierBlocked; hard-dropped.
+		//
+		// Storage policy:
+		//   * blocked → drop (no persistence, no wake, no ack, no broadcast).
+		//   * known / self / unknown → persist + broadcast.
+		// Wake / ack policy:
+		//   * Wake fires only for trusted senders (self or known) — a mind-form
+		//     cannot be cold-summoned by a stranger.
+		//   * Ack fires only for known senders (not self, not unknown) — we
+		//     never confirm presence to a stranger.
+		isSelf := rumor.PubKey == d.Key.PublicHex
 		var senderContact *contacts.Contact
-		if rumor.PubKey != d.Key.PublicHex {
+		if !isSelf {
 			c, err := d.Repo.Get(ctx, rumor.PubKey)
-			if err != nil || c.Tier == contacts.TierBlocked {
-				d.Log.Debug("dropped non-contact / blocked", "from", rumor.PubKey, "peer", d.peerLabel(ctx, rumor.PubKey))
+			switch {
+			case err == nil && c.Tier == contacts.TierBlocked:
+				d.Log.Debug("dropped blocked sender", "from", rumor.PubKey, "peer", d.peerLabel(ctx, rumor.PubKey))
 				return
+			case err == nil:
+				senderContact = c
+			default:
+				// Unknown sender: persist + broadcast, but do not wake and
+				// do not ack. senderContact stays nil so the downstream
+				// nil-checks suppress the ack the same way they do for self.
+				d.Log.Debug("inbox: unknown sender (persisted, no wake/ack)", "from", rumor.PubKey)
 			}
-			senderContact = c
 		}
 		msg := inbox.Message{
 			EventID:    ev.ID,
@@ -576,14 +596,16 @@ func (d *Daemon) dispatchEnvelope(ctx context.Context, ev *gnostr.Event, rumor *
 			d.Log.Error("append inbox", "err", err)
 			return
 		}
-		if d.wakeDir != "" {
+		// Trusted senders = self or known contact. Strangers do not wake.
+		trustedSender := isSelf || senderContact != nil
+		if d.wakeDir != "" && trustedSender {
 			if err := submitWake(d.wakeDir, msg); err != nil {
 				d.Log.Warn("wake submit", "err", err)
 			}
 		}
 		d.broadcastInbox(ctx, msg)
-		// Tier-2: emit ack to non-self whitelisted senders. senderContact is
-		// nil only for self-copies (rumor.PubKey == self), which we skip.
+		// Tier-2: emit ack to non-self known senders only. senderContact is
+		// nil for self-copies and for unknown senders, both of which we skip.
 		if senderContact != nil {
 			d.emitAck(ctx, rumor.PubKey, senderContact.Relays, rumor.ID)
 		}
@@ -969,14 +991,24 @@ func (d *Daemon) handleInviteRedemption(ctx context.Context, _ *gnostr.Event, ru
 	})
 }
 
+// ipcSubscriber pairs an IPC connection with the sender filter the
+// caller specified on inbox.tail. Control-plane events (contact.added,
+// session.changed, …) are pushed to every subscriber regardless of
+// filter; only inbox.message broadcasts honour the filter, since the
+// filter is logically a property of the inbox-stream subscription.
+type ipcSubscriber struct {
+	conn   *ipc.Conn
+	filter senderFilter
+}
+
 // broadcastContactAdded pushes a contact.added push event to all live IPC subscribers.
 func (d *Daemon) broadcastContactAdded(data any) {
 	d.mu.Lock()
-	subs := make([]*ipc.Conn, len(d.subs))
+	subs := make([]ipcSubscriber, len(d.subs))
 	copy(subs, d.subs)
 	d.mu.Unlock()
-	for _, c := range subs {
-		_ = c.PushEvent("contact.added", data)
+	for _, s := range subs {
+		_ = s.conn.PushEvent("contact.added", data)
 	}
 	// Convert the loose payload to a Contact pointer when possible so the
 	// dashboard event has structured fields. Fall back to a kind-only event.
@@ -993,20 +1025,48 @@ func (d *Daemon) broadcastContactAdded(data any) {
 
 // broadcastInbox pushes an inbox message to all live IPC subscribers
 // and the dashboard hub. The pushed message is enriched with the
-// sender's contact label so live `gate inbox --tail` consumers and the
-// dashboard SSE thread render friendly names without waiting for the
-// next inbox.list refresh.
+// sender's contact label AND the Pending classification so live
+// `gate inbox --tail` consumers and the dashboard SSE thread render
+// friendly names + pending status without waiting for the next
+// inbox.list refresh.
+//
+// Per-subscriber filter (senderFilter on inbox.tail): a subscriber
+// asking for sender=known does not see Pending=true rows; one asking
+// for sender=unknown only sees Pending=true rows; sender=all sees both.
+// The dashboard hub always receives both (the dashboard frontend tabs
+// by Pending client-side).
 func (d *Daemon) broadcastInbox(ctx context.Context, m inbox.Message) {
-	m.Label = lookupLabel(ctx, d, m.From, map[string]string{})
+	// Annotate the single row using the same logic as inbox.list so
+	// the live-pushed shape exactly matches what the next list call
+	// would return. annotateInboxRows takes a slice, so wrap.
+	rows := []inbox.Message{m}
+	annotateInboxRows(ctx, d, rows)
+	m = rows[0]
+
 	d.mu.Lock()
-	subs := make([]*ipc.Conn, len(d.subs))
+	subs := make([]ipcSubscriber, len(d.subs))
 	copy(subs, d.subs)
 	d.mu.Unlock()
-	for _, c := range subs {
-		_ = c.PushEvent("inbox.message", m)
+	for _, s := range subs {
+		if !s.filter.allows(m) {
+			continue
+		}
+		_ = s.conn.PushEvent("inbox.message", m)
 	}
 	mc := m
 	d.emitDashEvent(dashboard.Event{Kind: "inbox.message", Message: &mc})
+}
+
+// allows reports whether the subscriber's filter accepts m for push.
+func (f senderFilter) allows(m inbox.Message) bool {
+	switch f {
+	case senderUnknown:
+		return m.Pending
+	case senderAll:
+		return true
+	default: // senderKnown
+		return !m.Pending
+	}
 }
 
 // dashSub is a single dashboard subscriber: a buffered event channel plus a
@@ -1096,17 +1156,19 @@ func hasLifecyclePrefix(kind string) bool {
 		(len(kind) >= 15 && kind[:15] == "lifecycle.done:")
 }
 
-// addSubscriber registers conn as an inbox push target and auto-removes it when
-// the connection closes.
-func (d *Daemon) addSubscriber(c *ipc.Conn) {
+// addSubscriberWithFilter registers conn with the specified sender
+// filter so broadcastInbox honours the inbox.tail subscriber's choice
+// of known / unknown / all. The connection is auto-removed when it
+// closes.
+func (d *Daemon) addSubscriberWithFilter(c *ipc.Conn, f senderFilter) {
 	d.mu.Lock()
-	d.subs = append(d.subs, c)
+	d.subs = append(d.subs, ipcSubscriber{conn: c, filter: f})
 	d.mu.Unlock()
 	go func() {
 		<-c.Closed()
 		d.mu.Lock()
 		for i, x := range d.subs {
-			if x == c {
+			if x.conn == c {
 				d.subs = append(d.subs[:i], d.subs[i+1:]...)
 				break
 			}

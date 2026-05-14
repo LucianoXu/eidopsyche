@@ -59,3 +59,54 @@ func TestHandler_Messages_FallsBackToShortHexWithEllipsis(t *testing.T) {
 		t.Errorf("expected short-hex prefix with ellipsis, got %s", body)
 	}
 }
+
+// TestHandler_Messages_PendingView verifies /messages?view=pending
+// surfaces Pending=true rows under the new Pending tab. The default
+// /messages view must hide them; the count chip shows the pending count.
+func TestHandler_Messages_PendingView(t *testing.T) {
+	const knownHex = "1111111111111111111111111111111111111111111111111111111111111111"
+	const strangerHex = "2222222222222222222222222222222222222222222222222222222222222222"
+	deps := fakeDeps{
+		inbox: []inbox.Message{
+			{
+				From:       knownHex,
+				Label:      "alice",
+				Content:    mustEncode(t, envelope.Envelope{V: 1, Type: envelope.TypeChat, Text: "from alice"}),
+				ReceivedAt: time.Now().Unix(),
+				Pending:    false,
+			},
+			{
+				From:       strangerHex,
+				Content:    mustEncode(t, envelope.Envelope{V: 1, Type: envelope.TypeChat, Text: "cold-call"}),
+				ReceivedAt: time.Now().Unix() + 1,
+				Pending:    true,
+			},
+		},
+	}
+	srv := newTestServer(t, deps)
+
+	// Default view: known only.
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/messages", nil))
+	body := rec.Body.String()
+	if !strings.Contains(body, "from alice") {
+		t.Errorf("default view should include known sender's message; body=%s", body)
+	}
+	if strings.Contains(body, "cold-call") {
+		t.Errorf("default view leaked Pending row; body=%s", body)
+	}
+	if !strings.Contains(body, "Pending (1)") {
+		t.Errorf("expected 'Pending (1)' chip in default view; body=%s", body)
+	}
+
+	// Pending view: strangers only.
+	rec2 := httptest.NewRecorder()
+	srv.ServeHTTP(rec2, httptest.NewRequest("GET", "/messages?view=pending", nil))
+	body2 := rec2.Body.String()
+	if !strings.Contains(body2, "cold-call") {
+		t.Errorf("pending view should include stranger's message; body=%s", body2)
+	}
+	if strings.Contains(body2, "from alice") {
+		t.Errorf("pending view leaked known row; body=%s", body2)
+	}
+}

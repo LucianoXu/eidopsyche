@@ -130,3 +130,36 @@ func TestRemoveCascadesRelays(t *testing.T) {
 		t.Fatalf("expected zero relays after cascade, got %v", rs)
 	}
 }
+
+func TestIsPending(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	const self = "selfhex"
+	// add a friend
+	if err := repo.Add(ctx, Contact{Pubkey: "friendhex", Label: "F", Tier: TierFriend}); err != nil {
+		t.Fatalf("Add friend: %v", err)
+	}
+	// add a blocked contact
+	if err := repo.Add(ctx, Contact{Pubkey: "blockedhex", Label: "B", Tier: TierBlocked}); err != nil {
+		t.Fatalf("Add blocked: %v", err)
+	}
+	cases := []struct {
+		name    string
+		pubkey  string
+		pending bool
+	}{
+		{"self is never pending", self, false},
+		{"friend is not pending", "friendhex", false},
+		{"blocked is pending", "blockedhex", true},
+		{"unknown is pending", "strangerhex", true},
+		{"empty is pending", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsPending(ctx, repo, tc.pubkey, self)
+			if got != tc.pending {
+				t.Errorf("IsPending(%q): got %v want %v", tc.pubkey, got, tc.pending)
+			}
+		})
+	}
+}

@@ -60,8 +60,8 @@ type identityProjection struct {
 	HomeRelays []map[string]string `json:"home_relays"`
 }
 
-func (a dashboardAdapter) ListInbox(since *time.Time, from string, limit int) ([]inbox.Message, error) {
-	params := inboxListParams{From: from, Limit: limit}
+func (a dashboardAdapter) ListInbox(since *time.Time, from string, limit int, sender string) ([]inbox.Message, error) {
+	params := inboxListParams{From: from, Limit: limit, Sender: sender}
 	if since != nil {
 		s := since.Unix()
 		params.Since = &s
@@ -90,9 +90,10 @@ func (a dashboardAdapter) ListOutbox(since *time.Time, to string, limit int) ([]
 // anonymous structs in inboxList / outboxList. The IPC handlers accept
 // the same field set; named types let the adapter avoid map[string]any.
 type inboxListParams struct {
-	Since *int64 `json:"since,omitempty"`
-	From  string `json:"from,omitempty"`
-	Limit int    `json:"limit,omitempty"`
+	Since  *int64 `json:"since,omitempty"`
+	From   string `json:"from,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+	Sender string `json:"sender,omitempty"`
 }
 
 type outboxListParams struct {

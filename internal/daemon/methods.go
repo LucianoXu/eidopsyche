@@ -134,19 +134,58 @@ func isHex64(s string) bool {
 	return true
 }
 
-// annotateInboxLabels fills in row.Label from the contacts store. A
-// per-call cache amortises the lookup when the same sender appears in
-// many rows. Lookup errors degrade silently to "" so a missing or
-// mis-keyed contact never blocks the listing — the surface still
-// renders the short-hex fallback for that row.
-func annotateInboxLabels(ctx context.Context, d *Daemon, rows []inbox.Message) {
-	cache := map[string]string{}
+// annotateInboxRows fills in the transit-only Label and Pending fields
+// from the contacts store. A per-call cache amortises the lookup when
+// the same sender appears in many rows. Lookup errors degrade silently
+// to "" / Pending=true (unknown), so a missing or mis-keyed contact
+// never blocks the listing — the surface still renders the short-hex
+// fallback for that row.
+//
+// Pending classification per `contacts.IsPending`: unknown sender
+// (no row) or TierBlocked row → Pending=true. Self (rumor.PubKey ==
+// own pubkey) is always non-pending. Label is set from the contact's
+// stored Label whenever a contact row exists, including TierBlocked,
+// so renderers can still show the name a blocked peer had.
+func annotateInboxRows(ctx context.Context, d *Daemon, rows []inbox.Message) {
+	type cached struct {
+		label   string
+		pending bool
+	}
+	cache := map[string]cached{}
+	var selfHex string
+	if d != nil && d.Key != nil {
+		selfHex = d.Key.PublicHex
+	}
 	for i := range rows {
-		rows[i].Label = lookupLabel(ctx, d, rows[i].From, cache)
+		pk := rows[i].From
+		c, ok := cache[pk]
+		if !ok {
+			switch {
+			case pk == "":
+				c = cached{pending: true}
+			case pk == selfHex:
+				c = cached{pending: false}
+			default:
+				ct, err := d.Repo.Get(ctx, pk)
+				switch {
+				case err != nil || ct == nil:
+					c = cached{pending: true}
+				case ct.Tier == contacts.TierBlocked:
+					c = cached{label: ct.Label, pending: true}
+				default:
+					c = cached{label: ct.Label, pending: false}
+				}
+			}
+			cache[pk] = c
+		}
+		rows[i].Label = c.label
+		rows[i].Pending = c.pending
 	}
 }
 
-// annotateOutboxLabels mirrors annotateInboxLabels for sent rows.
+// annotateOutboxLabels mirrors annotateInboxRows for sent rows. There is
+// no outbox Pending concept (you chose the recipient when you sent), so
+// only Label is populated here.
 func annotateOutboxLabels(ctx context.Context, d *Daemon, rows []inbox.Sent) {
 	cache := map[string]string{}
 	for i := range rows {

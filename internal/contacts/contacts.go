@@ -41,6 +41,25 @@ var (
 	ErrExists   = errors.New("contact already exists")
 )
 
+// IsPending reports whether the inbox row from pubkey should be classified
+// as Pending — i.e. should NOT appear in the operator's default `eidos gate
+// inbox` view. True when (a) the pubkey is empty, (b) no contact row exists,
+// or (c) a contact row exists at TierBlocked. The caller passes selfHex so a
+// self-chat (rumor.PubKey == own pubkey) is always treated as known.
+func IsPending(ctx context.Context, r *Repo, pubkey, selfHex string) bool {
+	if pubkey == "" {
+		return true
+	}
+	if pubkey == selfHex {
+		return false
+	}
+	c, err := r.Get(ctx, pubkey)
+	if err != nil {
+		return true
+	}
+	return c.Tier == TierBlocked
+}
+
 func (r *Repo) Add(ctx context.Context, c Contact) error {
 	if c.Tier == "" {
 		c.Tier = TierFriend

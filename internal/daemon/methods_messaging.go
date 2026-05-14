@@ -172,12 +172,25 @@ func (d *Daemon) finalizeOutboxOrLog(ctx context.Context, sent inbox.Sent, event
 	}
 }
 
-// inboxList returns inbox messages filtered by since/from/limit.
+// inboxList returns inbox messages filtered by since/from/limit/sender.
+//
+// The `sender` field selects which classes of rows survive the contact-
+// graph filter:
+//   - "known"   (default): exclude rows whose sender has no non-blocked
+//     contact row. Self-chats survive.
+//   - "unknown":           inverse — return only rows that would be
+//     filtered out by "known". Useful for the
+//     operator's "pending" inbox tab.
+//   - "all":               no contact-graph filter.
+//
+// When `from` is set, `sender` is ignored: a specific-pubkey query is
+// the most specific filter possible.
 func inboxList(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
 	var p struct {
-		Since *int64 `json:"since"`
-		From  string `json:"from"`
-		Limit int    `json:"limit"`
+		Since  *int64 `json:"since"`
+		From   string `json:"from"`
+		Limit  int    `json:"limit"`
+		Sender string `json:"sender"`
 	}
 	if len(params) > 0 {
 		if err := json.Unmarshal(params, &p); err != nil {
@@ -196,18 +209,111 @@ func inboxList(ctx context.Context, d *Daemon, _ *ipc.Conn, params json.RawMessa
 		}
 		p.From = hex
 	}
-	out, err := d.Box.ListInbox(sincePtr, p.From, p.Limit)
+	keep, ipcErr := buildSenderKeep(ctx, d, p.From, p.Sender)
+	if ipcErr != nil {
+		return nil, ipcErr
+	}
+	var out []inbox.Message
+	var err error
+	if keep != nil {
+		out, err = d.Box.ListInbox(sincePtr, p.From, p.Limit, keep)
+	} else {
+		out, err = d.Box.ListInbox(sincePtr, p.From, p.Limit)
+	}
 	if err != nil {
 		return nil, internalErr(err)
 	}
-	annotateInboxLabels(ctx, d, out)
+	annotateInboxRows(ctx, d, out)
 	return out, nil
 }
 
 // inboxTail subscribes the connection to live inbox push events.
-func inboxTail(_ context.Context, d *Daemon, conn *ipc.Conn, _ json.RawMessage) (any, *ipc.Error) {
-	d.addSubscriber(conn)
+//
+// Optional `sender` param mirrors inbox.list: "known" (default),
+// "unknown", or "all". The filter is applied per-message at broadcast
+// time so a CLI tail asking for known senders does not see strangers,
+// and a dashboard pending-pane subscribing with sender=unknown does
+// not see the operator's normal traffic.
+func inboxTail(_ context.Context, d *Daemon, conn *ipc.Conn, params json.RawMessage) (any, *ipc.Error) {
+	var p struct {
+		Sender string `json:"sender"`
+	}
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, &ipc.Error{Code: ipc.ErrInvalidParams, Message: err.Error()}
+		}
+	}
+	filter, ipcErr := parseSenderEnum(p.Sender)
+	if ipcErr != nil {
+		return nil, ipcErr
+	}
+	d.addSubscriberWithFilter(conn, filter)
 	return map[string]bool{"subscribed": true}, nil
+}
+
+// senderFilter is the parsed form of the "sender" enum on inbox.list /
+// inbox.tail.
+type senderFilter int
+
+const (
+	senderKnown senderFilter = iota // default: hide rows where IsPending == true
+	senderUnknown
+	senderAll
+)
+
+// parseSenderEnum normalises the JSON string into a senderFilter. Empty
+// string defaults to senderKnown so existing callers (older CLI, scripts)
+// keep today's "default to known" behaviour.
+func parseSenderEnum(s string) (senderFilter, *ipc.Error) {
+	switch s {
+	case "", "known":
+		return senderKnown, nil
+	case "unknown":
+		return senderUnknown, nil
+	case "all":
+		return senderAll, nil
+	default:
+		return 0, &ipc.Error{Code: ipc.ErrInvalidParams, Message: "sender must be one of \"known\", \"unknown\", \"all\""}
+	}
+}
+
+// buildSenderKeep returns a Keep predicate for ListInbox based on the
+// sender enum, or nil when no filter is needed (sender=all, OR an
+// explicit from= filter that supersedes sender). The predicate uses a
+// per-call contact-lookup cache so a noisy page does not hit the DB
+// once per row.
+func buildSenderKeep(ctx context.Context, d *Daemon, from, sender string) (func(inbox.Message) bool, *ipc.Error) {
+	filter, ipcErr := parseSenderEnum(sender)
+	if ipcErr != nil {
+		return nil, ipcErr
+	}
+	// Specific-pubkey query is its own filter — sender is ignored.
+	if from != "" {
+		return nil, nil
+	}
+	if filter == senderAll {
+		return nil, nil
+	}
+	var selfHex string
+	if d != nil && d.Key != nil {
+		selfHex = d.Key.PublicHex
+	}
+	cache := map[string]bool{}
+	pending := func(pk string) bool {
+		if v, ok := cache[pk]; ok {
+			return v
+		}
+		v := contacts.IsPending(ctx, d.Repo, pk, selfHex)
+		cache[pk] = v
+		return v
+	}
+	switch filter {
+	case senderKnown:
+		return func(m inbox.Message) bool { return !pending(m.From) }, nil
+	case senderUnknown:
+		return func(m inbox.Message) bool { return pending(m.From) }, nil
+	}
+	return nil, nil
 }
 
 // outboxList returns sent messages filtered by since/to/limit.

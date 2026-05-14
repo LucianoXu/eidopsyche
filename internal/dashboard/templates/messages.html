@@ -1,7 +1,31 @@
 {{define "messages"}}
 <div class="thread-header">
-  <strong>{{if .OnlyMal}}Soft-rejected{{else}}All messages{{end}}</strong>
+  <strong>
+    {{if .OnlyMal}}Soft-rejected
+    {{else if .Pending}}Pending (strangers)
+    {{else}}Inbox{{end}}
+  </strong>
+  <span class="messages-tabs">
+    {{if not .Pending}}
+      <a class="tab-link active" href="/messages">Known</a>
+      <a class="tab-link" href="/messages?view=pending"
+         hx-get="/messages?view=pending" hx-target="#main" hx-push-url="true">
+        Pending{{if gt .PendingCount 0}} ({{.PendingCount}}){{end}}
+      </a>
+    {{else}}
+      <a class="tab-link" href="/messages"
+         hx-get="/messages" hx-target="#main" hx-push-url="true">Known</a>
+      <a class="tab-link active" href="/messages?view=pending">
+        Pending ({{.PendingCount}})
+      </a>
+    {{end}}
+  </span>
 </div>
+{{if .Pending}}
+<p class="hint">Messages from senders that are not in your contacts. Click a row to view the thread,
+   then promote the sender with <code>eidos gate add-contact</code> if you want their future messages
+   to land in the default inbox.</p>
+{{end}}
 <table class="messages">
   <thead>
     <tr>
@@ -14,13 +38,13 @@
   </thead>
   <tbody>
     {{range .Rows}}
-    <tr class="{{if .Malformed}}malformed{{end}}"
+    <tr class="{{if .Malformed}}malformed{{end}}{{if .Pending}} pending{{end}}"
         hx-get="/thread/{{.Pubkey}}"
         hx-target="#main"
         hx-push-url="true">
       <td><span title="{{.At.Format "2006-01-02 15:04:05"}}">{{reltime .At}}</span></td>
       <td>{{.Direction}}</td>
-      <td>{{.From}}</td>
+      <td>{{if .Pending}}<span class="tag-pending">pending</span> {{end}}{{.From}}</td>
       <td>{{truncate 80 .Preview}}</td>
       {{if $.OnlyMal}}<td>{{.RejectReason}}</td>{{end}}
     </tr>

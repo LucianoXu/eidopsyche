@@ -57,7 +57,7 @@ func shellHandler(deps DashboardDeps, r *renderer, logger *slog.Logger) http.Han
 		ctx := req.Context()
 		label, _ := deps.OwnLabel(ctx)
 		side := buildSidebar(ctx, deps, "", false)
-		main := buildMessagesView(deps, false, "")
+		main := buildMessagesView(deps, false, "", false)
 
 		mainHTML, err := r.Render("messages", main)
 		if err != nil {
@@ -164,7 +164,10 @@ func buildSidebar(ctx context.Context, deps DashboardDeps, activePubkey string, 
 
 func lastSeenByContact(deps DashboardDeps) map[string]time.Time {
 	out := map[string]time.Time{}
-	if msgs, err := deps.ListInbox(nil, "", 200); err == nil {
+	// "all" here so the sidebar's "last seen" pill reflects activity from
+	// any peer, not just known contacts — operators expect a contact's
+	// pre-promotion exchange to still anchor the row's recency.
+	if msgs, err := deps.ListInbox(nil, "", 200, "all"); err == nil {
 		for _, m := range msgs {
 			t := time.Unix(m.ReceivedAt, 0)
 			if cur, ok := out[m.From]; !ok || t.After(cur) {

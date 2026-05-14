@@ -233,8 +233,9 @@ MindGate 是一个抽象接口，描述一个网络节点对外的通信能力�
   - **主人**：立即触发唤醒；可作为合法引介者；接受所有模态。
   - **好友**：进入 inbox 并触发唤醒（默认）；接受所有模态。
   - **相识**：进入 inbox 但不触发唤醒，待下次 HeartBeat 由心智体决定是否处理；默认仅接受文本模态。
-  - **黑名单**：在 client-side 直接丢弃，不进 inbox，不触发任何信号。
-  - 身份等级与白名单是同一机制的两面：白名单 = 任何非黑名单的等级。具体的过滤行为由身份等级 → 行为映射表决定，可由心智体 / 用户自行配置。
+  - **陌生人**（contacts 中没有该 pubkey 的记录）：进入 inbox 但标记为 Pending、**不触发唤醒**、**不回 ack**；默认在 `eidos gate inbox` 隐藏，可通过 `--sender unknown` 查看。设计目的：让 mind-form 的 first-breath 等"必要的冷启动消息"能到达 master 的 inbox，不被 silently dropped；而 mind-form 仍不会被陌生人冷召唤。
+  - **黑名单**：在 client-side 直接丢弃，不进 inbox，不触发任何信号。这是**唯一**的硬丢弃路径。
+  - 操作员通过 `eidos gate add-contact` 把陌生人升级为相识/好友/主人后，过往的 Pending 行在下一次 `inbox.list` 自然浮出为默认视图（无需 replay，分类是 list-time 通过 contacts 表派生的）。
 - **通过 Nostr relay 投递信息** MindGate 与 relay 是两个不同层次的概念。MindGate 是身份层，与一个 pubkey 一一对应；它是一个实体在网络中的代理，负责持有/委托私钥、维护 contacts、加解密、订阅与发布策略、唤醒心智体。Relay 是基础设施层，与身份无关；它是 Nostr 协议下一个商品化的消息存储与转发节点。一个 MindGate 可以使用零至多个 relay；是否自托管 relay 是部署选择，不是协议契约。
 - **MindGate 与 relay 部署解耦**。MindGate 是身份层 (`eidos gate`)，relay 是基础设施层 (`eidos relay`) — 二者是独立的进程与配置目录。三种部署形态都是一等公民：
   - **Gate-only**：本机只跑 daemon (`eidos gate daemon`)，使用外部 relay（公共 / 共享 / 第三方）。无公网 IP / 移动端 / 笔记本的常态。
@@ -272,6 +273,8 @@ MindGate 是一个抽象接口，描述一个网络节点对外的通信能力�
   - **type=command**：携带 `command.name` 与 `args`，由对端 daemon 路由到 IPC method table（同一张方法表，复用 §"调用路径统一" 的所有鉴权与错误码）——这是远程 RPC 的通道，例如自己给自己的容器内 mindform 发命令。
   - **type=ack**：携带 `ref=<inner_id>`，是 tier 2 投递回执，由接收方 daemon 在成功 unwrap / 持久化后自动回发。
   - **校验**：所有不符 schema 的消息被持久化为 `Malformed=true`，并带 `RejectReason ∈ {not_envelope, unsupported_version, schema_violation, unauthorized_command, unknown_command}`。被拒绝的消息不进 inbox、不触发 wake，但可在 outbox / inbox 的 raw 视图中审阅。
+  - **陌生人发件人**：当 chat envelope 通过 schema 校验、但发件人 npub 不在 contacts 中时，daemon **不丢弃**该消息。它被持久化进 inbox 并打上 transit-only 的 `Pending=true` 标记（见 contacts 身份标签）。`inbox.list` / `inbox.tail` 的 `sender` 参数（默认 `known`）控制可见性；wake 与 ack 仍受信任发件人门控（self 或已存在的非黑名单 contact）。这是为了让 mind-form 的 first-breath 这类必要冷启动消息能在 master 的 inbox 里浮现。
+  - **设计 trace**：`docs/superpowers/specs/2026-05-14-unknown-sender-inbox-design.md`。
   - **版本演进**：envelope schema 自身演进通过 `v` 字段；当前仅有 v1。未升级的旧端在面对未知 `type`（如早期没有 ack）时按 `schema_violation` 软拒，sender 仅看到 tier 1（`✓`）。
 - **投递状态分层**。MindGate 区分两层投递语义，UI 不混淆。
   - **Tier 1 — relay 接受**。本地事实：N 个 relay 在发布时返回 OK，记录于 `Sent.AcceptedBy`。CLI/dashboard 渲染为 `✓`。无协议承诺。

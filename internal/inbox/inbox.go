@@ -36,7 +36,13 @@ func (s *Store) AppendInbox(m Message) error {
 	if m.ReceivedAt == 0 {
 		m.ReceivedAt = time.Now().Unix()
 	}
-	m.Label = "" // transit-only; defense against accidental persistence
+	// Transit-only annotations: defense against accidental persistence.
+	// Both fields are reconstructed at read time from the contacts repo
+	// (label) and the IsPending predicate (pending). Persisting them
+	// would freeze the classification at write time, defeating the
+	// promote-and-the-pending-row-becomes-known behaviour.
+	m.Label = ""
+	m.Pending = false
 	return s.appendJSONL(dailyPath(s.inboxDir(), time.Unix(m.ReceivedAt, 0)), m)
 }
 
@@ -71,7 +77,18 @@ func (s *Store) appendJSONL(path string, v any) error {
 // most recent ingestion (typically the post-restart replay) and the
 // surviving Malformed / RejectReason fields reflect the current
 // decoder's verdict — a clean replay supersedes a stale soft-reject.
-func (s *Store) ListInbox(since *time.Time, from string, limit int) ([]Message, error) {
+//
+// An optional keep predicate (variadic, at most one accepted) is invoked
+// per surviving row; rows for which keep returns false are skipped and
+// do not count against limit. This is how the daemon applies the
+// `sender=known|unknown|all` filter on inbox.list without losing the
+// "exactly limit matching rows" page-size semantic. keep omitted or nil
+// keeps every row.
+func (s *Store) ListInbox(since *time.Time, from string, limit int, keep ...func(Message) bool) ([]Message, error) {
+	var keepFn func(Message) bool
+	if len(keep) > 0 {
+		keepFn = keep[0]
+	}
 	files, err := s.daysDescending(s.inboxDir())
 	if err != nil {
 		return nil, err
@@ -96,6 +113,9 @@ func (s *Store) ListInbox(since *time.Time, from string, limit int) ([]Message, 
 					continue
 				}
 				seen[m.EventID] = struct{}{}
+			}
+			if keepFn != nil && !keepFn(m) {
+				continue
 			}
 			out = append(out, m)
 			if limit > 0 && len(out) >= limit {

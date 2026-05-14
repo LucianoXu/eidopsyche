@@ -163,3 +163,71 @@ func TestListOutboxAckFirstWins(t *testing.T) {
 		t.Errorf("first-ack-wins violated: %+v", rows)
 	}
 }
+
+func TestListInboxKeepFilter(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+	now := time.Now().Unix()
+	for i, from := range []string{"alice", "bob", "carol", "alice"} {
+		if err := s.AppendInbox(Message{
+			EventID: string(rune('a' + i)), From: from, Kind: 14,
+			Content: "x", RumorAt: now + int64(i), ReceivedAt: now + int64(i),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// keep only carol — should produce exactly one row.
+	keep := func(m Message) bool { return m.From == "carol" }
+	got, err := s.ListInbox(nil, "", 10, keep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].From != "carol" {
+		t.Fatalf("keep-filter: got %+v", got)
+	}
+	// nil keep == omitted keep — both behave identically.
+	gotNil, _ := s.ListInbox(nil, "", 10, nil)
+	gotOmitted, _ := s.ListInbox(nil, "", 10)
+	if len(gotNil) != 4 || len(gotOmitted) != 4 {
+		t.Fatalf("nil/omitted keep: got %d / %d, want 4 / 4", len(gotNil), len(gotOmitted))
+	}
+	// keep + limit interaction: limit counts AFTER keep.
+	keepNotBob := func(m Message) bool { return m.From != "bob" }
+	gotLim, _ := s.ListInbox(nil, "", 2, keepNotBob)
+	if len(gotLim) != 2 {
+		t.Fatalf("keep+limit: got %d rows, want 2", len(gotLim))
+	}
+	for _, m := range gotLim {
+		if m.From == "bob" {
+			t.Fatalf("keep+limit leaked rejected row: %+v", m)
+		}
+	}
+}
+
+func TestAppendInboxStripsTransitFields(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+	now := time.Now().Unix()
+	in := Message{
+		EventID: "e", From: "x", Kind: 14, Content: "y",
+		RumorAt: now, ReceivedAt: now,
+		Label:   "should-not-persist",
+		Pending: true,
+	}
+	if err := s.AppendInbox(in); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListInbox(nil, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len=%d", len(got))
+	}
+	if got[0].Label != "" {
+		t.Errorf("Label persisted: %q", got[0].Label)
+	}
+	if got[0].Pending != false {
+		t.Errorf("Pending persisted: %v", got[0].Pending)
+	}
+}
