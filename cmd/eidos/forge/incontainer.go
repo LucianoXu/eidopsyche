@@ -16,6 +16,7 @@ func registerHost(root *cobra.Command) {
 		newCreateCmd(),
 		newStartCmd(),
 		newStopCmd(),
+		newRestartCmd(),
 		newStatusCmd(),
 		newListCmd(),
 		newLogsCmd(),
