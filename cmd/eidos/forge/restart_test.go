@@ -115,8 +115,8 @@ func TestRestart_PreservesImage_AppliesNewMounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantOps := []string{
-		"stop:" + forgectl.ContainerName("alice"),
 		"inspect-image:" + forgectl.ContainerName("alice"),
+		"stop:" + forgectl.ContainerName("alice"),
 		"remove:" + forgectl.ContainerName("alice"),
 		"create:" + forgectl.ContainerName("alice"),
 		"start:" + forgectl.ContainerName("alice"),
@@ -137,7 +137,9 @@ func TestRestart_PreservesImage_AppliesNewMounts(t *testing.T) {
 }
 
 // TestRestart_ImageInspectError_AbortsCleanly: if reading the current
-// image fails, we must abort before doing rm — container still exists.
+// image fails, we must abort BEFORE stop+rm — the container should
+// still be running afterwards so the operator can retry without
+// stranding the mind-form on a transient docker error.
 func TestRestart_ImageInspectError_AbortsCleanly(t *testing.T) {
 	fc := newRestartFakeClient(t)
 	fc.inspectImageErr = errors.New("docker oops")
@@ -146,8 +148,12 @@ func TestRestart_ImageInspectError_AbortsCleanly(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	for _, op := range fc.ops {
-		if op == "remove:"+forgectl.ContainerName("alice") {
-			t.Errorf("must not remove after inspect-image failure: ops=%v", fc.ops)
+		switch op {
+		case "stop:" + forgectl.ContainerName("alice"),
+			"remove:" + forgectl.ContainerName("alice"),
+			"create:" + forgectl.ContainerName("alice"),
+			"start:" + forgectl.ContainerName("alice"):
+			t.Errorf("inspect-image failure must not run %q: ops=%v", op, fc.ops)
 		}
 	}
 }

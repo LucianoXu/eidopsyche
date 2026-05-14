@@ -38,17 +38,14 @@ func Restart(ctx context.Context, c forgectl.Client, name string, cfg *config.Co
 		}
 	}
 
-	if err := c.ContainerStop(ctx, cont, graceSeconds); err != nil {
-		return fmt.Errorf("stop %s: %w", cont, err)
-	}
-
-	// ContainerInspectImage returns (image-id, image-ref, err). Prefer
-	// the content-addressable ID over the ref so a mutable tag like
-	// `:dev` or `:latest` can't silently move the mind-form to a newer
-	// image bits between create and restart (the operator may have
-	// pulled or rebuilt the tag in between). The ID is immutable; if
-	// it's missing for some reason (older containers, weird state),
-	// fall back to the ref so the command still does something useful.
+	// Inspect the container's image BEFORE stopping. Image inspect is a
+	// read-only docker query and doesn't require the container to be
+	// stopped; doing it as part of preflight avoids stranding the
+	// mind-form down when docker returns a transient error here
+	// (daemon hiccup, permission glitch). Prefer the content-addressable
+	// ID over the ref so a mutable tag like `:dev` or `:latest` can't
+	// silently move the mind-form to newer image bits between create
+	// and restart. Fall back to the ref if the ID is missing.
 	imageID, imageRef, err := c.ContainerInspectImage(ctx, cont)
 	if err != nil {
 		return fmt.Errorf("inspect image %s: %w", cont, err)
@@ -59,6 +56,10 @@ func Restart(ctx context.Context, c forgectl.Client, name string, cfg *config.Co
 	}
 	if image == "" {
 		return fmt.Errorf("inspect image %s: container has no image ref (does it exist?)", cont)
+	}
+
+	if err := c.ContainerStop(ctx, cont, graceSeconds); err != nil {
+		return fmt.Errorf("stop %s: %w", cont, err)
 	}
 
 	if err := c.ContainerRemove(ctx, cont); err != nil {
