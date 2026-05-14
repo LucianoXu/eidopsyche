@@ -37,6 +37,11 @@ type Client interface {
 	// previous forge upgrade is not silently reverted).
 	ContainerInspectImage(ctx context.Context, name string) (string, error)
 
+	// ContainerInspectMounts returns the mount list as currently configured
+	// on the named container. Used by forge.workspace.list to compute the
+	// desired-vs-actual diff and pending_restart.
+	ContainerInspectMounts(ctx context.Context, name string) ([]Mount, error)
+
 	// RunInit runs a one-shot container with the given image, mount, env,
 	// and command. Pipes stdin into the container; returns combined
 	// stdout+stderr and exit code. Container is auto-removed on exit.
@@ -186,6 +191,32 @@ func (r *realClient) ContainerInspectImage(ctx context.Context, name string) (st
 		return "", err
 	}
 	return resp.Config.Image, nil
+}
+
+func (r *realClient) ContainerInspectMounts(ctx context.Context, name string) ([]Mount, error) {
+	resp, err := r.c.ContainerInspect(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Mount, 0, len(resp.HostConfig.Mounts))
+	for _, m := range resp.HostConfig.Mounts {
+		var t MountType
+		switch m.Type {
+		case "volume":
+			t = MountVolume
+		case "bind":
+			t = MountBind
+		default:
+			continue
+		}
+		out = append(out, Mount{
+			Type:     t,
+			Source:   m.Source,
+			Target:   m.Target,
+			ReadOnly: m.ReadOnly,
+		})
+	}
+	return out, nil
 }
 
 func (r *realClient) ContainerCreate(ctx context.Context, opts CreateOpts) error {

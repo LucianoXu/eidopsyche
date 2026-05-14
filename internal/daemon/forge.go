@@ -35,3 +35,8 @@ func (d *Daemon) SeedMindForm(name string) {
 	}
 	d.testKnownMindForms[name] = struct{}{}
 }
+
+// SetForgectlClient overrides the daemon's docker client. Test-only.
+func (d *Daemon) SetForgectlClient(c forgectl.Client) {
+	d.forgectlClient = c
+}

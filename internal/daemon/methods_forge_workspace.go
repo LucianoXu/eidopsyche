@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/LucianoXu/eidopsyche/internal/config"
+	"github.com/LucianoXu/eidopsyche/internal/forgectl"
 	"github.com/LucianoXu/eidopsyche/internal/ipc"
 )
 
@@ -157,4 +159,94 @@ func forgeWorkspaceRemove(ctx context.Context, d *Daemon, _ *ipc.Conn, raw json.
 		return nil, asIPCError(merr)
 	}
 	return forgeWorkspaceAddResult{PendingRestart: true}, nil
+}
+
+func init() {
+	register("forge.workspace.list", forgeWorkspaceList)
+}
+
+type forgeWorkspaceListParams struct {
+	MindForm string `json:"mindform"`
+}
+
+type forgeWorkspaceListEntry struct {
+	Name     string `json:"name"`
+	HostPath string `json:"host_path"`
+	Mode     string `json:"mode"`
+}
+
+type forgeWorkspaceListResult struct {
+	Desired        []forgeWorkspaceListEntry `json:"desired"`
+	Actual         []forgeWorkspaceListEntry `json:"actual"`
+	PendingRestart bool                      `json:"pending_restart"`
+}
+
+func forgeWorkspaceList(ctx context.Context, d *Daemon, _ *ipc.Conn, raw json.RawMessage) (any, *ipc.Error) {
+	var p forgeWorkspaceListParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &ipc.Error{Code: ipc.ErrInvalidRequest, Message: "decode params: " + err.Error()}
+	}
+	if !d.MindFormKnown(p.MindForm) {
+		return nil, &ipc.Error{Code: ipc.ErrForgeNotFound, Message: fmt.Sprintf("mind-form %q not found", p.MindForm)}
+	}
+
+	desired := []forgeWorkspaceListEntry{}
+	cfg, err := config.Load(d.configPath())
+	if err == nil {
+		for _, w := range cfg.Forge[p.MindForm].Workspaces {
+			desired = append(desired, forgeWorkspaceListEntry{
+				Name: w.Name, HostPath: w.HostPath, Mode: w.EffectiveMode(),
+			})
+		}
+	}
+
+	actual := []forgeWorkspaceListEntry{}
+	if d.forgectlClient != nil {
+		mounts, err := d.forgectlClient.ContainerInspectMounts(ctx, forgectl.ContainerName(p.MindForm))
+		if err == nil {
+			const prefix = "/workspace/"
+			for _, m := range mounts {
+				if m.Type != forgectl.MountBind {
+					continue
+				}
+				if !strings.HasPrefix(m.Target, prefix) {
+					continue
+				}
+				name := strings.TrimPrefix(m.Target, prefix)
+				if name == "" || strings.Contains(name, "/") {
+					continue
+				}
+				mode := "rw"
+				if m.ReadOnly {
+					mode = "ro"
+				}
+				actual = append(actual, forgeWorkspaceListEntry{
+					Name: name, HostPath: m.Source, Mode: mode,
+				})
+			}
+		}
+	}
+
+	return forgeWorkspaceListResult{
+		Desired:        desired,
+		Actual:         actual,
+		PendingRestart: !workspaceListsEqual(desired, actual),
+	}, nil
+}
+
+func workspaceListsEqual(a, b []forgeWorkspaceListEntry) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	idx := map[string]forgeWorkspaceListEntry{}
+	for _, e := range b {
+		idx[e.Name] = e
+	}
+	for _, e := range a {
+		other, ok := idx[e.Name]
+		if !ok || other != e {
+			return false
+		}
+	}
+	return true
 }

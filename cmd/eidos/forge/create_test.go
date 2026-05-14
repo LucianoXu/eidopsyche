@@ -80,6 +80,9 @@ func (f *fakeClient) ContainerLogs(_ context.Context, _ string, _ bool, _ io.Wri
 func (f *fakeClient) CopyFromContainer(_ context.Context, _ string, _ string, _ io.Writer) error {
 	return nil
 }
+func (f *fakeClient) ContainerInspectMounts(_ context.Context, _ string) ([]forgectl.Mount, error) {
+	return nil, nil
+}
 
 // fakeClientPullErr wraps fakeClient to override ImagePull with an error func.
 type fakeClientPullErr struct {
