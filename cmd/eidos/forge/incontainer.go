@@ -28,6 +28,7 @@ func registerHost(root *cobra.Command) {
 		newPlanHostCmd(),
 		newWatchCmd(),
 		newPromptDumpHostCmd(),
+		newUpgradeCmd(),
 	)
 }
 
