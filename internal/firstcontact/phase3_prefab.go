@@ -58,14 +58,22 @@ func Phase3Prefab(ctx context.Context, s *Summoning, r render.Renderer, d Phase3
 }
 
 // prefabMenuLine formats one row of the prefab menu in the operator's
-// preferred language: "<display> · <kind-glyph> · <tagline>".
+// preferred language. Preferred form: "<display> - <essence>". When a
+// prefab has no [essence] (e.g. the _test_fixture), the renderer
+// falls back to the legacy "<display> · <tagline>" form so the
+// fixture menu still parses.
 func prefabMenuLine(m ontology.Meta, lang string) string {
-	parts := []string{}
-	if disp := preferLang(m.Display, lang); disp != "" {
-		parts = append(parts, disp)
+	disp := preferLang(m.Display, lang)
+	if essence := preferLang(m.Essence, lang); essence != "" {
+		if disp == "" {
+			return essence
+		}
+		return disp + " - " + essence
 	}
-	if kind := kindGlyph(m.Kind, lang); kind != "" {
-		parts = append(parts, kind)
+	// Fallback: legacy "<display> · <tagline>" form.
+	parts := []string{}
+	if disp != "" {
+		parts = append(parts, disp)
 	}
 	if tag := preferLang(m.Tagline, lang); tag != "" {
 		parts = append(parts, tag)
@@ -74,9 +82,7 @@ func prefabMenuLine(m ontology.Meta, lang string) string {
 }
 
 // preferLang picks a value from a lang-keyed map: requested lang first,
-// then "en", then any non-empty value, else the empty string. Used for
-// display name / tagline / preview where prefab.toml carries multiple
-// translations.
+// then "en", then any non-empty value, else the empty string.
 func preferLang(m map[string]string, lang string) string {
 	if m == nil {
 		return ""
@@ -91,29 +97,6 @@ func preferLang(m map[string]string, lang string) string {
 		if v != "" {
 			return v
 		}
-	}
-	return ""
-}
-
-func kindGlyph(kind, lang string) string {
-	if lang == "zh" {
-		switch kind {
-		case "m":
-			return "男"
-		case "f":
-			return "女"
-		case "spirit":
-			return "灵"
-		}
-		return ""
-	}
-	switch kind {
-	case "m":
-		return "M"
-	case "f":
-		return "F"
-	case "spirit":
-		return "Spirit"
 	}
 	return ""
 }
