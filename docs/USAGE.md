@@ -425,3 +425,67 @@ $ eidos relay config set relay.mode public
 `config.toml` directly; the daemon / relay must be restarted to pick up
 changes. Adding/removing relay entries in the SQLite `own_relays` table goes
 through `eidos gate relay-add` / `relay-remove` instead.
+
+## MindForge — creating and managing mind-forms
+
+The `eidos forge` subcommand manages mind-form instances on the host. A mind-form
+runs in a Docker container and has persistent state stored in a Docker volume.
+
+Basic lifecycle:
+
+```
+eidos forge create <name>       # create a new mind-form (interactive)
+eidos forge start <name>        # start the container and agent-loop
+eidos forge stop <name>         # stop the container (no data loss)
+eidos forge status <name>       # show current state
+eidos forge list                # list all mind-forms
+eidos forge logs <name>         # tail the running agent-loop transcript
+eidos forge watch <name>        # stream the running agent-loop real-time
+eidos forge purge <name>        # delete the mind-form and its volume
+```
+
+### Shared workspaces
+
+Mount a host directory into a mind-form's container so the mind-form
+can `Read` / `Write` / `Edit` files that you also see natively on the
+host.
+
+```
+# Bind ~/code/project-x into alice as /workspace/proj-x (rw default)
+eidos forge workspace add alice proj-x ~/code/project-x
+
+# Read-only mount, e.g. for a shared reference dataset
+eidos forge workspace add alice photos ~/Pictures --mode ro
+
+# Apply the change (recreates the container; /eidos is preserved)
+eidos forge restart alice
+
+# Inspect current state
+eidos forge workspace list alice
+eidos forge status alice            # shows pending-restart if config diverges from the running container
+
+# Remove a workspace
+eidos forge workspace remove alice proj-x
+eidos forge restart alice
+```
+
+To share a directory between two mind-forms, bind the same host path
+to both:
+
+```
+eidos forge workspace add alice proj-x ~/code/project-x
+eidos forge workspace add bob   proj-x ~/code/project-x
+eidos forge restart alice && eidos forge restart bob
+```
+
+Workspaces appear inside the container at `/workspace/<name>/`. They
+are **not** part of the mind-form's ontology (`/eidos/...`). The
+mind-form discovers them with `ls /workspace/` and learns about them
+through its system prompt at every wake.
+
+**UID note.** The mind-form runs as `uid=1000` inside the container.
+If the host directory is owned by a different uid (typical on macOS
+or non-default Linux setups), `rw` writes from the mind-form may
+fail with `EACCES`. `forge workspace add` warns when this would
+apply. Fix with `chown -R 1000 <path>` or pass `--no-warn-uid` to
+silence.

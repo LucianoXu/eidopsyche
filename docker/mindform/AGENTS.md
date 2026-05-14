@@ -48,6 +48,13 @@ the spool with the right perms and removes the stray default
 `/etc/crontabs/root`. Supervisor runs `crond` via `sudo` so it can
 `setuid` into `eidos` for each job.
 
+## Filesystem layout
+
+The container's `/eidos` volume holds the mind-form's ontology (persistent state,
+memory, configuration). Operators may additionally bind host directories under
+`/workspace/<name>/` via `eidos forge workspace add` (see `docs/USAGE.md`);
+these are orthogonal to the ontology and survive across `eidos forge restart`.
+
 ## Runtime entrypoint
 
 `/sbin/tini -- entrypoint.sh` → `eidos supervisor run`. The supervisor
