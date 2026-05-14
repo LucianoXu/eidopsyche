@@ -591,3 +591,22 @@ silence.
 
 Stop, remove the container, and delete the volume. Irreversible; prompts
 for confirmation unless `--yes` is passed.
+
+## Using eidos-mcp from your host Claude Code
+
+The same `eidos mcp` subcommand that the mind-form's claude uses can be wired into your own Claude Code session on the host. This gives you the same typed tool surface (`eidos_send`, `eidos_state_get`, contact / invite / relay management) for the gate daemon running on your workstation.
+
+Add this to your project-local `.mcp.json` (or `~/.claude.json`):
+
+```json
+{
+  "mcpServers": {
+    "eidos": {
+      "command": "eidos",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+`eidos mcp` resolves the gate socket from `$EIDOS_GATE_HOME` (or your platform default — usually `~/.config/eidos/sock`), the same way `eidos gate ...` does. Tools that only make sense inside a mind-form container (`eidos_agent_state`, `eidos_lifecycle_status`) will return `[CONTEXT_MISMATCH]` from your host daemon — that's expected.

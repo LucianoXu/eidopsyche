@@ -104,6 +104,16 @@ func TestBuildClaudeArgs_IncludesToolsAllowlist(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeArgs_IncludesMCPConfig(t *testing.T) {
+	args := buildClaudeArgs(Opts{Prompt: "dump"})
+	for i, a := range args {
+		if a == "--mcp-config" && i+1 < len(args) && args[i+1] == "/etc/eidos/mcp.json" {
+			return
+		}
+	}
+	t.Fatal("--mcp-config /etc/eidos/mcp.json not present in argv")
+}
+
 func TestBuildClaudeArgs_BareOmitsSystemPrompt(t *testing.T) {
 	args := buildClaudeArgs(Opts{Prompt: "ping"})
 	joined := strings.Join(args, " ")

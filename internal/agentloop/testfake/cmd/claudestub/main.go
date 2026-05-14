@@ -40,7 +40,7 @@ func main() {
 	// though we discard the values.
 	for _, name := range []string{
 		"input-format", "output-format", "system-prompt",
-		"model", "effort", "resume", "p", "tools",
+		"model", "effort", "resume", "p", "tools", "mcp-config",
 	} {
 		flag.String(name, "", "(accepted but unused by stub; mirrors claude CLI)")
 	}

@@ -150,6 +150,7 @@ func buildClaudeArgs(opts SpawnOpts) []string {
 		"--verbose",
 		"--include-partial-messages",
 		"--tools", claudeexec.ToolsArg(),
+		"--mcp-config", "/etc/eidos/mcp.json",
 		"-p", "",
 	)
 	args = append(args, opts.ExtraArgs...)

@@ -149,6 +149,7 @@ func buildClaudeArgs(opts Opts) []string {
 	}
 	args = append(args, "--dangerously-skip-permissions")
 	args = append(args, "--tools", claudeexec.ToolsArg())
+	args = append(args, "--mcp-config", "/etc/eidos/mcp.json")
 	args = append(args, opts.ExtraArgs...)
 	args = append(args, "-p", opts.Prompt)
 	return args

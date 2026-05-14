@@ -87,6 +87,7 @@ RUN addgroup -g 1000 eidos \
 COPY --from=claude /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=claude /usr/local/bin/claude /usr/local/bin/claude
 COPY docker/mindform/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY docker/mindform/mcp.json /etc/eidos/mcp.json
 # Crontab lives in the per-user spool. busybox crond -c reads each
 # file as that named user's crontab and runs the job as that user
 # (via setuid). The crontab file itself MUST be owned by root, mode

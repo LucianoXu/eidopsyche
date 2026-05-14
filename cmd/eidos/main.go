@@ -9,6 +9,7 @@ import (
 
 	"github.com/LucianoXu/eidopsyche/cmd/eidos/forge"
 	"github.com/LucianoXu/eidopsyche/cmd/eidos/gate"
+	"github.com/LucianoXu/eidopsyche/cmd/eidos/mcp"
 	"github.com/LucianoXu/eidopsyche/cmd/eidos/relay"
 	"github.com/LucianoXu/eidopsyche/cmd/eidos/summon"
 	"github.com/LucianoXu/eidopsyche/cmd/eidos/supervisor"
@@ -40,6 +41,7 @@ See https://github.com/LucianoXu/eidopsyche for documentation.`,
 func init() {
 	rootCmd.AddCommand(gate.Command())
 	rootCmd.AddCommand(forge.Command())
+	rootCmd.AddCommand(mcp.Command())
 	rootCmd.AddCommand(supervisor.Command())
 	rootCmd.AddCommand(relay.Command())
 	rootCmd.AddCommand(summon.Command())
