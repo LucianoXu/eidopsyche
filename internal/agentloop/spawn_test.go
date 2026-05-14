@@ -135,10 +135,10 @@ func TestBuildClaudeArgs_StreamJSONContract(t *testing.T) {
 			require: []string{"--mode", "normal"},
 		},
 		{
-			name: "tools whitelist is passed",
+			name: "tools allowlist is passed adjacently",
 			opts: SpawnOpts{Mode: SessionNew, SessionUUID: "u", SystemPrompt: "x"},
 			require: []string{
-				"--tools", claudeexec.ToolsArg(),
+				"--tools " + claudeexec.ToolsArg(),
 			},
 		},
 	}
