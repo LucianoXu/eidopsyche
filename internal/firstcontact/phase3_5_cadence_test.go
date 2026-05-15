@@ -38,6 +38,7 @@ func (r *scriptedRenderer) Logo(context.Context, time.Duration) {}
 func (r *scriptedRenderer) EditMultiline(_, defaultText string) (string, error) {
 	return defaultText, nil
 }
+func (r *scriptedRenderer) WithRawTerminal(fn func() error) error { return fn() }
 
 type nopStatus struct{}
 

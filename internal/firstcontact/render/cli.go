@@ -228,6 +228,13 @@ func (r *cliRenderer) EditMultiline(prompt, defaultText string) (string, error) 
 	return strings.Join(lines, "\n"), nil
 }
 
+// WithRawTerminal is a passthrough on the CLI renderer: nothing owns
+// the terminal in raw mode, so fn can use os.Stdin / os.Stdout
+// directly. The TUI renderer overrides this to release Bubble Tea.
+func (r *cliRenderer) WithRawTerminal(fn func() error) error {
+	return fn()
+}
+
 // Logo renders the EIDOPSYCHE letter circle. ANSI-capable terminals
 // see a brief flicker effect; piped / dumb terminals get a single
 // static print. A true rotating-glyph implementation is deferred until

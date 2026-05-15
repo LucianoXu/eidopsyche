@@ -50,6 +50,7 @@ func (f *fakeRenderer) EditMultiline(_ string, defaultText string) (string, erro
 	f.scriptedEdits = f.scriptedEdits[1:]
 	return v, nil
 }
+func (f *fakeRenderer) WithRawTerminal(fn func() error) error { return fn() }
 
 type noopStatus struct{}
 

@@ -172,6 +172,31 @@ func (r *tuiRenderer) EditMultiline(prompt, defaultText string) (string, error) 
 	return reply.text, reply.err
 }
 
+// WithRawTerminal hands control of the real /dev/tty to fn for the
+// duration of the call. Used by Phase 4 to drive `claude setup-token`
+// — an interactive child that prints a device-authorization URL and
+// reads a code back, both of which need ONLCR-cooked stdin/stdout and
+// a real read loop, not Bubble Tea's raw-mode capture.
+//
+// The call sequence mirrors bubbletea's own tea.ExecProcess: release
+// the terminal (restoring the original tty state and cancelling the
+// input reader), run fn, then re-acquire. We deliberately do NOT
+// repaint after RestoreTerminal — the next renderer call (or the
+// status spinner already in flight) drives the next View.
+func (r *tuiRenderer) WithRawTerminal(fn func() error) error {
+	if err := r.prog.ReleaseTerminal(); err != nil {
+		return fmt.Errorf("release terminal: %w", err)
+	}
+	fnErr := fn()
+	if err := r.prog.RestoreTerminal(); err != nil {
+		if fnErr != nil {
+			return fmt.Errorf("%w (also: restore terminal: %v)", fnErr, err)
+		}
+		return fmt.Errorf("restore terminal: %w", err)
+	}
+	return fnErr
+}
+
 // RenderMarkdown is the MarkdownRenderer implementation: routes the
 // body through glamour for blockquote / heading / emphasis styling.
 func (r *tuiRenderer) RenderMarkdown(_ context.Context, body string) {

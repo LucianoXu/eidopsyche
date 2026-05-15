@@ -180,15 +180,17 @@ func Phase4(ctx context.Context, s *Summoning, r render.Renderer, ready <-chan R
 		_ = forgectl.PurgeForFailedSummon(cleanCtx, d.DockerClient, s.Slug)
 	}
 
-	// Auto-login claude into the new mind-form's volume so the supervisor's
-	// birth-wake handler can actually invoke claude. Without this, the
-	// in-container claude exits "Not logged in · Please run /login", the
-	// birth handler returns an error every iteration, and the wizard
-	// times out waiting for chest/first-message.md. Equivalent to
-	// `eidos forge login <slug> --from-host` running between create and
-	// start. Failure is fatal — we tear down the volume so the next
-	// summon starts cleanly.
-	if err := forge.InstallLoginInteractive(s.Slug, d.Image, os.Stdin, os.Stdout, os.Stderr); err != nil {
+	// Auto-login claude into the new mind-form's volume so the
+	// supervisor's birth-wake handler can actually invoke claude.
+	// Without this, the in-container claude exits "Not logged in ·
+	// Please run /login", the birth handler returns an error every
+	// iteration, and the wizard times out waiting for
+	// chest/first-message.md. Driven through the same Renderer the
+	// rest of the wizard uses — writing to os.Stdout directly here
+	// would collide with Bubble Tea's raw-mode hold on the terminal
+	// (staircase rendering, stolen keystrokes). Failure is fatal: we
+	// tear down the volume so the next summon starts cleanly.
+	if err := installClaudeCredentials(ctx, r, s, d.Image); err != nil {
 		purge()
 		return nil, fmt.Errorf("install claude credentials: %w", err)
 	}

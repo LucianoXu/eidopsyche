@@ -62,6 +62,18 @@ type Renderer interface {
 	// calling-words is the only caller today; an empty submission is
 	// a valid result.
 	EditMultiline(prompt, default_ string) (string, error)
+
+	// WithRawTerminal hands the real /dev/tty back to fn so it can run
+	// a child process that needs raw stdin/stdout (e.g. `claude
+	// setup-token`'s device-authorization flow). For the TUI renderer
+	// this releases Bubble Tea's hold on the terminal for the duration
+	// of fn and re-acquires it afterwards; for the plain CLI renderer
+	// it is a passthrough since nothing owns the terminal already.
+	//
+	// fn's error is returned verbatim. Errors from release / restore
+	// are wrapped so the caller can distinguish "the child failed"
+	// from "I could not give the child the terminal."
+	WithRawTerminal(fn func() error) error
 }
 
 // TUIRenderer is implemented by renderers whose lifecycle requires

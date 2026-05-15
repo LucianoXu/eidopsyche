@@ -238,14 +238,3 @@ func runInteractiveLogin(cmd *cobra.Command, name string) (loginInput, error) {
 		return loginInput{}, fmt.Errorf("invalid choice %q", choice)
 	}
 }
-
-// InstallLoginInteractive is the wizard-callable shim. Used by
-// internal/firstcontact/phase4_seal.go.
-func InstallLoginInteractive(name, image string, stdin io.Reader, stdout, stderr io.Writer) error {
-	cmd := newLoginCmd()
-	cmd.SetIn(stdin)
-	cmd.SetOut(stdout)
-	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{name, "--image", image})
-	return cmd.Execute()
-}
